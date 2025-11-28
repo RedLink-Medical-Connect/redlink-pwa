@@ -1,0 +1,15 @@
+{
+  "dev": {
+    "awscloudformation": {
+      "AuthRoleName": "amplify-redlinkpwa-dev-f38d9-authRole",
+      "UnauthRoleArn": "arn:aws:iam::052247097294:role/amplify-redlinkpwa-dev-f38d9-unauthRole",
+      "AuthRoleArn": "arn:aws:iam::052247097294:role/amplify-redlinkpwa-dev-f38d9-authRole",
+      "Region": "eu-west-3",
+      "DeploymentBucketName": "amplify-redlinkpwa-dev-f38d9-deployment",
+      "UnauthRoleName": "amplify-redlinkpwa-dev-f38d9-unauthRole",
+      "StackName": "amplify-redlinkpwa-dev-f38d9",
+      "StackId": "arn:aws:cloudformation:eu-west-3:052247097294:stack/amplify-redlinkpwa-dev-f38d9/8834eeb0-cc6c-11f0-ae0b-0eb5bb35faf3",
+      "AmplifyAppId": "d20qrsdkzeugxd"
+    }
+  }
+}
