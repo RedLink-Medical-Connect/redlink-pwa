@@ -1,10 +1,23 @@
 {
   "home": {
-    "title": "Welcome to RedLink",
-    "vet_button": "I am a Veterinarian",
-    "owner_button": "I am an Owner"
+    "title": "Welcome to the 2025 Tech Stack",
+    "subtitle": "2025 Tech Stack Demo"
   },
-  "nav": {
-    "login": "Login"
+  "cards": {
+    "i18n": {
+      "title": "Interface & i18n",
+      "currentLanguage": "Current language"
+    },
+    "mouse": {
+      "title": "VueUse (Mouse)",
+      "moveMouse": "Move your mouse to test reactivity:"
+    },
+    "map": {
+      "title": "Leaflet (Map)"
+    }
+  },
+  "buttons": {
+    "changeLanguage": "Change language",
+    "danger": "Danger Button"
   }
 }

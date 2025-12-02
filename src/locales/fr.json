@@ -1,10 +1,23 @@
 {
   "home": {
-    "title": "Bienvenue sur RedLink",
-    "vet_button": "Je suis Vétérinaire",
-    "owner_button": "Je suis Propriétaire"
+    "title": "Bienvenue sur la Stack Technique 2025",
+    "subtitle": "Test de la Stack Technique 2025"
   },
-  "nav": {
-    "login": "Connexion"
+  "cards": {
+    "i18n": {
+      "title": "Interface & i18n",
+      "currentLanguage": "Langue actuelle"
+    },
+    "mouse": {
+      "title": "VueUse (Souris)",
+      "moveMouse": "Bougez votre souris pour tester la réactivité :"
+    },
+    "map": {
+      "title": "Leaflet (Carte)"
+    }
+  },
+  "buttons": {
+    "changeLanguage": "Changer la langue",
+    "danger": "Bouton Danger"
   }
 }
