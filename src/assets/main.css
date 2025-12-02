@@ -1,0 +1,19 @@
+@import "tailwindcss";
+
+/* Correctif pour la carte Leaflet */
+.leaflet-pane {
+  z-index: 0 !important; /* Force la carte à rester en arrière-plan */
+}
+
+:root {
+  --p-content-background: #ffffff;
+}
+/* Style de base */
+html, body, #app {
+  height: 100%;
+  margin: 0;
+  font-family: Arial, sans-serif;
+  background-color: var(--p-content-background);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}

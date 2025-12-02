@@ -1,0 +1,10 @@
+{
+  "home": {
+    "title": "Bienvenue sur RedLink",
+    "vet_button": "Je suis Vétérinaire",
+    "owner_button": "Je suis Propriétaire"
+  },
+  "nav": {
+    "login": "Connexion"
+  }
+}

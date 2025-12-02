@@ -1,0 +1,10 @@
+{
+  "home": {
+    "title": "Welcome to RedLink",
+    "vet_button": "I am a Veterinarian",
+    "owner_button": "I am an Owner"
+  },
+  "nav": {
+    "login": "Login"
+  }
+}
