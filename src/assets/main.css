@@ -1,19 +1,29 @@
 @import "tailwindcss";
 
+@variant dark (&:where(.dark, .dark *));
+
 /* Correctif pour la carte Leaflet */
 .leaflet-pane {
   z-index: 0 !important; /* Force la carte à rester en arrière-plan */
 }
 
 :root {
-  --p-content-background: #ffffff;
+  --app-bg: #ffffff;
+  --app-text: #18181b; /* zinc-900 */
 }
+
+:root.dark {
+  --app-bg: #09090b; /* zinc-950 (Très sombre) */
+  --app-text: #f4f4f5; /* zinc-100 */
+}
+
 /* Style de base */
 html, body, #app {
   height: 100%;
   margin: 0;
   font-family: Arial, sans-serif;
-  background-color: var(--p-content-background);
+  background-color: var(--app-bg);
+  color: var(--app-text);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
