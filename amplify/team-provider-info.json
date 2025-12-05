@@ -10,6 +10,11 @@
       "StackName": "amplify-redlinkpwa-dev-f38d9",
       "StackId": "arn:aws:cloudformation:eu-west-3:052247097294:stack/amplify-redlinkpwa-dev-f38d9/8834eeb0-cc6c-11f0-ae0b-0eb5bb35faf3",
       "AmplifyAppId": "d20qrsdkzeugxd"
+    },
+    "categories": {
+      "auth": {
+        "redlinkpwa056b43b0056b43b0": {}
+      }
     }
   }
 }

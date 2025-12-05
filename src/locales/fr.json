@@ -1,23 +1,362 @@
 {
-  "home": {
-    "title": "Bienvenue sur la Stack Technique 2025",
-    "subtitle": "Test de la Stack Technique 2025"
+  "common": {
+    "save": "ENREGISTRER",
+    "edit": "Modifier",
+    "back": "Retour",
+    "next": "Suivant",
+    "cancel": "Annuler",
+    "delete": "Supprimer",
+    "search": "Rechercher",
+    "contact": "Contacter",
+    "view": "Voir",
+    "loading": "Chargement...",
+    "sending": "Envoi en cours...",
+    "weight": "Poids",
+    "age": "Âge",
+    "years": "ans",
+    "km": "km",
+    "ml": "ml",
+    "kg": "kg"
   },
-  "cards": {
-    "i18n": {
-      "title": "Interface & i18n",
-      "currentLanguage": "Langue actuelle"
+  "errors": {
+    "fill_all_fields": "Veuillez remplir tous les champs.",
+    "fill_required_fields": "Veuillez remplir tous les champs obligatoires.",
+    "passwords_not_match": "Les mots de passe ne correspondent pas.",
+    "password_too_short": "Le mot de passe est trop court.",
+    "enter_email": "Veuillez entrer votre email.",
+    "fill_code_password": "Veuillez remplir le code et le mot de passe.",
+    "resend_code_failed": "Impossible de renvoyer le code. Réessayez plus tard.",
+    "request_sent": "Demande envoyée avec succès !",
+    "login_failed": "Email ou mot de passe incorrect.",
+    "email_exists": "Cet email possède déjà un compte.",
+    "registration_failed": "Erreur lors de l'inscription.",
+    "invalid_code": "Code invalide ou expiré.",
+    "send_code_failed": "Impossible d'envoyer le code (Email inconnu ?)",
+    "reset_password_failed": "Code invalide ou erreur système.",
+    "delete_account_failed": "Impossible de supprimer le compte."
+  },
+  "roles": {
+    "vet": "Clinique",
+    "owner": "Propriétaire"
+  },
+  "home": {
+    "hero": {
+      "title": "Sauvez des vies animales grâce au don de sang.",
+      "subtitle": "REDLINK connecte les cliniques vétérinaires avec les propriétaires d'animaux volontaires pour les urgences transfusionnelles.",
+      "cta_primary": "Devenir Donneur",
+      "cta_secondary": "Devenir Clinique Partenaire"
     },
-    "mouse": {
-      "title": "VueUse (Souris)",
-      "moveMouse": "Bougez votre souris pour tester la réactivité :"
+    "steps": {
+      "title": "Comment ça marche ?",
+      "1_title": "Inscription gratuite",
+      "1_desc": "Cliniques et propriétaires créent leur profil en quelques clics.",
+      "2_title": "Recherche en temps réel",
+      "2_desc": "Les cliniques émettent une demande en cas d'urgence. REDLINK notifie automatiquement les donneurs compatibles.",
+      "3_title": "Action solidaire",
+      "3_desc": "Les propriétaires répondent, se rendent à la clinique et aident à sauver une vie."
     },
-    "map": {
-      "title": "Leaflet (Carte)"
+    "why": {
+      "title": "Pourquoi REDLINK ?",
+      "subtitle": "Un lien vital entre médecine vétérinaire et solidarité.",
+      "cta": "Devenir Donneur",
+      "points": {
+        "fast": "Rapide : Matching instantané grâce à la géolocalisation",
+        "target": "Ciblé : Recherche filtrée par espèce, groupe sanguin et poids",
+        "transparent": "Transparent : Le propriétaire garde le contrôle à chaque étape",
+        "secure": "Sécurisé : Données protégées et accessibles uniquement aux vétérinaires",
+        "useful": "Utile : Chaque don peut sauver une vie"
+      }
+    },
+    "stats": {
+      "title": "REDLINK en chiffres",
+      "requests": "demandes de transfusion traitées",
+      "animals": "animaux inscrits",
+      "time": "minutes de délai moyen"
+    },
+    "trust": "Ils ont fait confiance à REDLINK",
+    "testimonial": {
+      "text": "Grâce à REDLINK, nous avons pu réaliser deux transfusions critiques ce mois-ci. Le système est fluide, les donneurs réactifs.",
+      "author": "Dr Petton",
+      "roles": {
+        "vet": "Vétérinaire",
+        "partner": "Partenaire",
+        "emergency": "Urgences"
+      }
+    },
+    "join": {
+      "title": "Rejoignez le réseau solidaire",
+      "subtitle": "Chaque seconde compte. Ensemble, nous pouvons faire la différence."
+    },
+    "faq": {
+      "title": "Un doute ? La réponse est surement ici !",
+      "q1": "Mon animal doit-il être à jeun ?",
+      "a1": "Il est préférable que l'animal n'ait pas mangé quelques heures avant, mais l'eau est autorisée.",
+      "q2": "Est-ce que le don est douloureux ?",
+      "a2": "Non, c'est comme une prise de sang classique. Une crème anesthésiante peut être appliquée.",
+      "q3": "Que reçoit mon animal en retour ?",
+      "a3": "Un bilan sanguin complet gratuit, des croquettes et la fierté d'avoir sauvé une vie !"
     }
   },
-  "buttons": {
-    "changeLanguage": "Changer la langue",
-    "danger": "Bouton Danger"
+  "layout": {
+    "header": {
+      "donor_btn": "Devenir Donneur",
+      "clinic_btn": "Devenir Clinique Partenaire",
+      "login_btn": "Se connecter",
+      "new_request": "FAIRE UNE DEMANDE",
+      "add_animal": "AJOUTER UN ANIMAL"
+    },
+    "footer": {
+      "clinic_section": "Clinique",
+      "team": "Équipe",
+      "contact": "Contact",
+      "about": "À propos",
+      "legal_section": "Légal",
+      "terms": "Termes & Conditions",
+      "privacy": "Politique de confidentialité",
+      "question_title": "Une question ? Une remarque ?",
+      "question_desc": "Posez-nous toutes vos questions, nous répondons en moins de 24h.",
+      "email_placeholder": "votre{'@'}email.com",
+      "send": "OK",
+      "rights_reserved": "Tous droits réservés.",
+      "made_with": "Fait avec",
+      "in_france": "en France"
+    },
+    "mobile": {
+      "home": "Accueil",
+      "emergency": "Urgence",
+      "account": "Compte"
+    }
+  },
+  "auth": {
+    "login": {
+      "title": "SE CONNECTER",
+      "email_label": "EMAIL",
+      "password_label": "MOT DE PASSE",
+      "forgot_password": "MOT DE PASSE OUBLIÉ ?",
+      "btn": "SE CONNECTER",
+      "no_account": "VOUS N'AVEZ PAS DE COMPTE ?",
+      "create_account": "CRÉEZ-EN UN ICI"
+    },
+    "verify": {
+      "title": "VÉRIFICATION",
+      "subtitle": "Un code a été envoyé à",
+      "code_label": "CODE DE VÉRIFICATION",
+      "btn": "VÉRIFIER",
+      "resend": "RENVOYER LE CODE",
+      "resend_loading": "Envoi en cours...",
+      "resend_success": "Un nouveau code a été envoyé !"
+    },
+    "forgot": {
+      "title": "MOT DE PASSE OUBLIÉ",
+      "email_label": "EMAIL",
+      "btn_send": "ENVOYER LE LIEN",
+      "btn_reset": "RÉINITIALISER",
+      "new_password_label": "NOUVEAU MOT DE PASSE",
+      "code_label": "CODE REÇU",
+      "back": "RETOUR",
+      "subtitle": "Entrez votre email pour recevoir un code",
+      "subtitle_step2": "Vérifiez vos emails"
+    },
+    "selection": {
+      "title": "REJOIGNEZ LE RÉSEAU",
+      "subtitle": "Choisissez votre profil pour commencer l'inscription",
+      "owner_btn": "JE SUIS PROPRIÉTAIRE",
+      "owner_desc": "Je souhaite inscrire mon animal pour sauver des vies.",
+      "clinic_btn": "JE SUIS UNE CLINIQUE",
+      "clinic_desc": "Je souhaite rechercher des donneurs en cas d'urgence."
+    },
+    "register_owner": {
+      "title_step1": "INFORMATION PROPRIÉTAIRE",
+      "title_step2": "INFORMATION ANIMAL",
+      "next": "SUIVANT",
+      "finish": "TERMINER L'INSCRIPTION",
+      "fields": {
+        "lastname": "NOM",
+        "firstname": "PRÉNOM",
+        "phone": "TÉLÉPHONE",
+        "email": "ADRESSE MAIL",
+        "password": "MOT DE PASSE",
+        "confirm_password": "CONFIRMATION MOT DE PASSE",
+        "address": "ADRESSE",
+        "city": "VILLE",
+        "zip": "CODE POSTAL",
+        "animal_name": "NOM",
+        "animal_species": "ESPÈCE",
+        "animal_breed": "RACE",
+        "animal_age": "ÂGE",
+        "animal_weight": "POIDS",
+        "blood_group": "GROUPE SANGUIN"
+      }
+    },
+    "register_clinic": {
+      "title_step1": "VÉTÉRINAIRE RÉFÉRENT",
+      "title_step2": "INFORMATION CLINIQUE",
+      "next": "SUIVANT",
+      "finish": "TERMINER L'INSCRIPTION",
+      "fields": {
+        "clinic_name": "NOM DE LA CLINIQUE",
+        "rpps": "NUMÉRO RPPS",
+        "emergency_service": "SERVICE D'URGENCE ?"
+      }
+    }
+  },
+  "request": {
+    "title": "NOUVELLE DEMANDE",
+    "step1_subtitle": "Quel est le niveau d'urgence ?",
+    "emergency": {
+      "title": "URGENCE VITALE",
+      "desc": "Besoin immédiat. Notification Push envoyée à tous les donneurs compatibles à proximité.",
+      "badge": "Priorité Absolue"
+    },
+    "appointment": {
+      "title": "PROGRAMMER UN DON",
+      "desc": "Besoin planifié. Prise de rendez-vous avec un donneur pour une transfusion future.",
+      "badge": "Standard",
+      "info": "Le propriétaire pourra proposer un autre créneau si besoin."
+    },
+    "form": {
+      "title_emergency": "DÉTAILS DE L'URGENCE",
+      "title_appointment": "DÉTAILS DU RENDEZ-VOUS",
+      "patient_name": "Nom du patient",
+      "species": "Espèce",
+      "breed": "Race",
+      "weight": "Poids (kg)",
+      "blood_group": "Groupe sanguin recherché",
+      "quantity": "Quantité estimée (ml)",
+      "date_label": "Date souhaitée",
+      "time_label": "Créneau horaire",
+      "details": "Informations complémentaires (Optionnel)",
+      "submit_emergency": "LANCER L'ALERTE ( -1 CRÉDIT )",
+      "submit_appointment": "RECHERCHER DES DISPONIBILITÉS",
+      "back": "Changer de type",
+      "select_placeholder": "Choix",
+      "select_blood_placeholder": "Sélectionner"
+    },
+    "species": {
+      "dog": "Chien",
+      "cat": "Chat"
+    }
+  },
+  "dashboard": {
+    "sidebar": {
+      "requests": "Mes Demandes",
+      "history": "Historique",
+      "settings": "Paramètres",
+      "donors": "Donneurs",
+      "logout": "Se déconnecter"
+    },
+    "header": {
+      "new_request": "FAIRE UNE DEMANDE",
+      "my_requests": "MES DEMANDES",
+      "my_account": "MON COMPTE"
+    },
+    "owner": {
+      "tabs": {
+        "general": "MON PROFIL",
+        "animals": "MES ANIMAUX",
+        "availability": "DISPONIBILITÉS",
+        "notifications": "NOTIFICATIONS"
+      },
+      "general": {
+        "firstname": "Prénom",
+        "lastname": "Nom",
+        "email": "Email",
+        "phone": "Téléphone portable",
+        "address": "Adresse domicile",
+        "city": "Ville",
+        "zip": "Code Postal"
+      },
+      "animals": {
+        "add_btn": "AJOUTER UN ANIMAL",
+        "edit": "Modifier",
+        "weight": "Poids",
+        "age": "ans"
+      },
+      "availability": {
+        "title": "Zone d'intervention",
+        "distance_label": "Je suis prêt à me déplacer jusqu'à :",
+        "km": "km",
+        "days_label": "Jours de disponibilité",
+        "vacation_mode": "Mode Vacances (Suspendre les alertes)",
+        "vacation_mode_desc": "Vous ne recevrez aucune notification tant que ce mode est activé.",
+        "min_distance": "5 km",
+        "max_distance": "100 km"
+      }
+    },
+    "settings": {
+      "tabs": {
+        "general": "INFORMATIONS GÉNÉRALES",
+        "subscription": "SOUSCRIPTION",
+        "vet_ref": "VÉTÉRINAIRE RÉFÉRENT",
+        "notifications": "PRÉFÉRENCES DE NOTIFICATIONS",
+        "activity": "HISTORIQUE DES ACTIVITÉS"
+      },
+      "delete_confirm": {
+        "header": "Suppression de compte",
+        "message": "Êtes-vous sûr de vouloir supprimer votre compte ? Cette action est irréversible et toutes vos données seront perdues.",
+        "accept": "Oui, supprimer",
+        "reject": "Annuler"
+      },
+      "clinic_name": "Nom de la clinique",
+      "phone": "Numéro de téléphone",
+      "address": "Adresse",
+      "zip": "Code postal",
+      "city": "Ville",
+      "email": "E-mail",
+      "delete_account": "SUPPRIMER LE COMPTE",
+      "save": "ENREGISTRER",
+      "under_construction": "Section en construction..."
+    },
+    "requests": {
+      "title": "Mes Demandes en cours",
+      "new_request": "Nouvelle Demande",
+      "columns": {
+        "id": "#",
+        "date": "DATE",
+        "patient": "PATIENT",
+        "blood_group": "GROUPE",
+        "status": "STATUT",
+        "donors_found": "DONNEURS TROUVÉS",
+        "action": "ACTION"
+      },
+      "status": {
+        "open": "OPEN",
+        "closed": "CLOSED",
+        "contacted": "contactés"
+      }
+    },
+    "donors": {
+      "title": "Base de Donneurs",
+      "search_placeholder": "Rechercher par nom, ville...",
+      "columns": {
+        "animal": "ANIMAL",
+        "blood": "SANG",
+        "distance": "DISTANCE",
+        "last_donation": "DERNIER DON",
+        "action": "ACTION"
+      },
+      "contact": "Contacter"
+    },
+    "history": {
+      "title": "Historique d'activité",
+      "request_closed": "Demande #{id} clôturée avec succès",
+      "donor_added": "Nouveau donateur ajouté : {name}",
+      "time_ago": "Il y a {time}",
+      "yesterday_at": "Hier à {time}"
+    }
+  },
+  "menu": {
+    "dashboard": "Tableau de bord",
+    "requests": "Historique demandes",
+    "credits": "Mon Solde & Crédits",
+    "invoices": "Factures",
+    "team": "Gérer l'équipe",
+    "settings": "Paramètres",
+    "animals": "Mes Animaux",
+    "add_animal": "Ajouter un animal",
+    "availability": "Disponibilités",
+    "vacation": "Mode Vacances",
+    "profile": "Mon Profil",
+    "logout": "Se déconnecter"
   }
 }
