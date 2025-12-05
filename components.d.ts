@@ -23,7 +23,10 @@ declare module 'vue' {
     Button: typeof import('primevue/button')['default']
     Card: typeof import('primevue/card')['default']
     Carousel: typeof import('primevue/carousel')['default']
+    Column: typeof import('primevue/column')['default']
+    ConfirmDialog: typeof import('primevue/confirmdialog')['default']
     DashboardSidebar: typeof import('./src/components/dashboard/DashboardSidebar.vue')['default']
+    DataTable: typeof import('primevue/datatable')['default']
     InputOtp: typeof import('primevue/inputotp')['default']
     InputText: typeof import('primevue/inputtext')['default']
     Menu: typeof import('primevue/menu')['default']
@@ -34,6 +37,7 @@ declare module 'vue' {
     Select: typeof import('primevue/select')['default']
     Slider: typeof import('primevue/slider')['default']
     Tag: typeof import('primevue/tag')['default']
+    Toast: typeof import('primevue/toast')['default']
     ToggleSwitch: typeof import('primevue/toggleswitch')['default']
   }
 }
