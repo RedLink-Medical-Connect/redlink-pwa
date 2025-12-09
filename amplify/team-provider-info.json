@@ -23,7 +23,8 @@
         }
       },
       "api": {
-        "apiStripe": {}
+        "apiStripe": {},
+        "redlinkpwa": {}
       }
     }
   }
