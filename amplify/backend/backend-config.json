@@ -74,6 +74,25 @@
       "service": "Lambda"
     }
   },
+  "geo": {
+    "placeIndex": {
+      "accessType": "AuthorizedAndGuestUsers",
+      "dataProvider": "HERE",
+      "dataSourceIntendedUse": "SingleUse",
+      "dependsOn": [
+        {
+          "attributes": [
+            "UserPoolId"
+          ],
+          "category": "auth",
+          "resourceName": "redlinkpwa056b43b0056b43b0"
+        }
+      ],
+      "isDefault": true,
+      "providerPlugin": "awscloudformation",
+      "service": "PlaceIndex"
+    }
+  },
   "parameters": {
     "AMPLIFY_function_createPaymentIntent_deploymentBucketName": {
       "usedBy": [

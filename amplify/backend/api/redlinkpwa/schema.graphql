@@ -3,6 +3,7 @@
 # ---------------------------------------------------------
 
 type Clinic @model @auth(rules: [
+  { allow: owner },
   { allow: groups, groups: ["Veterinarians"], operations: [create, read, update, delete] },
   { allow: private, operations: [read] }
 ]) {

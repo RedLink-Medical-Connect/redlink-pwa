@@ -33,6 +33,7 @@ export const getClinic = /* GraphQL */ `
       }
       createdAt
       updatedAt
+      owner
       __typename
     }
   }
@@ -58,6 +59,7 @@ export const listClinics = /* GraphQL */ `
         donorOwnersCount
         createdAt
         updatedAt
+        owner
         __typename
       }
       nextToken
@@ -87,6 +89,7 @@ export const getClinicAvailability = /* GraphQL */ `
         donorOwnersCount
         createdAt
         updatedAt
+        owner
         __typename
       }
       createdAt
@@ -145,6 +148,7 @@ export const getVeterinarian = /* GraphQL */ `
         donorOwnersCount
         createdAt
         updatedAt
+        owner
         __typename
       }
       validatedMissions {
@@ -392,6 +396,7 @@ export const getClinicOwnerRelation = /* GraphQL */ `
         donorOwnersCount
         createdAt
         updatedAt
+        owner
         __typename
       }
       ownerID
@@ -472,6 +477,7 @@ export const getRequest = /* GraphQL */ `
         donorOwnersCount
         createdAt
         updatedAt
+        owner
         __typename
       }
       mission {

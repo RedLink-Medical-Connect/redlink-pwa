@@ -29,5 +29,12 @@ export type AmplifyDependentResourcesAttributes = {
       "Name": "string",
       "Region": "string"
     }
+  },
+  "geo": {
+    "placeIndex": {
+      "Arn": "string",
+      "Name": "string",
+      "Region": "string"
+    }
   }
 }

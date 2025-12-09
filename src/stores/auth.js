@@ -35,8 +35,17 @@ export const useAuthStore = defineStore('auth', () => {
     // 2. Sinon, on utilise la valeur du sélecteur de test
     return role.value
   })
+  const tempRegistrationData = ref(null)
 
-  // --- ACTIONS ---
+  // 2. Action pour sauvegarder
+  function setTempRegistrationData(data) {
+    tempRegistrationData.value = data
+  }
+
+  // 3. Action pour nettoyer
+  function clearTempRegistrationData() {
+    tempRegistrationData.value = null
+  }
 
   // 1. Initialisation (Au chargement de l'app ou F5)
   async function init() {
@@ -220,6 +229,8 @@ export const useAuthStore = defineStore('auth', () => {
     resetPassSubmit,
     deleteAccount,
     clearError,
-    setError
+    setError,
+    clearTempRegistrationData,
+    setTempRegistrationData
   }
 })

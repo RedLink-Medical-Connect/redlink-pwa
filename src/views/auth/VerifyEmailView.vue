@@ -1,43 +1,174 @@
 <script setup>
-import { ref, onMounted, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { ref, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useI18n } from 'vue-i18n'
-import { resendSignUpCode } from 'aws-amplify/auth' // Import direct pour le renvoi
-// Auto-import: InputOtp, Button, Message, Toast (si dispo)
+import { resendSignUpCode, getCurrentUser } from 'aws-amplify/auth'
+import { generateClient } from 'aws-amplify/api'
+
+import {
+  createOwnerSimple,
+  createAnimalSimple,
+  createOwnerAvailabilitySimple,
+  createClinicSimple,
+  createVeterinarianSimple
+} from '@/graphql/custom-mutations'
 
 const route = useRoute()
+const router = useRouter()
 const auth = useAuthStore()
 const { t } = useI18n()
+const client = generateClient()
+
 const email = ref('')
 const code = ref('')
+const confirmPassword = ref('')
+const showPasswordInput = ref(false)
 const resendLoading = ref(false)
 const resendSuccess = ref(false)
 
+let registrationData = null
+
 onMounted(() => {
   email.value = route.query.email || ''
+
+  if (auth.tempRegistrationData && auth.tempRegistrationData.password) {
+    registrationData = auth.tempRegistrationData
+  } else {
+    const local = localStorage.getItem('temp_register_safe_data')
+    if (local) {
+      registrationData = JSON.parse(local)
+      showPasswordInput.value = true
+    } else {
+      auth.setError("Session expirée.")
+      setTimeout(() => router.push('/register/selection'), 2000)
+    }
+  }
 })
 
-// 1. UX : Effacer l'erreur quand on tape
-watch(code, () => {
-  if (auth.error) auth.clearError()
-})
-
-const handleVerify = () => {
+const handleVerify = async () => {
   if (code.value.length < 6) return
-  auth.confirmRegistration(email.value, code.value)
-}
+  if (showPasswordInput.value && !confirmPassword.value) {
+    auth.setError("Mot de passe requis.")
+    return
+  }
 
-// 2. Fonctionnalité : Renvoyer le code
+  try {
+    auth.isLoading = true
+    auth.clearError()
+
+    try {
+      await auth.confirmRegistration(email.value, code.value)
+    } catch (e) {
+      if (!e.message.includes('Current status is CONFIRMED')) throw e
+    }
+
+    const pwd = showPasswordInput.value ? confirmPassword.value : registrationData.password
+    try {
+      await getCurrentUser()
+    } catch {
+      await auth.login(email.value, pwd)
+    }
+
+    const data = registrationData
+
+    if (data.role === 'owner') {
+      // --- PROPRIÉTAIRE ---
+      const ownerRes = await client.graphql({
+        query: createOwnerSimple,
+        variables: { input: {
+            firstname: data.firstname,
+            lastname: data.lastname,
+            email: data.email,
+            phone: data.phone || '',
+            address: data.address || '',
+            latitude: parseFloat(data.latitude || 0),
+            longitude: parseFloat(data.longitude || 0),
+            maxTravelDistance: 50,
+            totalDonations: 0
+          }}
+      })
+
+      const ownerID = ownerRes.data.createOwner.id
+
+      if (data.animal_name) {
+        await client.graphql({
+          query: createAnimalSimple,
+          variables: { input: {
+              ownerID: ownerID,
+              name: data.animal_name,
+              species: (data.animal_species || 'DOG').toUpperCase(),
+              breed: data.animal_breed || '',
+              weight: parseFloat(data.animal_weight || 0),
+              bloodGroup: data.blood_group || 'UNKNOWN',
+              isVaccinated: true,
+              isSterilized: false,
+              donationFrequency: 'ASAP'
+            }}
+        })
+      }
+
+      await client.graphql({
+        query: createOwnerAvailabilitySimple,
+        variables: { input: {
+            ownerID: ownerID,
+            dayOfWeek: 6,
+            startTime: "09:00Z",
+            endTime: "12:00Z"
+          }}
+      })
+
+    } else if (data.role === 'vet') {
+      // --- VÉTO ---
+      const clinicRes = await client.graphql({
+        query: createClinicSimple,
+        variables: { input: {
+            name: data.clinic_name,
+            rpps: data.rpps,
+            email: data.email,
+            phone: data.phone || '',
+            address: data.address,
+            latitude: parseFloat(data.latitude || 0),
+            longitude: parseFloat(data.longitude || 0),
+            hasEmergencyService: false,
+            transfusionsDone: 0,
+            donorOwnersCount: 0
+          }}
+      })
+
+      await client.graphql({
+        query: createVeterinarianSimple,
+        variables: { input: {
+            clinicID: clinicRes.data.createClinic.id,
+            firstname: data.firstname,
+            lastname: data.lastname,
+            email: data.email
+          }}
+      })
+    }
+
+    auth.clearTempRegistrationData()
+    localStorage.removeItem('temp_register_safe_data')
+    router.push('/dashboard')
+
+  } catch (err) {
+    console.error("Erreur Inscription:", err)
+    if (err.errors && err.errors.length > 0) {
+      auth.setError(`Erreur technique : ${err.errors[0].message}`)
+    } else {
+      auth.setError(err.message || "Erreur inconnue.")
+    }
+  } finally {
+    auth.isLoading = false
+  }
+}
 const handleResend = async () => {
   resendLoading.value = true
   resendSuccess.value = false
   auth.clearError()
-
   try {
     await resendSignUpCode({ username: email.value })
     resendSuccess.value = true
-    // Petit reset du message de succès après 5 secondes
     setTimeout(() => resendSuccess.value = false, 5000)
   } catch {
     auth.setError(t('errors.resend_code_failed'))
@@ -71,35 +202,50 @@ const handleResend = async () => {
       {{ $t('auth.verify.resend_success') }}
     </Message>
 
-    <div class="flex justify-center mb-8">
-      <InputOtp
-        v-model="code"
-        :length="6"
-        integer-only
-        :pt="{
-          root: { class: 'gap-2 sm:gap-3' },
-          input: {
-            class: [
-              '!bg-zinc-100 dark:!bg-zinc-800',
-              '!text-zinc-900 dark:!text-white',
-              '!w-10 !h-12 sm:!w-12 sm:!h-14',
-              '!text-xl font-bold',
-              'focus:!ring-2 focus:!ring-[#ff3b4e] focus:!border-[#ff3b4e]',
-              // Si erreur, bordure rouge, sinon bordure transparente/grise
-              auth.error ? '!border-red-500 !ring-red-500/30' : '!border-none'
-            ]
-          }
-        }"
-      />
-    </div>
+    <form @submit.prevent="handleVerify">
+      <div class="flex justify-center mb-8">
+        <InputOtp
+          v-model="code"
+          :length="6"
+          integer-only
+          :pt="{
+            root: { class: 'gap-2 sm:gap-3' },
+            input: {
+              class: [
+                '!bg-zinc-100 dark:!bg-zinc-800',
+                '!text-zinc-900 dark:!text-white',
+                '!w-10 !h-12 sm:!w-12 sm:!h-14',
+                '!text-xl font-bold',
+                'focus:!ring-2 focus:!ring-[#ff3b4e] focus:!border-[#ff3b4e]',
+                auth.error ? '!border-red-500 !ring-red-500/30' : '!border-none'
+              ]
+            }
+          }"
+        />
+      </div>
 
-    <Button
-      :label="$t('auth.verify.btn')"
-      class="w-full !bg-[#ff3b4e] !border-none !text-white !font-black !uppercase !py-4 !rounded-md shadow-lg shadow-red-500/20 transition-transform active:scale-95"
-      :loading="auth.isLoading"
-      :disabled="code.length < 6"
-      @click="handleVerify"
-    />
+      <div v-if="showPasswordInput" class="mb-6 text-left animate-fade-in bg-yellow-50 dark:bg-yellow-900/10 p-4 rounded-lg border border-yellow-200 dark:border-yellow-800/30">
+        <label class="block text-xs font-bold uppercase text-yellow-700 dark:text-yellow-500 mb-2 ml-1">
+          Confirmez votre mot de passe
+        </label>
+        <Password
+          v-model="confirmPassword"
+          :feedback="false"
+          toggle-mask
+          placeholder="Requis suite au rechargement"
+          class="w-full"
+          input-class="w-full !bg-white dark:!bg-zinc-900 !border-none !text-zinc-900 dark:!text-white !p-3 rounded-md shadow-sm"
+        />
+      </div>
+
+      <Button
+        :label="$t('auth.verify.btn')"
+        type="submit"
+        class="w-full !bg-[#ff3b4e] !border-none !text-white !font-black !uppercase !py-4 !rounded-md shadow-lg shadow-red-500/20 transition-transform active:scale-95"
+        :loading="auth.isLoading"
+        :disabled="code.length < 6"
+      />
+    </form>
 
     <Button
       :label="resendLoading ? $t('auth.verify.resend_loading') : $t('auth.verify.resend')"
