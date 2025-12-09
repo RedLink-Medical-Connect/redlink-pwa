@@ -1,0 +1,199 @@
+# ---------------------------------------------------------
+# 1. CLINIQUE & VÉTÉRINAIRES
+# ---------------------------------------------------------
+
+type Clinic @model @auth(rules: [
+  { allow: groups, groups: ["Veterinarians"], operations: [create, read, update, delete] },
+  { allow: private, operations: [read] }
+]) {
+  id: ID!
+  name: String!
+  rpps: String!
+  email: String!
+  phone: String!
+  address: String!
+  latitude: Float
+  longitude: Float
+  hasEmergencyService: Boolean!
+
+  transfusionsDone: Int
+  donorOwnersCount: Int
+
+  veterinarians: [Veterinarian] @hasMany
+  availabilities: [ClinicAvailability] @hasMany
+  requests: [Request] @hasMany
+  clients: [ClinicOwnerRelation] @hasMany
+}
+
+type ClinicAvailability @model @auth(rules: [
+  { allow: groups, groups: ["Veterinarians"] },
+  { allow: private, operations: [read] }
+]) {
+  id: ID!
+  dayOfWeek: Int! # 1-7
+  startTime: AWSTime!
+  endTime: AWSTime!
+
+  clinicID: ID! @index(name: "byClinicAvail")
+  clinic: Clinic @belongsTo(fields: ["clinicID"])
+}
+
+type Veterinarian @model @auth(rules: [
+  { allow: owner },
+  { allow: groups, groups: ["Admins"], operations: [read, delete] }
+]) {
+  id: ID!
+  firstname: String!
+  lastname: String!
+  email: String!
+
+  clinicID: ID! @index(name: "byClinicVet")
+  clinic: Clinic @belongsTo(fields: ["clinicID"])
+
+  validatedMissions: [Mission] @hasMany
+}
+
+# ---------------------------------------------------------
+# 2. PROPRIÉTAIRES & ANIMAUX
+# ---------------------------------------------------------
+
+type Owner @model @auth(rules: [
+  { allow: owner },
+  { allow: groups, groups: ["Veterinarians"], operations: [read] }
+]) {
+  id: ID!
+  firstname: String!
+  lastname: String!
+  email: String!
+  phone: String!
+  address: String!
+  latitude: Float
+  longitude: Float
+  maxTravelDistance: Int!
+
+  totalDonations: Int
+
+  animals: [Animal] @hasMany
+  availabilities: [OwnerAvailability] @hasMany
+  myClinics: [ClinicOwnerRelation] @hasMany
+}
+
+type OwnerAvailability @model @auth(rules: [
+  { allow: owner },
+  { allow: groups, groups: ["Veterinarians"], operations: [read] }
+]) {
+  id: ID!
+  dayOfWeek: Int!
+  startTime: AWSTime!
+  endTime: AWSTime!
+
+  ownerID: ID! @index(name: "byOwnerAvail")
+  owner: Owner @belongsTo(fields: ["ownerID"])
+}
+
+type Animal @model @auth(rules: [
+  { allow: owner },
+  { allow: groups, groups: ["Veterinarians"], operations: [read] }
+]) {
+  id: ID!
+  name: String!
+  species: Species!
+  breed: String
+  birthDate: AWSDate
+  weight: Float!
+  bloodGroup: String!
+  isVaccinated: Boolean!
+  isSterilized: Boolean
+  lastDonationDate: AWSDate
+  donationFrequency: DonationFrequency
+
+  ownerID: ID! @index(name: "byOwnerAnimal")
+  owner: Owner @belongsTo(fields: ["ownerID"])
+  missions: [Mission] @hasMany(indexName: "byAnimalMission")
+}
+
+type ClinicOwnerRelation @model @auth(rules: [
+  { allow: owner },
+  { allow: groups, groups: ["Veterinarians"] }
+]) {
+  id: ID!
+  clinicID: ID! @index(name: "byClinicClient")
+  clinic: Clinic @belongsTo(fields: ["clinicID"])
+  ownerID: ID! @index(name: "byOwnerClient")
+  owner: Owner @belongsTo(fields: ["ownerID"])
+  isPrimaryClinic: Boolean
+}
+
+# ---------------------------------------------------------
+# 3. OPÉRATIONS
+# ---------------------------------------------------------
+
+type Request @model @auth(rules: [{ allow: groups, groups: ["Veterinarians"] }]) {
+  id: ID!
+  requestType: RequestType!
+  requiredSpecies: Species!
+  requiredBloodGroup: String!
+  quantity: Int!
+  status: RequestStatus!
+  createdAt: AWSDateTime
+
+  clinicID: ID! @index(name: "byClinicRequest")
+  clinic: Clinic @belongsTo(fields: ["clinicID"])
+
+  mission: Mission @hasOne
+}
+
+type Mission @model @auth(rules: [
+  { allow: owner },
+  { allow: groups, groups: ["Veterinarians"] }
+]) {
+  id: ID!
+  requestID: ID! @index(name: "byRequestMission")
+  animalID: ID! @index(name: "byAnimalMission")
+  animal: Animal @belongsTo(fields: ["animalID"])
+
+  status: MissionStatus!
+  appointmentDatetime: AWSDateTime
+
+  stripePaymentIntentId: String
+  stripePaymentStatus: String
+  validationCode: String
+  scannedAt: AWSDateTime
+
+  validatedByVeterinarianID: ID
+  validatedBy: Veterinarian @belongsTo(fields: ["validatedByVeterinarianID"])
+}
+
+# ---------------------------------------------------------
+# 4. ENUMS
+# ---------------------------------------------------------
+
+enum Species {
+  DOG
+  CAT
+}
+
+enum DonationFrequency {
+  ASAP
+  TWICE_YEAR
+  ONCE_YEAR
+}
+
+enum RequestType {
+  EMERGENCY
+  APPOINTMENT
+}
+
+enum RequestStatus {
+  OPEN
+  IN_PROGRESS
+  CLOSED
+  CANCELLED
+}
+
+enum MissionStatus {
+  ACCEPTED
+  PENDING_ARRIVAL
+  COMPLETED
+  NO_SHOW
+}
