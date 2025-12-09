@@ -97,7 +97,8 @@ const router = createRouter({
       name: 'owner-profile',
       component: () => import('@/views/dashboard/owner/ProfileView.vue'),
       meta: { requiresAuth: true, role: 'owner' } // <--- Sécurité Rôle
-    }
+    },
+    { path: '/test-stripe', component: () => import('@/views/TestStripe.vue') }
   ]
 })
 

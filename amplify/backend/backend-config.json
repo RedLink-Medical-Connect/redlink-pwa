@@ -1,4 +1,20 @@
 {
+  "api": {
+    "apiStripe": {
+      "dependsOn": [
+        {
+          "attributes": [
+            "Name",
+            "Arn"
+          ],
+          "category": "function",
+          "resourceName": "createPaymentIntent"
+        }
+      ],
+      "providerPlugin": "awscloudformation",
+      "service": "API Gateway"
+    }
+  },
   "auth": {
     "redlinkpwa056b43b0056b43b0": {
       "customAuth": false,
@@ -25,6 +41,39 @@
       },
       "providerPlugin": "awscloudformation",
       "service": "Cognito"
+    }
+  },
+  "function": {
+    "createPaymentIntent": {
+      "build": true,
+      "providerPlugin": "awscloudformation",
+      "service": "Lambda"
+    }
+  },
+  "parameters": {
+    "AMPLIFY_function_createPaymentIntent_deploymentBucketName": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "createPaymentIntent"
+        }
+      ]
+    },
+    "AMPLIFY_function_createPaymentIntent_s3Key": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "createPaymentIntent"
+        }
+      ]
+    },
+    "AMPLIFY_function_createPaymentIntent_stripeSecretKey": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "createPaymentIntent"
+        }
+      ]
     }
   }
 }

@@ -20,6 +20,7 @@
   },
   "dependencies": {
     "@primevue/themes": "^4.5.0",
+    "@stripe/stripe-js": "^8.5.3",
     "@tailwindcss/vite": "^4.1.17",
     "@vue-leaflet/vue-leaflet": "^0.10.1",
     "@vueuse/core": "^14.1.0",
