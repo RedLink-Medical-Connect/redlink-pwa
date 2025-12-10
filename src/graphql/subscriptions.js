@@ -2,8 +2,11 @@
 // this is an auto generated file. This will be overwritten
 
 export const onCreateClinic = /* GraphQL */ `
-  subscription OnCreateClinic($filter: ModelSubscriptionClinicFilterInput) {
-    onCreateClinic(filter: $filter) {
+  subscription OnCreateClinic(
+    $filter: ModelSubscriptionClinicFilterInput
+    $owner: String
+  ) {
+    onCreateClinic(filter: $filter, owner: $owner) {
       id
       name
       rpps
@@ -33,13 +36,17 @@ export const onCreateClinic = /* GraphQL */ `
       }
       createdAt
       updatedAt
+      owner
       __typename
     }
   }
 `;
 export const onUpdateClinic = /* GraphQL */ `
-  subscription OnUpdateClinic($filter: ModelSubscriptionClinicFilterInput) {
-    onUpdateClinic(filter: $filter) {
+  subscription OnUpdateClinic(
+    $filter: ModelSubscriptionClinicFilterInput
+    $owner: String
+  ) {
+    onUpdateClinic(filter: $filter, owner: $owner) {
       id
       name
       rpps
@@ -69,13 +76,17 @@ export const onUpdateClinic = /* GraphQL */ `
       }
       createdAt
       updatedAt
+      owner
       __typename
     }
   }
 `;
 export const onDeleteClinic = /* GraphQL */ `
-  subscription OnDeleteClinic($filter: ModelSubscriptionClinicFilterInput) {
-    onDeleteClinic(filter: $filter) {
+  subscription OnDeleteClinic(
+    $filter: ModelSubscriptionClinicFilterInput
+    $owner: String
+  ) {
+    onDeleteClinic(filter: $filter, owner: $owner) {
       id
       name
       rpps
@@ -105,6 +116,7 @@ export const onDeleteClinic = /* GraphQL */ `
       }
       createdAt
       updatedAt
+      owner
       __typename
     }
   }
@@ -133,6 +145,7 @@ export const onCreateClinicAvailability = /* GraphQL */ `
         donorOwnersCount
         createdAt
         updatedAt
+        owner
         __typename
       }
       createdAt
@@ -166,6 +179,7 @@ export const onUpdateClinicAvailability = /* GraphQL */ `
         donorOwnersCount
         createdAt
         updatedAt
+        owner
         __typename
       }
       createdAt
@@ -199,6 +213,7 @@ export const onDeleteClinicAvailability = /* GraphQL */ `
         donorOwnersCount
         createdAt
         updatedAt
+        owner
         __typename
       }
       createdAt
@@ -233,6 +248,7 @@ export const onCreateVeterinarian = /* GraphQL */ `
         donorOwnersCount
         createdAt
         updatedAt
+        owner
         __typename
       }
       validatedMissions {
@@ -272,6 +288,7 @@ export const onUpdateVeterinarian = /* GraphQL */ `
         donorOwnersCount
         createdAt
         updatedAt
+        owner
         __typename
       }
       validatedMissions {
@@ -311,6 +328,7 @@ export const onDeleteVeterinarian = /* GraphQL */ `
         donorOwnersCount
         createdAt
         updatedAt
+        owner
         __typename
       }
       validatedMissions {
@@ -689,6 +707,7 @@ export const onCreateClinicOwnerRelation = /* GraphQL */ `
         donorOwnersCount
         createdAt
         updatedAt
+        owner
         __typename
       }
       ownerID
@@ -739,6 +758,7 @@ export const onUpdateClinicOwnerRelation = /* GraphQL */ `
         donorOwnersCount
         createdAt
         updatedAt
+        owner
         __typename
       }
       ownerID
@@ -789,6 +809,7 @@ export const onDeleteClinicOwnerRelation = /* GraphQL */ `
         donorOwnersCount
         createdAt
         updatedAt
+        owner
         __typename
       }
       ownerID
@@ -842,6 +863,7 @@ export const onCreateRequest = /* GraphQL */ `
         donorOwnersCount
         createdAt
         updatedAt
+        owner
         __typename
       }
       mission {
@@ -894,6 +916,7 @@ export const onUpdateRequest = /* GraphQL */ `
         donorOwnersCount
         createdAt
         updatedAt
+        owner
         __typename
       }
       mission {
@@ -946,6 +969,7 @@ export const onDeleteRequest = /* GraphQL */ `
         donorOwnersCount
         createdAt
         updatedAt
+        owner
         __typename
       }
       mission {

@@ -36,6 +36,7 @@ export const createClinic = /* GraphQL */ `
       }
       createdAt
       updatedAt
+      owner
       __typename
     }
   }
@@ -75,6 +76,7 @@ export const updateClinic = /* GraphQL */ `
       }
       createdAt
       updatedAt
+      owner
       __typename
     }
   }
@@ -114,6 +116,7 @@ export const deleteClinic = /* GraphQL */ `
       }
       createdAt
       updatedAt
+      owner
       __typename
     }
   }
@@ -143,6 +146,7 @@ export const createClinicAvailability = /* GraphQL */ `
         donorOwnersCount
         createdAt
         updatedAt
+        owner
         __typename
       }
       createdAt
@@ -177,6 +181,7 @@ export const updateClinicAvailability = /* GraphQL */ `
         donorOwnersCount
         createdAt
         updatedAt
+        owner
         __typename
       }
       createdAt
@@ -211,6 +216,7 @@ export const deleteClinicAvailability = /* GraphQL */ `
         donorOwnersCount
         createdAt
         updatedAt
+        owner
         __typename
       }
       createdAt
@@ -245,6 +251,7 @@ export const createVeterinarian = /* GraphQL */ `
         donorOwnersCount
         createdAt
         updatedAt
+        owner
         __typename
       }
       validatedMissions {
@@ -284,6 +291,7 @@ export const updateVeterinarian = /* GraphQL */ `
         donorOwnersCount
         createdAt
         updatedAt
+        owner
         __typename
       }
       validatedMissions {
@@ -323,6 +331,7 @@ export const deleteVeterinarian = /* GraphQL */ `
         donorOwnersCount
         createdAt
         updatedAt
+        owner
         __typename
       }
       validatedMissions {
@@ -701,6 +710,7 @@ export const createClinicOwnerRelation = /* GraphQL */ `
         donorOwnersCount
         createdAt
         updatedAt
+        owner
         __typename
       }
       ownerID
@@ -751,6 +761,7 @@ export const updateClinicOwnerRelation = /* GraphQL */ `
         donorOwnersCount
         createdAt
         updatedAt
+        owner
         __typename
       }
       ownerID
@@ -801,6 +812,7 @@ export const deleteClinicOwnerRelation = /* GraphQL */ `
         donorOwnersCount
         createdAt
         updatedAt
+        owner
         __typename
       }
       ownerID
@@ -857,6 +869,7 @@ export const createRequest = /* GraphQL */ `
         donorOwnersCount
         createdAt
         updatedAt
+        owner
         __typename
       }
       mission {
@@ -912,6 +925,7 @@ export const updateRequest = /* GraphQL */ `
         donorOwnersCount
         createdAt
         updatedAt
+        owner
         __typename
       }
       mission {
@@ -967,6 +981,7 @@ export const deleteRequest = /* GraphQL */ `
         donorOwnersCount
         createdAt
         updatedAt
+        owner
         __typename
       }
       mission {

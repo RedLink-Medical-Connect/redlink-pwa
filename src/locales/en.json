@@ -22,6 +22,7 @@
     "fill_all_fields": "Please fill in all fields.",
     "fill_required_fields": "Please fill in all required fields.",
     "passwords_not_match": "Passwords do not match.",
+    "password_length": "Password must be at least 8 characters.",
     "password_too_short": "Password is too short.",
     "enter_email": "Please enter your email.",
     "fill_code_password": "Please fill in the code and password.",
@@ -32,7 +33,10 @@
     "registration_failed": "Error during registration.",
     "invalid_code": "Invalid or expired code.",
     "send_code_failed": "Unable to send code (Unknown email?)",
-    "reset_password_failed": "Invalid code or system error."
+    "reset_password_failed": "Invalid code or system error.",
+    "invalid_phone": "Invalid phone number.",
+    "invalid_address": "Please select a valid address from the list.",
+    "delete_account_failed": "Unable to delete the account right now."
   },
   "roles": {
     "vet": "Clinic",
@@ -127,6 +131,19 @@
     }
   },
   "auth": {
+    "register_common": {
+      "lastname": "LAST NAME",
+      "firstname": "FIRST NAME",
+      "phone": "PHONE",
+      "email": "EMAIL ADDRESS",
+      "password": "PASSWORD",
+      "confirm_password": "CONFIRM PASSWORD",
+      "address": "ADDRESS",
+      "city": "CITY",
+      "zip": "ZIP CODE",
+      "next": "NEXT",
+      "finish": "COMPLETE REGISTRATION"
+    },
     "login": {
       "title": "LOG IN",
       "email_label": "EMAIL",
@@ -143,7 +160,8 @@
       "btn": "VERIFY",
       "resend": "RESEND CODE",
       "resend_loading": "Sending...",
-      "resend_success": "A new code has been sent!"
+      "resend_success": "A new code has been sent!",
+      "db_creation_error": "Account created but profile setup failed."
     },
     "forgot": {
       "title": "FORGOT PASSWORD",
@@ -182,6 +200,7 @@
         "animal_name": "NAME",
         "animal_species": "SPECIES",
         "animal_breed": "BREED",
+        "animal_birth_date": "BIRTH DATE",
         "animal_age": "AGE",
         "animal_weight": "WEIGHT",
         "blood_group": "BLOOD GROUP"

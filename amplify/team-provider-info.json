@@ -25,6 +25,9 @@
       "api": {
         "apiStripe": {},
         "redlinkpwa": {}
+      },
+      "geo": {
+        "placeIndex": {}
       }
     }
   }
