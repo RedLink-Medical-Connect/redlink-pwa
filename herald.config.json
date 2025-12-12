@@ -1,0 +1,13 @@
+{
+  "rules": {
+    "disable": [
+      "file-too-long",
+      "function-too-long",
+      "too-many-exports",
+      "commented-code",
+      "inconsistent-semi",
+      "floating-promise"
+    ]
+  },
+  "ignore": ["src/graphql/**/*.js", "amplify/**/*.json", "dist/**", "node_modules/**"]
+}
