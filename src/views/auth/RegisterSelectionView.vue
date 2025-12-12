@@ -1,5 +1,4 @@
 <script setup>
-// Pas de logique, juste de la navigation
 </script>
 
 <template>

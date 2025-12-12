@@ -56,7 +56,7 @@ const currentYear = new Date().getFullYear();
     <div class="bg-black/20 py-4 z-20 border-t border-white/10">
       <div class="container mx-auto px-6 flex flex-col md:flex-row justify-between items-center text-xs text-white/70 gap-2">
 
-        <p>&copy; {{ currentYear }} RedLink SAS. {{ $t('layout.footer.rights_reserved') }}</p>
+        <p>&copy; {{ currentYear }} {{ $t('layout.footer.company') }}. {{ $t('layout.footer.rights_reserved') }}</p>
 
         <div class="flex gap-4">
           <span>
@@ -64,7 +64,7 @@ const currentYear = new Date().getFullYear();
             <i class="pi pi-heart-fill text-[10px] mx-1 text-red-300"></i>
             {{ $t('layout.footer.in_france') }}
           </span>
-          <span class="opacity-50">v1.0.0</span>
+          <span class="opacity-50">{{ $t('layout.footer.version') }}</span>
         </div>
 
       </div>

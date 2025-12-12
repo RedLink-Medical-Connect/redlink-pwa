@@ -2,6 +2,10 @@
 import { ref } from 'vue'
 import { AsYouType, isValidPhoneNumber } from 'libphonenumber-js'
 
+defineOptions({
+  inheritAttrs: false
+})
+
 const emit = defineEmits(['update:modelValue', 'valid'])
 
 const props = defineProps({
@@ -34,8 +38,10 @@ const handleInput = (event) => {
       v-model="phone"
       placeholder="06 12 34 56 78"
       :class="[
-        '!bg-zinc-200 dark:!bg-zinc-800 !border-none !p-3 rounded-md',
-        !isValid && phone.length > 0 ? '!border !border-red-500 ring-1 ring-red-500' : '',
+        'w-full !p-3 rounded-md transition-colors',
+        !$attrs.class ? '!bg-zinc-200 dark:!bg-zinc-800 !border-none' : '',
+        $attrs.class,
+        !isValid && phone.length > 0 ? '!border !border-red-500 ring-1 ring-red-500' : ''
       ]"
       @input="handleInput"
     />

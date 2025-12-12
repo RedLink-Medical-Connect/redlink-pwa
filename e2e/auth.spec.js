@@ -26,7 +26,7 @@ test.describe('🔴 RedLink - Suite de Tests Complète (Auth & Rôles)', () => {
     await expect(page).toHaveURL(/.*login/); // Doit être redirigé
 
     // Test d'accès interdit (Profil)
-    await page.goto('/profile');
+    await page.goto('/dashboard/profile');
     await expect(page).toHaveURL(/.*login/);
 
     // Test de la page Login
@@ -113,7 +113,7 @@ test.describe('🔴 RedLink - Suite de Tests Complète (Auth & Rôles)', () => {
     await expect(page.getByRole('link', { name: /Donneurs|Donors/i })).toBeVisible();
 
     // 3. Test Sécurité Croisée : Essayer d'aller sur le profil owner
-    await page.goto('/profile');
+    await page.goto('/dashboard/profile');
     // Doit être renvoyé sur le dashboard
     await expect(page).toHaveURL(/.*dashboard\/requests/);
   });

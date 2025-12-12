@@ -7,18 +7,15 @@ export function usePassword() {
   const password = ref('')
   const confirmPassword = ref('')
 
-  // Vérifie la longueur
   const isValid = computed(() => {
-    if (!password.value) return true // Pas d'erreur si vide (UX)
+    if (!password.value) return true
     return password.value.length >= 8
   })
 
-  // Vérifie la correspondance
   const doMatch = computed(() => {
     return password.value === confirmPassword.value
   })
 
-  // Fonction de validation globale pour le submit
   const validate = () => {
     if (!isValid.value) return t('errors.password_length')
     if (!doMatch.value) return t('errors.passwords_not_match')

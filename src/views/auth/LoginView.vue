@@ -2,20 +2,17 @@
 import { ref, watch } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useI18n } from 'vue-i18n'
-// Auto-import: Button, InputText, Password, Message
 
 const auth = useAuthStore()
 const { t } = useI18n()
 const email = ref('')
 const password = ref('')
 
-// 1. UX : On efface l'erreur dès que l'utilisateur modifie un champ
 watch([email, password], () => {
   if (auth.error) auth.clearError()
 })
 
 const handleLogin = async () => {
-  // 2. Sécurité : Validation locale avant envoi
   if (!email.value || !password.value) {
     auth.setError(t('errors.fill_all_fields'))
     return
@@ -30,7 +27,7 @@ const handleLogin = async () => {
     <div class="hidden md:block relative h-[500px] w-full rounded-sm overflow-hidden shadow-2xl">
       <img
         src="https://images.unsplash.com/photo-1576201836106-db1758fd1c97?q=80&w=2070&auto=format&fit=crop"
-        alt="Vétérinaire et chien"
+        :alt="$t('auth.login.image_alt')"
         class="absolute inset-0 w-full h-full object-cover"
       />
       <div class="absolute inset-0 bg-black/10"></div>
