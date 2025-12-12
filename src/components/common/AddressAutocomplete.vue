@@ -3,6 +3,10 @@ import { ref } from 'vue'
 import AutoComplete from 'primevue/autocomplete'
 import { Geo } from '@aws-amplify/geo'
 
+defineOptions({
+  inheritAttrs: false,
+})
+
 const emit = defineEmits(['update:modelValue', 'select'])
 const props = defineProps({
   modelValue: {
@@ -36,7 +40,7 @@ const onSelect = (event) => {
   const data = {
     address: place.label,
     latitude: place.geometry.point[1],
-    longitude: place.geometry.point[0]
+    longitude: place.geometry.point[0],
   }
 
   emit('update:modelValue', place.label)
@@ -50,9 +54,13 @@ const onSelect = (event) => {
       v-model="selectedAddress"
       :suggestions="suggestions"
       option-label="label"
-      placeholder="Entrez votre adresse..."
+      :placeholder="$t('common.address_placeholder')"
       class="w-full"
-      input-class="w-full !bg-zinc-200 dark:!bg-zinc-800 !border-none !p-3 rounded-md"
+      :input-class="[
+        'w-full !p-3 rounded-md transition-colors',
+        !$attrs.class ? '!bg-zinc-200 dark:!bg-zinc-800 !border-none' : '',
+        $attrs.class,
+      ]"
       @complete="searchAddress"
       @item-select="onSelect"
       @input="emit('update:modelValue', $event.target.value)"

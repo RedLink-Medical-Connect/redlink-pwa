@@ -1,11 +1,13 @@
 <script setup>
 import { ref, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { loadStripe } from '@stripe/stripe-js'
 import { post } from 'aws-amplify/api' // Nouvelle méthode Amplify v6
 
 // VOTRE CLÉ PUBLIQUE (pk_test_...) - Celle-ci peut être publique
 const stripePromise = loadStripe('pk_test_51Sc1gTL3JgDp3G6ikoJ7E6OlL2ugf2lCaEWoJY1rNUiIJ1OkqilXLrryn8md5I9xfZgBvIfuYWuZraqu4UXzbQiB00ARTIBMOh')
 
+const { t } = useI18n()
 const cardElement = ref(null)
 const stripe = ref(null)
 const elements = ref(null)
@@ -23,7 +25,7 @@ onMounted(async () => {
 
 const handlePayment = async () => {
   loading.value = true
-  message.value = 'Initialisation...'
+  message.value = t('testStripe.initializing')
 
   try {
     // 1. Appeler notre API AWS pour avoir l'autorisation
@@ -45,17 +47,17 @@ const handlePayment = async () => {
     })
 
     if (result.error) {
-      message.value = `Erreur : ${result.error.message}`
+      message.value = t('testStripe.error', { message: result.error.message })
     } else {
       if (result.paymentIntent.status === 'requires_capture') {
-        message.value = 'SUCCÈS ! 50€ sont bloqués (Pre-Auth) ! Vérifiez votre Dashboard Stripe.'
+        message.value = t('testStripe.success')
       } else {
-        message.value = `Statut inattendu : ${result.paymentIntent.status}`
+        message.value = t('testStripe.unexpected_status', { status: result.paymentIntent.status })
       }
     }
   } catch (err) {
     console.error(err)
-    message.value = "Erreur technique : " + err.message
+    message.value = t('testStripe.technical_error', { message: err.message })
   } finally {
     loading.value = false
   }
@@ -64,7 +66,7 @@ const handlePayment = async () => {
 
 <template>
   <div class="p-10 max-w-md mx-auto">
-    <h1 class="text-2xl font-bold mb-6">Test Empreinte Bancaire (50€)</h1>
+    <h1 class="text-2xl font-bold mb-6">{{ $t('testStripe.title') }}</h1>
 
     <div class="bg-white p-4 rounded border border-gray-300 mb-6">
       <div ref="cardElement"></div>
@@ -75,7 +77,7 @@ const handlePayment = async () => {
       @click="handlePayment"
       :disabled="loading"
     >
-      {{ loading ? 'Traitement...' : 'Bloquer 50€' }}
+      {{ loading ? $t('testStripe.processing') : $t('testStripe.cta') }}
     </button>
 
     <div v-if="message" class="mt-6 p-4 rounded bg-gray-100 text-sm font-mono">

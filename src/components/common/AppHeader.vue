@@ -20,7 +20,6 @@ const { currentMenuItems } = useMenu()
 const languages = ref([
   { label: 'FR', value: 'fr' },
   { label: 'EN', value: 'en' },
-  // { label: 'ES', value: 'es' } // Facile à ajouter plus tard
 ])
 
 watch(locale, (newLang) => {
@@ -31,8 +30,7 @@ const menuItems = computed(() => {
   const items = []
 
   items.push({
-    label:
-      auth.user?.attributes?.name || (auth.currentRole === 'vet' ? 'Vétérinaire' : 'Propriétaire'),
+    label: auth.user?.attributes?.name || t(auth.currentRole === 'vet' ? 'roles.vet' : 'roles.owner'),
     icon: 'pi pi-user',
     disabled: true,
     class: 'font-bold opacity-100 mb-2',
@@ -123,12 +121,13 @@ const toggleMenu = (event) => {
             />
             <Button
               v-if="auth.currentRole === 'owner'"
+              as="router-link"
+              to="/dashboard/animals/add"
               :label="$t('layout.header.add_animal')"
               icon="pi pi-plus"
               variant="outlined"
               class="!text-[#ff3b4e] !border-[#ff3b4e] hover:!bg-red-50 dark:hover:!bg-red-900/10 font-bold !px-4"
               size="small"
-              @click="router.push('/profile')"
             />
           </div>
         </div>

@@ -38,20 +38,20 @@ export function useMenu() {
     {
       label: 'dashboard.owner.tabs.general',
       icon: 'pi pi-user',
-      to: '/profile',
-      command: () => router.push('/profile')
+      to: '/dashboard/profile',
+      command: () => router.push('/dashboard/profile')
     },
     {
       label: 'dashboard.owner.tabs.animals',
       icon: 'pi pi-heart',
-      to: '/profile?tab=animals',
-      command: () => router.push('/profile?tab=animals')
+      to: '/dashboard/animals',
+      command: () => router.push('/dashboard/animals')
     },
     {
       label: 'dashboard.owner.tabs.availability',
       icon: 'pi pi-calendar',
-      to: '/profile?tab=availability',
-      command: () => router.push('/profile?tab=availability')
+      to: '/dashboard/availability',
+      command: () => router.push('/dashboard/availability')
     }
   ])
 
