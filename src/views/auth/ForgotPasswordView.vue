@@ -2,7 +2,6 @@
 import { ref, watch } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useI18n } from 'vue-i18n'
-// Auto-import: InputText, Button, Password, InputOtp, Message
 
 const auth = useAuthStore()
 const { t } = useI18n()
@@ -12,26 +11,22 @@ const email = ref('')
 const code = ref('')
 const newPassword = ref('')
 
-// 1. UX : Nettoyage automatique des erreurs quand l'utilisateur tape
 watch([email, code, newPassword], () => {
   if (auth.error) auth.clearError()
 })
 
-// Étape 1 : Demander le code
 const handleSendCode = async () => {
   if (!email.value) {
     auth.setError(t('errors.enter_email'))
     return
   }
 
-  // Si l'envoi réussit, on passe à l'étape 2
   if (await auth.forgotPass(email.value)) {
-    auth.clearError() // On nettoie les erreurs potentielles avant l'étape 2
+    auth.clearError()
     step.value = 2
   }
 }
 
-// Étape 2 : Valider le nouveau mot de passe
 const handleReset = async () => {
   if (!code.value || !newPassword.value) {
     auth.setError(t('errors.fill_code_password'))

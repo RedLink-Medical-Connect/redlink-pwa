@@ -76,7 +76,7 @@ export const useAuthStore = defineStore('auth', () => {
         if (currentRole.value === 'vet') {
           await router.push('/dashboard/requests')
         } else if (currentRole.value === 'owner') {
-          await router.push('/profile')
+          await router.push('/dashboard/profile')
         } else {
           await router.push('/') // Fallback
         }

@@ -11,6 +11,12 @@
     "view": "Voir",
     "loading": "Chargement...",
     "sending": "Envoi...",
+    "address_placeholder": "Entrez votre adresse...",
+    "error": "Erreur",
+    "success": "Succès",
+    "deleted": "Supprimé",
+    "yes": "Oui",
+    "no": "Non",
     "weight": "Poids",
     "age": "Âge",
     "years": "ans",
@@ -36,7 +42,20 @@
     "reset_password_failed": "Code invalide ou erreur système.",
     "invalid_phone": "Numéro invalide.",
     "invalid_address": "Veuillez sélectionner une adresse valide dans la liste.",
-    "delete_account_failed": "Impossible de supprimer le compte pour le moment."
+    "delete_account_failed": "Impossible de supprimer le compte pour le moment.",
+    "session_expired": "Session expirée.",
+    "password_required": "Mot de passe requis.",
+    "owner_profile_missing": "Profil propriétaire introuvable.",
+    "auth_required": "Vous devez être connecté.",
+    "generic": "Une erreur inattendue est survenue.",
+    "technical_with_message": "Erreur technique : {message}",
+    "unknown": "Erreur inconnue.",
+    "animals_load_failed": "Impossible de charger la liste des animaux.",
+    "animal_save_failed": "Échec de la sauvegarde.",
+    "animal_delete_failed": "Impossible de supprimer l'animal.",
+    "profile_load_failed": "Impossible de charger le profil.",
+    "profile_save_failed": "Impossible de sauvegarder le profil.",
+    "profile_delete_failed": "Impossible de supprimer le compte."
   },
   "roles": {
     "vet": "Clinique",
@@ -122,7 +141,9 @@
       "send": "OK",
       "rights_reserved": "Tous droits réservés.",
       "made_with": "Fait avec",
-      "in_france": "en France"
+    "in_france": "en France",
+    "company": "RedLink SAS",
+    "version": "v1.0.0"
     },
     "mobile": {
       "home": "Accueil",
@@ -138,7 +159,8 @@
       "forgot_password": "MOT DE PASSE OUBLIÉ ?",
       "btn": "SE CONNECTER",
       "no_account": "VOUS N'AVEZ PAS DE COMPTE ?",
-      "create_account": "CRÉEZ-EN UN ICI"
+      "create_account": "CRÉEZ-EN UN ICI",
+      "image_alt": "Vétérinaire et chien"
     },
     "verify": {
       "title": "VÉRIFICATION",
@@ -148,7 +170,9 @@
       "resend": "RENVOYER LE CODE",
       "resend_loading": "Envoi en cours...",
       "resend_success": "Un nouveau code a été envoyé !",
-      "db_creation_error": "Compte créé mais erreur lors de la configuration du profil."
+      "db_creation_error": "Compte créé mais erreur lors de la configuration du profil.",
+      "password_label": "Confirmez votre mot de passe",
+      "password_placeholder": "Requis après rechargement"
     },
     "forgot": {
       "title": "MOT DE PASSE OUBLIÉ",
@@ -288,7 +312,53 @@
         "add_btn": "AJOUTER UN ANIMAL",
         "edit": "Modifier",
         "weight": "Poids",
-        "age": "ans"
+        "age": "ans",
+        "title": "Mes Animaux",
+        "subtitle": "Gérez les profils de vos compagnons donneurs.",
+        "add_card": "Ajouter un animal",
+        "unknown_breed": "Race inconnue",
+        "weight_label": "Poids",
+        "age_label": "Âge",
+        "dialog": {
+          "edit_title": "Modifier la fiche",
+          "delete_title": "Confirmation",
+          "delete_confirm": "Voulez-vous vraiment supprimer cet animal ?",
+          "delete_confirm_yes": "Oui, supprimer"
+        },
+        "frequency": {
+          "asap": "Dès que possible",
+          "twice_year": "2 fois par an",
+          "once_year": "1 fois par an"
+        },
+        "form": {
+          "name": "Nom",
+          "name_placeholder": "Rex",
+          "species": "Espèce",
+          "breed": "Race",
+          "breed_optional": "Race (Optionnel)",
+          "breed_placeholder": "Labrador",
+          "birthdate": "Date de naissance",
+          "weight": "Poids",
+          "weight_label": "Poids (kg)",
+          "blood_group": "Groupe sanguin",
+          "blood_group_placeholder": "DEA 1.1, Inconnu...",
+          "donation_frequency": "Fréquence de don",
+          "vaccinated": "Vacciné",
+          "vaccinated_required": "Vaccinations à jour (Obligatoire)",
+          "sterilized": "Stérilisé"
+        },
+        "toasts": {
+          "load_failed": "Impossible de charger la liste des animaux.",
+          "saved": "Fiche mise à jour",
+          "save_failed": "Échec de la sauvegarde",
+          "deleted": "Animal retiré",
+          "delete_failed": "Impossible de supprimer l'animal"
+        },
+        "add": {
+          "title": "Ajouter un animal",
+          "subtitle": "Remplissez la fiche de votre compagnon pour sauver des vies.",
+          "submit": "Enregistrer l'animal"
+        }
       },
       "availability": {
         "title": "Zone d'intervention",
@@ -299,6 +369,25 @@
         "vacation_mode_desc": "Vous ne recevrez aucune notification tant que ce mode est actif.",
         "min_distance": "5 km",
         "max_distance": "100 km"
+      }
+    },
+    "profile": {
+      "address_label": "Adresse postale",
+      "distance_label": "Distance :",
+      "dialog": {
+        "title": "Attention !",
+        "confirm": "Êtes-vous sûr ? Cette action est irréversible.",
+        "confirm_action": "Confirmer"
+      },
+      "danger_zone": "Zone de danger",
+      "danger_desc": "La suppression est définitive.",
+      "delete_account": "Supprimer mon compte",
+      "toasts": {
+        "saved": "Profil mis à jour",
+        "save_failed": "Échec de la sauvegarde",
+        "deleted": "Compte supprimé.",
+        "delete_failed": "Impossible de supprimer le compte",
+        "load_failed": "Impossible de charger le profil"
       }
     },
     "settings": {
@@ -370,5 +459,15 @@
     "vacation": "Mode vacances",
     "profile": "Mon profil",
     "logout": "Se déconnecter"
+  },
+  "testStripe": {
+    "title": "Test empreinte bancaire (50€)",
+    "initializing": "Initialisation...",
+    "processing": "Traitement...",
+    "cta": "Bloquer 50€",
+    "success": "SUCCÈS ! 50€ sont bloqués (Pre-Auth) ! Vérifiez votre Dashboard Stripe.",
+    "error": "Erreur : {message}",
+    "unexpected_status": "Statut inattendu : {status}",
+    "technical_error": "Erreur technique : {message}"
   }
 }

@@ -40,7 +40,7 @@ onMounted(() => {
       registrationData = JSON.parse(local)
       showPasswordInput.value = true
     } else {
-      auth.setError("Session expirée.")
+      auth.setError(t('errors.session_expired'))
       setTimeout(() => router.push('/register/selection'), 2000)
     }
   }
@@ -49,7 +49,7 @@ onMounted(() => {
 const handleVerify = async () => {
   if (code.value.length < 6) return
   if (showPasswordInput.value && !confirmPassword.value) {
-    auth.setError("Mot de passe requis.")
+    auth.setError(t('errors.password_required'))
     return
   }
 
@@ -73,7 +73,6 @@ const handleVerify = async () => {
     const data = registrationData
 
     if (data.role === 'owner') {
-      // --- PROPRIÉTAIRE ---
       const ownerRes = await client.graphql({
         query: createOwnerSimple,
         variables: { input: {
@@ -119,7 +118,6 @@ const handleVerify = async () => {
       })
 
     } else if (data.role === 'vet') {
-      // --- VÉTO ---
       const clinicRes = await client.graphql({
         query: createClinicSimple,
         variables: { input: {
@@ -149,14 +147,14 @@ const handleVerify = async () => {
 
     auth.clearTempRegistrationData()
     localStorage.removeItem('temp_register_safe_data')
-    router.push('/dashboard')
+    await router.push('/dashboard')
 
   } catch (err) {
-    console.error("Erreur Inscription:", err)
+    console.error('Erreur Inscription:', err)
     if (err.errors && err.errors.length > 0) {
-      auth.setError(`Erreur technique : ${err.errors[0].message}`)
+      auth.setError(t('errors.technical_with_message', { message: err.errors[0].message }))
     } else {
-      auth.setError(err.message || "Erreur inconnue.")
+      auth.setError(err.message || t('errors.unknown'))
     }
   } finally {
     auth.isLoading = false
@@ -226,13 +224,13 @@ const handleResend = async () => {
 
       <div v-if="showPasswordInput" class="mb-6 text-left animate-fade-in bg-yellow-50 dark:bg-yellow-900/10 p-4 rounded-lg border border-yellow-200 dark:border-yellow-800/30">
         <label class="block text-xs font-bold uppercase text-yellow-700 dark:text-yellow-500 mb-2 ml-1">
-          Confirmez votre mot de passe
+          {{ $t('auth.verify.password_label') }}
         </label>
         <Password
           v-model="confirmPassword"
           :feedback="false"
           toggle-mask
-          placeholder="Requis suite au rechargement"
+          :placeholder="$t('auth.verify.password_placeholder')"
           class="w-full"
           input-class="w-full !bg-white dark:!bg-zinc-900 !border-none !text-zinc-900 dark:!text-white !p-3 rounded-md shadow-sm"
         />

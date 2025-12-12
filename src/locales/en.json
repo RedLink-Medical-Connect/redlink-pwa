@@ -11,6 +11,12 @@
     "view": "View",
     "loading": "Loading...",
     "sending": "Sending...",
+    "address_placeholder": "Enter your address...",
+    "error": "Error",
+    "success": "Success",
+    "deleted": "Deleted",
+    "yes": "Yes",
+    "no": "No",
     "weight": "Weight",
     "age": "Age",
     "years": "years",
@@ -36,7 +42,20 @@
     "reset_password_failed": "Invalid code or system error.",
     "invalid_phone": "Invalid phone number.",
     "invalid_address": "Please select a valid address from the list.",
-    "delete_account_failed": "Unable to delete the account right now."
+    "delete_account_failed": "Unable to delete the account right now.",
+    "session_expired": "Session expired.",
+    "password_required": "Password required.",
+    "owner_profile_missing": "Owner profile not found.",
+    "auth_required": "You must be logged in.",
+    "generic": "An unexpected error occurred.",
+    "technical_with_message": "Technical error: {message}",
+    "unknown": "Unknown error.",
+    "animals_load_failed": "Unable to load the animal list.",
+    "animal_save_failed": "Save failed.",
+    "animal_delete_failed": "Unable to delete the animal.",
+    "profile_load_failed": "Unable to load the profile.",
+    "profile_save_failed": "Unable to save the profile.",
+    "profile_delete_failed": "Unable to delete the account."
   },
   "roles": {
     "vet": "Clinic",
@@ -122,7 +141,9 @@
       "send": "OK",
       "rights_reserved": "All rights reserved.",
       "made_with": "Made with",
-      "in_france": "in France"
+    "in_france": "in France",
+    "company": "RedLink SAS",
+    "version": "v1.0.0"
     },
     "mobile": {
       "home": "Home",
@@ -151,7 +172,8 @@
       "forgot_password": "FORGOT PASSWORD?",
       "btn": "LOG IN",
       "no_account": "DON'T HAVE AN ACCOUNT?",
-      "create_account": "CREATE ONE HERE"
+      "create_account": "CREATE ONE HERE",
+      "image_alt": "Veterinarian and dog"
     },
     "verify": {
       "title": "VERIFICATION",
@@ -161,7 +183,9 @@
       "resend": "RESEND CODE",
       "resend_loading": "Sending...",
       "resend_success": "A new code has been sent!",
-      "db_creation_error": "Account created but profile setup failed."
+      "db_creation_error": "Account created but profile setup failed.",
+      "password_label": "Confirm your password",
+      "password_placeholder": "Required after reload"
     },
     "forgot": {
       "title": "FORGOT PASSWORD",
@@ -288,7 +312,53 @@
         "add_btn": "ADD ANIMAL",
         "edit": "Edit",
         "weight": "Weight",
-        "age": "years"
+        "age": "years",
+        "title": "My Animals",
+        "subtitle": "Manage your donor pets.",
+        "add_card": "Add an animal",
+        "unknown_breed": "Unknown breed",
+        "weight_label": "Weight",
+        "age_label": "Age",
+        "dialog": {
+          "edit_title": "Edit record",
+          "delete_title": "Confirmation",
+          "delete_confirm": "Do you really want to delete this animal?",
+          "delete_confirm_yes": "Yes, delete"
+        },
+        "frequency": {
+          "asap": "As soon as possible",
+          "twice_year": "Twice a year",
+          "once_year": "Once a year"
+        },
+        "form": {
+          "name": "Name",
+          "name_placeholder": "Rex",
+          "species": "Species",
+          "breed": "Breed",
+          "breed_optional": "Breed (optional)",
+          "breed_placeholder": "Labrador",
+          "birthdate": "Birth date",
+          "weight": "Weight",
+          "weight_label": "Weight (kg)",
+          "blood_group": "Blood group",
+          "blood_group_placeholder": "DEA 1.1, Unknown...",
+          "donation_frequency": "Donation frequency",
+          "vaccinated": "Vaccinated",
+          "vaccinated_required": "Vaccinations up to date (Required)",
+          "sterilized": "Sterilized"
+        },
+        "toasts": {
+          "load_failed": "Unable to load the animal list.",
+          "saved": "Record updated",
+          "save_failed": "Save failed",
+          "deleted": "Animal removed",
+          "delete_failed": "Unable to delete the animal"
+        },
+        "add": {
+          "title": "Add an animal",
+          "subtitle": "Fill in your companion's profile to save lives.",
+          "submit": "Save the animal"
+        }
       },
       "availability": {
         "title": "Intervention area",
@@ -299,6 +369,25 @@
         "vacation_mode_desc": "You will not receive any notifications while this mode is enabled.",
         "min_distance": "5 km",
         "max_distance": "100 km"
+      }
+    },
+    "profile": {
+      "address_label": "Postal address",
+      "distance_label": "Distance:",
+      "dialog": {
+        "title": "Warning!",
+        "confirm": "Are you sure? This action is irreversible.",
+        "confirm_action": "Confirm"
+      },
+      "danger_zone": "Danger zone",
+      "danger_desc": "Deletion is permanent.",
+      "delete_account": "Delete my account",
+      "toasts": {
+        "saved": "Profile updated",
+        "save_failed": "Save failed",
+        "deleted": "Account deleted.",
+        "delete_failed": "Unable to delete the account",
+        "load_failed": "Unable to load the profile"
       }
     },
     "settings": {
@@ -370,5 +459,15 @@
     "vacation": "Vacation Mode",
     "profile": "My Profile",
     "logout": "Log out"
+  },
+  "testStripe": {
+    "title": "Payment hold test (€50)",
+    "initializing": "Initializing...",
+    "processing": "Processing...",
+    "cta": "Hold €50",
+    "success": "SUCCESS! €50 have been held (Pre-Auth). Check your Stripe Dashboard.",
+    "error": "Error: {message}",
+    "unexpected_status": "Unexpected status: {status}",
+    "technical_error": "Technical error: {message}"
   }
 }

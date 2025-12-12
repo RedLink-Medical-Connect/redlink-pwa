@@ -4,7 +4,6 @@ import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { usePassword } from '@/composables/usePassword'
 import { useI18n } from 'vue-i18n'
-// Composants intelligents
 import AddressAutocomplete from '@/components/common/AddressAutocomplete.vue'
 import PhoneInput from '@/components/common/PhoneInput.vue'
 
@@ -12,19 +11,16 @@ const auth = useAuthStore()
 const { t } = useI18n()
 const router = useRouter()
 
-// Logique mot de passe
 const { password, confirmPassword, isValid: isPasswordValid, validate: validatePassword } = usePassword()
 
 const step = ref(1)
 const isLoading = ref(false)
 
 const form = ref({
-  // Vétérinaire (Admin)
   lastname: '',
   firstname: '',
   email: '',
 
-  // Clinique
   clinic_name: '',
   rpps: '',
   phone: '',
@@ -34,7 +30,6 @@ const form = ref({
 })
 
 const nextStep = () => {
-  // Validation Étape 1
   if (!form.value.lastname || !form.value.firstname || !form.value.email || !password.value) {
     auth.setError(t('errors.fill_required_fields'))
     return
