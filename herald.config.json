@@ -9,5 +9,5 @@
       "floating-promise"
     ]
   },
-  "ignore": ["src/graphql/**/*.js", "amplify/**/*.json", "dist/**", "node_modules/**"]
+  "ignore": ["src/graphql/**/*.js", "amplify/**/*.json", "dist/**", "node_modules/**", "src/locales/**"]
 }
