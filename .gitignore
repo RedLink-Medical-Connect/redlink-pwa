@@ -68,3 +68,6 @@ amplifytools.xcconfig
 .env
 .env.local
 .env.*.local
+
+# Fichiers sensibles Amplify
+amplify/team-provider-info.json
