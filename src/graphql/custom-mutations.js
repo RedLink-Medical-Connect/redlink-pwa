@@ -14,6 +14,15 @@ export const createClinicSimple = /* GraphQL */ `
   }
 `;
 
+export const deleteClinicSimple = /* GraphQL */ `
+  mutation DeleteClinic($input: DeleteClinicInput!) {
+    deleteClinic(input: $input) {
+      id
+      # On ne demande rien d'autre !
+    }
+  }
+`
+
 export const createVeterinarianSimple = /* GraphQL */ `
   mutation CreateVeterinarian($input: CreateVeterinarianInput!) {
     createVeterinarian(input: $input) {
@@ -22,6 +31,26 @@ export const createVeterinarianSimple = /* GraphQL */ `
   }
 `;
 
+export const updateVeterinarianSimple = /* GraphQL */ `
+  mutation UpdateVeterinarian($input: UpdateVeterinarianInput!) {
+    updateVeterinarian(input: $input) {
+      id
+      firstname
+      lastname
+      email
+      updatedAt
+    }
+  }
+`;
+
+export const deleteVeterinarianSimple = /* GraphQL */ `
+  mutation DeleteVeterinarian($input: DeleteVeterinarianInput!) {
+    deleteVeterinarian(input: $input) {
+      id
+      # On ne demande rien d'autre !
+    }
+  }
+`
 export const createAnimalSimple = /* GraphQL */ `
   mutation CreateAnimal($input: CreateAnimalInput!) {
     createAnimal(input: $input) {

@@ -90,8 +90,7 @@ const handleRegister = async () => {
     const safePayload = { ...payload }
     localStorage.setItem('temp_register_safe_data', JSON.stringify(safePayload))
 
-    // 3. Redirection
-    router.push({ name: 'verify-email', query: { email: form.value.email } })
+    await router.push({ name: 'verify-email', query: { email: form.value.email } })
   } catch (err) {
     console.error(err)
     auth.setError(err.message || t('errors.registration_failed'))
@@ -288,11 +287,5 @@ const handleRegister = async () => {
     opacity: 1;
     transform: translateY(0);
   }
-}
-</style>
-
-<style scoped>
-.animate-fade-in {
-  animation: fadeIn 0.5s ease-out;
 }
 </style>
