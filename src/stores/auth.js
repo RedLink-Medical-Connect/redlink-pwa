@@ -14,71 +14,54 @@ import {
 import router from '@/router'
 
 export const useAuthStore = defineStore('auth', () => {
-  // --- ÉTAT (STATE) ---
   const user = ref(null)
   const isLoading = ref(false)
   const error = ref(null)
-
-  // Variable locale pour le test (Sélecteur du Header)
-  // Elle est écrasée par le vrai rôle AWS une fois connecté
   const role = ref('owner')
 
-  // --- GETTERS ---
   const isAuthenticated = computed(() => !!user.value)
 
-  // Le Cerveau : Détermine le rôle actif (AWS prioritaire, sinon Test)
   const currentRole = computed(() => {
-    // 1. Si connecté, on lit le champ 'profile' d'AWS
     if (user.value?.attributes?.profile) {
       return user.value.attributes.profile
     }
-    // 2. Sinon, on utilise la valeur du sélecteur de test
     return role.value
   })
   const tempRegistrationData = ref(null)
 
-  // 2. Action pour sauvegarder
   function setTempRegistrationData(data) {
     tempRegistrationData.value = data
   }
 
-  // 3. Action pour nettoyer
   function clearTempRegistrationData() {
     tempRegistrationData.value = null
   }
 
-  // 1. Initialisation (Au chargement de l'app ou F5)
   async function init() {
     try {
       const currentUser = await getCurrentUser()
-      // On doit faire un 2ème appel pour avoir les attributs (email, profile, etc.)
       const attributes = await fetchUserAttributes()
 
-      // On stocke tout dans l'objet user
       user.value = { ...currentUser, attributes }
     } catch {
-      // Pas d'erreur ici, c'est juste que l'utilisateur n'est pas connecté
       user.value = null
     }
   }
 
-  // 2. Connexion
   async function login(email, password) {
     isLoading.value = true
     error.value = null
     try {
       const { isSignedIn } = await signIn({ username: email, password })
       if (isSignedIn) {
-        // On charge le profil pour savoir qui c'est (Véto ou Proprio)
         await init()
 
-        // AIGUILLAGE AUTOMATIQUE
         if (currentRole.value === 'vet') {
           await router.push('/dashboard/requests')
         } else if (currentRole.value === 'owner') {
           await router.push('/dashboard/profile')
         } else {
-          await router.push('/') // Fallback
+          await router.push('/')
         }
       }
     } catch (err) {
@@ -89,7 +72,6 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  // 3. Inscription
   async function register(email, password, name, roleType) {
     isLoading.value = true
     error.value = null
@@ -101,13 +83,10 @@ export const useAuthStore = defineStore('auth', () => {
           userAttributes: {
             email,
             name,
-            // ICI : On utilise 'profile' au lieu de 'custom:role'
-            // car c'est un champ standard autorisé par votre config AWS
             profile: roleType
           }
         }
       })
-      // Redirection vers vérification
       await router.push(`/verify-email?email=${encodeURIComponent(email)}`)
     } catch (err) {
       console.error(err)
@@ -121,7 +100,6 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  // 4. Confirmation Email
   async function confirmRegistration(email, code) {
     isLoading.value = true
     error.value = null
@@ -141,7 +119,6 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  // 5. Mot de passe oublié (Demande)
   async function forgotPass(email) {
     isLoading.value = true
     error.value = null
@@ -157,7 +134,6 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  // 6. Mot de passe oublié (Validation)
   async function resetPassSubmit(email, code, newPassword) {
     isLoading.value = true
     error.value = null
@@ -176,7 +152,6 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  // 7. Déconnexion
   async function logout() {
     try {
       await signOut()
@@ -193,7 +168,7 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       await deleteUser()
       user.value = null
-      router.push('/login')
+      await router.push('/login')
       return true
     } catch (err) {
       console.error(err)
@@ -204,7 +179,6 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  // Actions pour gérer les erreurs depuis l'extérieur du store
   function clearError() {
     error.value = null
   }

@@ -95,6 +95,7 @@ export const getClinicAvailability = /* GraphQL */ `
       createdAt
       updatedAt
       clinicAvailabilitiesId
+      owner
       __typename
     }
   }
@@ -119,6 +120,7 @@ export const listClinicAvailabilities = /* GraphQL */ `
         createdAt
         updatedAt
         clinicAvailabilitiesId
+        owner
         __typename
       }
       nextToken
@@ -501,6 +503,7 @@ export const getRequest = /* GraphQL */ `
       updatedAt
       clinicRequestsId
       requestMissionId
+      owner
       __typename
     }
   }
@@ -524,6 +527,7 @@ export const listRequests = /* GraphQL */ `
         updatedAt
         clinicRequestsId
         requestMissionId
+        owner
         __typename
       }
       nextToken
@@ -637,6 +641,7 @@ export const clinicAvailabilitiesByClinicID = /* GraphQL */ `
         createdAt
         updatedAt
         clinicAvailabilitiesId
+        owner
         __typename
       }
       nextToken
@@ -834,6 +839,7 @@ export const requestsByClinicID = /* GraphQL */ `
         updatedAt
         clinicRequestsId
         requestMissionId
+        owner
         __typename
       }
       nextToken

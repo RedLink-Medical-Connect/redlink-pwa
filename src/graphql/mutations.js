@@ -152,6 +152,7 @@ export const createClinicAvailability = /* GraphQL */ `
       createdAt
       updatedAt
       clinicAvailabilitiesId
+      owner
       __typename
     }
   }
@@ -187,6 +188,7 @@ export const updateClinicAvailability = /* GraphQL */ `
       createdAt
       updatedAt
       clinicAvailabilitiesId
+      owner
       __typename
     }
   }
@@ -222,6 +224,7 @@ export const deleteClinicAvailability = /* GraphQL */ `
       createdAt
       updatedAt
       clinicAvailabilitiesId
+      owner
       __typename
     }
   }
@@ -893,6 +896,7 @@ export const createRequest = /* GraphQL */ `
       updatedAt
       clinicRequestsId
       requestMissionId
+      owner
       __typename
     }
   }
@@ -949,6 +953,7 @@ export const updateRequest = /* GraphQL */ `
       updatedAt
       clinicRequestsId
       requestMissionId
+      owner
       __typename
     }
   }
@@ -1005,6 +1010,7 @@ export const deleteRequest = /* GraphQL */ `
       updatedAt
       clinicRequestsId
       requestMissionId
+      owner
       __typename
     }
   }

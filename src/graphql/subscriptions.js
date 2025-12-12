@@ -124,8 +124,9 @@ export const onDeleteClinic = /* GraphQL */ `
 export const onCreateClinicAvailability = /* GraphQL */ `
   subscription OnCreateClinicAvailability(
     $filter: ModelSubscriptionClinicAvailabilityFilterInput
+    $owner: String
   ) {
-    onCreateClinicAvailability(filter: $filter) {
+    onCreateClinicAvailability(filter: $filter, owner: $owner) {
       id
       dayOfWeek
       startTime
@@ -151,6 +152,7 @@ export const onCreateClinicAvailability = /* GraphQL */ `
       createdAt
       updatedAt
       clinicAvailabilitiesId
+      owner
       __typename
     }
   }
@@ -158,8 +160,9 @@ export const onCreateClinicAvailability = /* GraphQL */ `
 export const onUpdateClinicAvailability = /* GraphQL */ `
   subscription OnUpdateClinicAvailability(
     $filter: ModelSubscriptionClinicAvailabilityFilterInput
+    $owner: String
   ) {
-    onUpdateClinicAvailability(filter: $filter) {
+    onUpdateClinicAvailability(filter: $filter, owner: $owner) {
       id
       dayOfWeek
       startTime
@@ -185,6 +188,7 @@ export const onUpdateClinicAvailability = /* GraphQL */ `
       createdAt
       updatedAt
       clinicAvailabilitiesId
+      owner
       __typename
     }
   }
@@ -192,8 +196,9 @@ export const onUpdateClinicAvailability = /* GraphQL */ `
 export const onDeleteClinicAvailability = /* GraphQL */ `
   subscription OnDeleteClinicAvailability(
     $filter: ModelSubscriptionClinicAvailabilityFilterInput
+    $owner: String
   ) {
-    onDeleteClinicAvailability(filter: $filter) {
+    onDeleteClinicAvailability(filter: $filter, owner: $owner) {
       id
       dayOfWeek
       startTime
@@ -219,6 +224,7 @@ export const onDeleteClinicAvailability = /* GraphQL */ `
       createdAt
       updatedAt
       clinicAvailabilitiesId
+      owner
       __typename
     }
   }
@@ -839,8 +845,11 @@ export const onDeleteClinicOwnerRelation = /* GraphQL */ `
   }
 `;
 export const onCreateRequest = /* GraphQL */ `
-  subscription OnCreateRequest($filter: ModelSubscriptionRequestFilterInput) {
-    onCreateRequest(filter: $filter) {
+  subscription OnCreateRequest(
+    $filter: ModelSubscriptionRequestFilterInput
+    $owner: String
+  ) {
+    onCreateRequest(filter: $filter, owner: $owner) {
       id
       requestType
       requiredSpecies
@@ -887,13 +896,17 @@ export const onCreateRequest = /* GraphQL */ `
       updatedAt
       clinicRequestsId
       requestMissionId
+      owner
       __typename
     }
   }
 `;
 export const onUpdateRequest = /* GraphQL */ `
-  subscription OnUpdateRequest($filter: ModelSubscriptionRequestFilterInput) {
-    onUpdateRequest(filter: $filter) {
+  subscription OnUpdateRequest(
+    $filter: ModelSubscriptionRequestFilterInput
+    $owner: String
+  ) {
+    onUpdateRequest(filter: $filter, owner: $owner) {
       id
       requestType
       requiredSpecies
@@ -940,13 +953,17 @@ export const onUpdateRequest = /* GraphQL */ `
       updatedAt
       clinicRequestsId
       requestMissionId
+      owner
       __typename
     }
   }
 `;
 export const onDeleteRequest = /* GraphQL */ `
-  subscription OnDeleteRequest($filter: ModelSubscriptionRequestFilterInput) {
-    onDeleteRequest(filter: $filter) {
+  subscription OnDeleteRequest(
+    $filter: ModelSubscriptionRequestFilterInput
+    $owner: String
+  ) {
+    onDeleteRequest(filter: $filter, owner: $owner) {
       id
       requestType
       requiredSpecies
@@ -993,6 +1010,7 @@ export const onDeleteRequest = /* GraphQL */ `
       updatedAt
       clinicRequestsId
       requestMissionId
+      owner
       __typename
     }
   }

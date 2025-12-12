@@ -401,12 +401,27 @@
       "clinic_name": "Nom de la clinique",
       "phone": "Numéro de téléphone",
       "address": "Adresse",
-      "zip": "Code postal",
-      "city": "Ville",
+      "rpps": "Numéro RPPS",
       "email": "Email",
       "delete_account": "SUPPRIMER LE COMPTE",
       "save": "ENREGISTRER",
-      "under_construction": "Section en cours de construction..."
+      "emergency": "Nous avons un service d'urgence 7/7",
+      "under_construction": "Section en cours de construction...",
+      "firstname": "Prénom",
+      "lastname": "Nom",
+      "toasts": {
+        "load_failed": "Impossible de charger la liste des animaux.",
+        "save_clinic": "Fiche clinic mise à jour",
+        "save_vet": "Fiche vétérinaire mise à jour",
+        "save_failed": "Échec de la sauvegarde",
+        "deleted": "Compte retiré",
+        "delete_failed": "Impossible de supprimer le compte"
+      },
+      "dialog": {
+        "title": "Attention !",
+        "confirm": "Êtes-vous sûr ? Cette action est irréversible.",
+        "confirm_action": "Confirmer"
+      }
     },
     "requests": {
       "title": "Mes demandes actives",

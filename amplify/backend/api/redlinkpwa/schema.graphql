@@ -28,7 +28,8 @@ type Clinic @model @auth(rules: [
 
 type ClinicAvailability @model @auth(rules: [
   { allow: groups, groups: ["Veterinarians"] },
-  { allow: private, operations: [read] }
+  { allow: private, operations: [read] },
+  { allow: owner },
 ]) {
   id: ID!
   dayOfWeek: Int! # 1-7
@@ -129,7 +130,10 @@ type ClinicOwnerRelation @model @auth(rules: [
 # 3. OPÉRATIONS
 # ---------------------------------------------------------
 
-type Request @model @auth(rules: [{ allow: groups, groups: ["Veterinarians"] }]) {
+type Request @model @auth(rules: [
+  { allow: groups, groups: ["Veterinarians"] },
+  { allow: owner },
+]) {
   id: ID!
   requestType: RequestType!
   requiredSpecies: Species!
