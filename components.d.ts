@@ -30,6 +30,8 @@ declare module 'vue' {
     ConfirmDialog: typeof import('primevue/confirmdialog')['default']
     DashboardSidebar: typeof import('./src/components/dashboard/DashboardSidebar.vue')['default']
     DataTable: typeof import('primevue/datatable')['default']
+    DatePicker: typeof import('primevue/datepicker')['default']
+    Dialog: typeof import('primevue/dialog')['default']
     InputNumber: typeof import('primevue/inputnumber')['default']
     InputOtp: typeof import('primevue/inputotp')['default']
     InputText: typeof import('primevue/inputtext')['default']
@@ -42,7 +44,11 @@ declare module 'vue' {
     Select: typeof import('primevue/select')['default']
     Slider: typeof import('primevue/slider')['default']
     Tag: typeof import('primevue/tag')['default']
+    Textarea: typeof import('primevue/textarea')['default']
     Toast: typeof import('primevue/toast')['default']
     ToggleSwitch: typeof import('primevue/toggleswitch')['default']
+  }
+  export interface GlobalDirectives {
+    Tooltip: typeof import('primevue/tooltip')['default']
   }
 }

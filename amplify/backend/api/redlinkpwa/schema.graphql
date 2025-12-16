@@ -61,7 +61,8 @@ type Veterinarian @model @auth(rules: [
 
 type Owner @model @auth(rules: [
   { allow: owner },
-  { allow: groups, groups: ["Veterinarians"], operations: [read] }
+  { allow: groups, groups: ["Veterinarians"], operations: [read] },
+  { allow: private, operations: [read] }
 ]) {
   id: ID!
   firstname: String!
@@ -90,12 +91,13 @@ type OwnerAvailability @model @auth(rules: [
   endTime: AWSTime!
 
   ownerID: ID! @index(name: "byOwnerAvail")
-  owner: Owner @belongsTo(fields: ["ownerID"])
+  ownerProfile: Owner @belongsTo(fields: ["ownerID"])
 }
 
 type Animal @model @auth(rules: [
   { allow: owner },
-  { allow: groups, groups: ["Veterinarians"], operations: [read] }
+  { allow: groups, groups: ["Veterinarians"], operations: [read] },
+  { allow: private, operations: [read] }
 ]) {
   id: ID!
   name: String!
@@ -110,7 +112,7 @@ type Animal @model @auth(rules: [
   donationFrequency: DonationFrequency
 
   ownerID: ID! @index(name: "byOwnerAnimal")
-  owner: Owner @belongsTo(fields: ["ownerID"])
+  ownerProfile: Owner @belongsTo(fields: ["ownerID"])
   missions: [Mission] @hasMany(indexName: "byAnimalMission")
 }
 
@@ -122,7 +124,7 @@ type ClinicOwnerRelation @model @auth(rules: [
   clinicID: ID! @index(name: "byClinicClient")
   clinic: Clinic @belongsTo(fields: ["clinicID"])
   ownerID: ID! @index(name: "byOwnerClient")
-  owner: Owner @belongsTo(fields: ["ownerID"])
+  ownerProfile: Owner @belongsTo(fields: ["ownerID"])
   isPrimaryClinic: Boolean
 }
 
@@ -133,6 +135,7 @@ type ClinicOwnerRelation @model @auth(rules: [
 type Request @model @auth(rules: [
   { allow: groups, groups: ["Veterinarians"] },
   { allow: owner },
+  { allow: private, operations: [read, update] }
 ]) {
   id: ID!
   requestType: RequestType!
@@ -145,12 +148,14 @@ type Request @model @auth(rules: [
   clinicID: ID! @index(name: "byClinicRequest")
   clinic: Clinic @belongsTo(fields: ["clinicID"])
 
-  mission: Mission @hasOne
+  activeMissionID: ID
+  mission: Mission @hasOne(fields: ["activeMissionID"])
 }
 
 type Mission @model @auth(rules: [
   { allow: owner },
-  { allow: groups, groups: ["Veterinarians"] }
+  { allow: groups, groups: ["Veterinarians"] },
+  { allow: private, operations: [read] }
 ]) {
   id: ID!
   requestID: ID! @index(name: "byRequestMission")

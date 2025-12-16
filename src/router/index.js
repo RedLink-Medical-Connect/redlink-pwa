@@ -96,6 +96,11 @@ const router = createRouter({
       name: 'owner-profile',
       component: () => import('@/views/dashboard/owner/ProfileView.vue'),
       meta: { requiresAuth: true, role: 'owner' },
+    },{
+      path: '/dashboard/board',
+      name: 'owner-dashboard',
+      component: () => import('@/views/dashboard/owner/DashboardView.vue'),
+      meta: { requiresAuth: true, role: 'owner' },
     },
     {
       path: '/dashboard/animals',

@@ -4,7 +4,7 @@ export const createOwnerSimple = /* GraphQL */ `
       id
     }
   }
-`;
+`
 
 export const createClinicSimple = /* GraphQL */ `
   mutation CreateClinic($input: CreateClinicInput!) {
@@ -12,7 +12,7 @@ export const createClinicSimple = /* GraphQL */ `
       id
     }
   }
-`;
+`
 
 export const deleteClinicSimple = /* GraphQL */ `
   mutation DeleteClinic($input: DeleteClinicInput!) {
@@ -29,7 +29,7 @@ export const createVeterinarianSimple = /* GraphQL */ `
       id
     }
   }
-`;
+`
 
 export const updateVeterinarianSimple = /* GraphQL */ `
   mutation UpdateVeterinarian($input: UpdateVeterinarianInput!) {
@@ -41,7 +41,7 @@ export const updateVeterinarianSimple = /* GraphQL */ `
       updatedAt
     }
   }
-`;
+`
 
 export const deleteVeterinarianSimple = /* GraphQL */ `
   mutation DeleteVeterinarian($input: DeleteVeterinarianInput!) {
@@ -57,7 +57,7 @@ export const createAnimalSimple = /* GraphQL */ `
       id
     }
   }
-`;
+`
 
 export const createOwnerAvailabilitySimple = /* GraphQL */ `
   mutation CreateOwnerAvailability($input: CreateOwnerAvailabilityInput!) {
@@ -65,4 +65,41 @@ export const createOwnerAvailabilitySimple = /* GraphQL */ `
       id
     }
   }
-`;
+`
+
+export const createRequestSimple = /* GraphQL */ `
+  mutation CreateRequest($input: CreateRequestInput!) {
+    createRequest(input: $input) {
+      id
+      status
+    }
+  }
+`
+
+export const updateRequestStatusSimple = /* GraphQL */ `
+  mutation UpdateRequest($input: UpdateRequestInput!) {
+    updateRequest(input: $input) {
+      id
+      status
+    }
+  }
+`
+
+export const createMissionSimple = /* GraphQL */ `
+  mutation CreateMission($input: CreateMissionInput!) {
+    createMission(input: $input) {
+      id
+      status
+    }
+  }
+`
+
+export const linkRequestToMission = /* GraphQL */ `
+  mutation LinkRequestToMission($id: ID!, $activeMissionID: ID!) {
+    updateRequest(input: { id: $id, activeMissionID: $activeMissionID, status: IN_PROGRESS }) {
+      id
+      status
+      activeMissionID
+    }
+  }
+`

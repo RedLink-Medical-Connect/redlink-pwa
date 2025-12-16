@@ -465,7 +465,7 @@ export const createOwnerAvailability = /* GraphQL */ `
       startTime
       endTime
       ownerID
-      owner {
+      ownerProfile {
         id
         firstname
         lastname
@@ -484,6 +484,7 @@ export const createOwnerAvailability = /* GraphQL */ `
       createdAt
       updatedAt
       ownerAvailabilitiesId
+      owner
       __typename
     }
   }
@@ -499,7 +500,7 @@ export const updateOwnerAvailability = /* GraphQL */ `
       startTime
       endTime
       ownerID
-      owner {
+      ownerProfile {
         id
         firstname
         lastname
@@ -518,6 +519,7 @@ export const updateOwnerAvailability = /* GraphQL */ `
       createdAt
       updatedAt
       ownerAvailabilitiesId
+      owner
       __typename
     }
   }
@@ -533,7 +535,7 @@ export const deleteOwnerAvailability = /* GraphQL */ `
       startTime
       endTime
       ownerID
-      owner {
+      ownerProfile {
         id
         firstname
         lastname
@@ -552,6 +554,7 @@ export const deleteOwnerAvailability = /* GraphQL */ `
       createdAt
       updatedAt
       ownerAvailabilitiesId
+      owner
       __typename
     }
   }
@@ -574,7 +577,7 @@ export const createAnimal = /* GraphQL */ `
       lastDonationDate
       donationFrequency
       ownerID
-      owner {
+      ownerProfile {
         id
         firstname
         lastname
@@ -597,6 +600,7 @@ export const createAnimal = /* GraphQL */ `
       createdAt
       updatedAt
       ownerAnimalsId
+      owner
       __typename
     }
   }
@@ -619,7 +623,7 @@ export const updateAnimal = /* GraphQL */ `
       lastDonationDate
       donationFrequency
       ownerID
-      owner {
+      ownerProfile {
         id
         firstname
         lastname
@@ -642,6 +646,7 @@ export const updateAnimal = /* GraphQL */ `
       createdAt
       updatedAt
       ownerAnimalsId
+      owner
       __typename
     }
   }
@@ -664,7 +669,7 @@ export const deleteAnimal = /* GraphQL */ `
       lastDonationDate
       donationFrequency
       ownerID
-      owner {
+      ownerProfile {
         id
         firstname
         lastname
@@ -687,6 +692,7 @@ export const deleteAnimal = /* GraphQL */ `
       createdAt
       updatedAt
       ownerAnimalsId
+      owner
       __typename
     }
   }
@@ -717,7 +723,7 @@ export const createClinicOwnerRelation = /* GraphQL */ `
         __typename
       }
       ownerID
-      owner {
+      ownerProfile {
         id
         firstname
         lastname
@@ -738,6 +744,7 @@ export const createClinicOwnerRelation = /* GraphQL */ `
       updatedAt
       clinicClientsId
       ownerMyClinicsId
+      owner
       __typename
     }
   }
@@ -768,7 +775,7 @@ export const updateClinicOwnerRelation = /* GraphQL */ `
         __typename
       }
       ownerID
-      owner {
+      ownerProfile {
         id
         firstname
         lastname
@@ -789,6 +796,7 @@ export const updateClinicOwnerRelation = /* GraphQL */ `
       updatedAt
       clinicClientsId
       ownerMyClinicsId
+      owner
       __typename
     }
   }
@@ -819,7 +827,7 @@ export const deleteClinicOwnerRelation = /* GraphQL */ `
         __typename
       }
       ownerID
-      owner {
+      ownerProfile {
         id
         firstname
         lastname
@@ -840,6 +848,7 @@ export const deleteClinicOwnerRelation = /* GraphQL */ `
       updatedAt
       clinicClientsId
       ownerMyClinicsId
+      owner
       __typename
     }
   }
@@ -875,6 +884,7 @@ export const createRequest = /* GraphQL */ `
         owner
         __typename
       }
+      activeMissionID
       mission {
         id
         requestID
@@ -895,7 +905,6 @@ export const createRequest = /* GraphQL */ `
       }
       updatedAt
       clinicRequestsId
-      requestMissionId
       owner
       __typename
     }
@@ -932,6 +941,7 @@ export const updateRequest = /* GraphQL */ `
         owner
         __typename
       }
+      activeMissionID
       mission {
         id
         requestID
@@ -952,7 +962,6 @@ export const updateRequest = /* GraphQL */ `
       }
       updatedAt
       clinicRequestsId
-      requestMissionId
       owner
       __typename
     }
@@ -989,6 +998,7 @@ export const deleteRequest = /* GraphQL */ `
         owner
         __typename
       }
+      activeMissionID
       mission {
         id
         requestID
@@ -1009,7 +1019,6 @@ export const deleteRequest = /* GraphQL */ `
       }
       updatedAt
       clinicRequestsId
-      requestMissionId
       owner
       __typename
     }
@@ -1040,6 +1049,7 @@ export const createMission = /* GraphQL */ `
         createdAt
         updatedAt
         ownerAnimalsId
+        owner
         __typename
       }
       status
@@ -1095,6 +1105,7 @@ export const updateMission = /* GraphQL */ `
         createdAt
         updatedAt
         ownerAnimalsId
+        owner
         __typename
       }
       status
@@ -1150,6 +1161,7 @@ export const deleteMission = /* GraphQL */ `
         createdAt
         updatedAt
         ownerAnimalsId
+        owner
         __typename
       }
       status

@@ -257,7 +257,7 @@ export const getOwnerAvailability = /* GraphQL */ `
       startTime
       endTime
       ownerID
-      owner {
+      ownerProfile {
         id
         firstname
         lastname
@@ -276,6 +276,7 @@ export const getOwnerAvailability = /* GraphQL */ `
       createdAt
       updatedAt
       ownerAvailabilitiesId
+      owner
       __typename
     }
   }
@@ -300,6 +301,7 @@ export const listOwnerAvailabilities = /* GraphQL */ `
         createdAt
         updatedAt
         ownerAvailabilitiesId
+        owner
         __typename
       }
       nextToken
@@ -322,7 +324,7 @@ export const getAnimal = /* GraphQL */ `
       lastDonationDate
       donationFrequency
       ownerID
-      owner {
+      ownerProfile {
         id
         firstname
         lastname
@@ -345,6 +347,7 @@ export const getAnimal = /* GraphQL */ `
       createdAt
       updatedAt
       ownerAnimalsId
+      owner
       __typename
     }
   }
@@ -372,6 +375,7 @@ export const listAnimals = /* GraphQL */ `
         createdAt
         updatedAt
         ownerAnimalsId
+        owner
         __typename
       }
       nextToken
@@ -402,7 +406,7 @@ export const getClinicOwnerRelation = /* GraphQL */ `
         __typename
       }
       ownerID
-      owner {
+      ownerProfile {
         id
         firstname
         lastname
@@ -423,6 +427,7 @@ export const getClinicOwnerRelation = /* GraphQL */ `
       updatedAt
       clinicClientsId
       ownerMyClinicsId
+      owner
       __typename
     }
   }
@@ -447,6 +452,7 @@ export const listClinicOwnerRelations = /* GraphQL */ `
         updatedAt
         clinicClientsId
         ownerMyClinicsId
+        owner
         __typename
       }
       nextToken
@@ -482,6 +488,7 @@ export const getRequest = /* GraphQL */ `
         owner
         __typename
       }
+      activeMissionID
       mission {
         id
         requestID
@@ -502,7 +509,6 @@ export const getRequest = /* GraphQL */ `
       }
       updatedAt
       clinicRequestsId
-      requestMissionId
       owner
       __typename
     }
@@ -524,9 +530,9 @@ export const listRequests = /* GraphQL */ `
         status
         createdAt
         clinicID
+        activeMissionID
         updatedAt
         clinicRequestsId
-        requestMissionId
         owner
         __typename
       }
@@ -557,6 +563,7 @@ export const getMission = /* GraphQL */ `
         createdAt
         updatedAt
         ownerAnimalsId
+        owner
         __typename
       }
       status
@@ -705,6 +712,7 @@ export const ownerAvailabilitiesByOwnerID = /* GraphQL */ `
         createdAt
         updatedAt
         ownerAvailabilitiesId
+        owner
         __typename
       }
       nextToken
@@ -743,6 +751,7 @@ export const animalsByOwnerID = /* GraphQL */ `
         createdAt
         updatedAt
         ownerAnimalsId
+        owner
         __typename
       }
       nextToken
@@ -774,6 +783,7 @@ export const clinicOwnerRelationsByClinicID = /* GraphQL */ `
         updatedAt
         clinicClientsId
         ownerMyClinicsId
+        owner
         __typename
       }
       nextToken
@@ -805,6 +815,7 @@ export const clinicOwnerRelationsByOwnerID = /* GraphQL */ `
         updatedAt
         clinicClientsId
         ownerMyClinicsId
+        owner
         __typename
       }
       nextToken
@@ -836,9 +847,9 @@ export const requestsByClinicID = /* GraphQL */ `
         status
         createdAt
         clinicID
+        activeMissionID
         updatedAt
         clinicRequestsId
-        requestMissionId
         owner
         __typename
       }

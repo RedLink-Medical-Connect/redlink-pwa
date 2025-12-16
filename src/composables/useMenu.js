@@ -36,23 +36,29 @@ export function useMenu() {
   // MENU PROPRIÉTAIRE (Commun)
   const ownerItems = computed(() => [
     {
+      label: 'dashboard.owner.tabs.dashboard',
+      icon: 'pi pi-th-large',
+      to: '/dashboard/board',
+      command: () => router.push('/dashboard/board'),
+    },
+    {
       label: 'dashboard.owner.tabs.general',
       icon: 'pi pi-user',
       to: '/dashboard/profile',
-      command: () => router.push('/dashboard/profile')
+      command: () => router.push('/dashboard/profile'),
     },
     {
       label: 'dashboard.owner.tabs.animals',
       icon: 'pi pi-heart',
       to: '/dashboard/animals',
-      command: () => router.push('/dashboard/animals')
+      command: () => router.push('/dashboard/animals'),
     },
     {
       label: 'dashboard.owner.tabs.availability',
       icon: 'pi pi-calendar',
       to: '/dashboard/availability',
-      command: () => router.push('/dashboard/availability')
-    }
+      command: () => router.push('/dashboard/availability'),
+    },
   ])
 
   const currentMenuItems = computed(() => {
