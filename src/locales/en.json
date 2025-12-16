@@ -17,12 +17,14 @@
     "deleted": "Deleted",
     "yes": "Yes",
     "no": "No",
+    "close": "Close",
     "weight": "Weight",
     "age": "Age",
     "years": "years",
     "km": "km",
     "ml": "ml",
-    "kg": "kg"
+    "kg": "kg",
+    "locale": "en-US"
   },
   "errors": {
     "fill_all_fields": "Please fill in all fields.",
@@ -294,6 +296,7 @@
     },
     "owner": {
       "tabs": {
+        "dashboard": "DASHBOARD",
         "general": "MY PROFILE",
         "animals": "MY ANIMALS",
         "availability": "AVAILABILITY",
@@ -360,6 +363,28 @@
           "submit": "Save the animal"
         }
       },
+    "missions": {
+      "title": "Rescue missions",
+      "subtitle": "These animals need you. Accept a mission to help them.",
+      "empty_title": "All good!",
+      "empty_subtitle": "No blood request at the moment.",
+      "asap": "As soon as possible",
+      "card": {
+        "title": "Looking for {species}",
+        "blood": "Group {group}",
+        "quantity": "Required quantity",
+        "date": "Date",
+        "immediately": "IMMEDIATELY",
+        "accept_cta": "I ACCEPT THE MISSION"
+      },
+      "toasts": {
+        "accepted_title": "Mission accepted!",
+        "accepted_detail": "Great! {name} is expected at the clinic.",
+        "incompatible_title": "Incompatible",
+        "incompatible_detail": "You don't have a registered animal matching the required species/blood.",
+        "accept_failed": "Unable to accept the mission."
+      }
+    },
       "availability": {
         "title": "Intervention area",
         "distance_label": "I am ready to travel up to:",
@@ -401,12 +426,29 @@
       "clinic_name": "Clinic name",
       "phone": "Phone number",
       "address": "Address",
+      "email": "Email",
       "zip": "Zip code",
       "city": "City",
-      "email": "Email",
+      "rpps": "RPPS number",
+      "emergency": "We have a 24/7 emergency service",
       "delete_account": "DELETE ACCOUNT",
       "save": "SAVE",
-      "under_construction": "Section under construction..."
+      "under_construction": "Section under construction...",
+      "firstname": "First name",
+      "lastname": "Last name",
+      "toasts": {
+        "load_failed": "Unable to load clinic information.",
+        "save_clinic": "Clinic record updated",
+        "save_vet": "Veterinarian record updated",
+        "save_failed": "Save failed",
+        "deleted": "Account removed",
+        "delete_failed": "Unable to delete the account"
+      },
+      "dialog": {
+        "title": "Warning!",
+        "confirm": "Are you sure? This action is irreversible.",
+        "confirm_action": "Confirm"
+      }
     },
     "requests": {
       "title": "My Active Requests",
@@ -424,6 +466,36 @@
         "open": "OPEN",
         "closed": "CLOSED",
         "contacted": "contacted"
+      },
+      "dialog": {
+        "title": "Request details",
+        "request_title": "The request",
+        "type": "Type:",
+        "type_emergency": "EMERGENCY",
+        "type_appointment": "APPOINTMENT",
+        "species": "Species:",
+        "blood": "Blood:",
+        "quantity": "Quantity:",
+        "donor_found": "Donor found!",
+        "owner_contact": "Owner contact",
+        "waiting_donor": "Waiting for a donor..."
+      },
+      "columns": {
+        "on_the_way": "On the way",
+        "waiting": "Waiting...",
+        "donor": "Donor",
+        "close_tooltip": "Close"
+      },
+      "empty": "No ongoing requests.",
+      "type_emergency_short": "Emergency",
+      "type_appointment_short": "Appointment",
+      "toasts": {
+        "close_success": "Request successfully closed",
+        "close_failed": "Error while closing the request"
+      },
+      "toasts": {
+        "close_success": "Request successfully closed",
+        "close_failed": "Error while closing the request"
       }
     },
     "donors": {

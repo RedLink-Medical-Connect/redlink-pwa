@@ -17,12 +17,14 @@
     "deleted": "Supprimé",
     "yes": "Oui",
     "no": "Non",
+    "close": "Fermer",
     "weight": "Poids",
     "age": "Âge",
     "years": "ans",
     "km": "km",
     "ml": "ml",
-    "kg": "kg"
+    "kg": "kg",
+    "locale": "fr-FR"
   },
   "errors": {
     "fill_all_fields": "Veuillez remplir tous les champs.",
@@ -111,6 +113,7 @@
     },
     "faq": {
       "title": "Une question ? Vous trouverez sûrement la réponse ici !",
+      "label": "FAQ",
       "q1": "Mon animal doit-il être à jeun ?",
       "a1": "Il est recommandé de ne pas avoir mangé quelques heures avant, mais l'eau est autorisée.",
       "q2": "Le don est-il douloureux ?",
@@ -294,6 +297,7 @@
     },
     "owner": {
       "tabs": {
+        "dashboard": "TABLEAU DE BORD",
         "general": "MON PROFIL",
         "animals": "MES ANIMAUX",
         "availability": "DISPONIBILITÉ",
@@ -360,6 +364,28 @@
           "submit": "Enregistrer l'animal"
         }
       },
+    "missions": {
+      "title": "Missions de sauvetage",
+      "subtitle": "Ces animaux ont besoin de vous. Acceptez une mission pour les sauver.",
+      "empty_title": "Tout va bien !",
+      "empty_subtitle": "Aucune demande de sang en cours pour le moment.",
+      "asap": "Dès que possible",
+      "card": {
+        "title": "Recherche {species}",
+        "blood": "Groupe {group}",
+        "quantity": "Quantité requise",
+        "date": "Date",
+        "immediately": "IMMÉDIATEMENT",
+        "accept_cta": "J'ACCEPTE LA MISSION"
+      },
+      "toasts": {
+        "accepted_title": "Mission acceptée !",
+        "accepted_detail": "Bravo ! {name} est attendu à la clinique.",
+        "incompatible_title": "Incompatible",
+        "incompatible_detail": "Vous n'avez pas d'animal correspondant (Espèce/Sang) enregistré.",
+        "accept_failed": "Impossible d'accepter la mission."
+      }
+    },
       "availability": {
         "title": "Zone d'intervention",
         "distance_label": "Je suis prêt à me déplacer jusqu'à :",
@@ -439,6 +465,32 @@
         "open": "OUVERTE",
         "closed": "CLOTURÉE",
         "contacted": "contacté"
+      },
+      "dialog": {
+        "title": "Détails de la demande",
+        "request_title": "La demande",
+        "type": "Type :",
+        "type_emergency": "URGENCE",
+        "type_appointment": "RDV",
+        "species": "Espèce :",
+        "blood": "Groupe :",
+        "quantity": "Quantité :",
+        "donor_found": "Donneur trouvé !",
+        "owner_contact": "Contact propriétaire",
+        "waiting_donor": "En attente de donneur..."
+      },
+      "columns": {
+        "on_the_way": "En route",
+        "waiting": "En attente...",
+        "donor": "Donneur",
+        "close_tooltip": "Clôturer"
+      },
+      "empty": "Aucune demande en cours.",
+      "type_emergency_short": "Urgence",
+      "type_appointment_short": "RDV",
+      "toasts": {
+        "close_success": "Demande clôturée avec succès",
+        "close_failed": "Erreur lors de la clôture"
       }
     },
     "donors": {

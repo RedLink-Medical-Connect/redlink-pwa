@@ -6,6 +6,7 @@ import { getCurrentUser } from 'aws-amplify/auth'
 import { generateClient } from 'aws-amplify/api'
 import { useAnimals } from '@/composables/useAnimals'
 import { listOwners } from '@/graphql/queries'
+import { Species, DonationFrequency, BloodGroupsBySpecies } from '@/constants/enums.js'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -17,25 +18,29 @@ const { createNewAnimal, isSaving } = useAnimals()
 
 const form = ref({
   name: '',
-  species: 'DOG',
+  species: Species.DOG,
   breed: '',
   birthDate: '',
   weight: null,
   bloodGroup: '',
   isVaccinated: false,
   isSterilized: false,
-  donationFrequency: 'ASAP',
+  donationFrequency: DonationFrequency.ASAP,
 })
 
 const speciesOptions = computed(() => [
-  { label: t('request.species.dog'), value: 'DOG' },
-  { label: t('request.species.cat'), value: 'CAT' },
+  { label: t('request.species.dog'), value: Species.DOG },
+  { label: t('request.species.cat'), value: Species.CAT },
 ])
 
+const bloodOptions = computed(
+  () => BloodGroupsBySpecies[form.value.species] || [],
+)
+
 const frequencyOptions = computed(() => [
-  { label: t('dashboard.owner.animals.frequency.asap'), value: 'ASAP' },
-  { label: t('dashboard.owner.animals.frequency.twice_year'), value: 'TWICE_YEAR' },
-  { label: t('dashboard.owner.animals.frequency.once_year'), value: 'ONCE_YEAR' },
+  { label: t('dashboard.owner.animals.frequency.asap'), value: DonationFrequency.ASAP },
+  { label: t('dashboard.owner.animals.frequency.twice_year'), value: DonationFrequency.TWICE_YEAR },
+  { label: t('dashboard.owner.animals.frequency.once_year'), value: DonationFrequency.ONCE_YEAR },
 ])
 
 onMounted(async () => {
@@ -148,10 +153,15 @@ const handleSubmit = async () => {
             <label class="text-xs font-bold text-zinc-500 uppercase">{{
               $t('dashboard.owner.animals.form.birthdate')
             }}</label>
-            <InputText
+            <Calendar
               v-model="form.birthDate"
-              type="date"
-              class="!bg-zinc-50 dark:!bg-zinc-950 !border-zinc-300 dark:!border-zinc-800 !p-3 focus:!border-[#ff3b4e]"
+              date-format="dd/mm/yy"
+              :placeholder="$t('auth.register_owner.fields.animal_birth_date')"
+              :manual-input="false"
+              show-icon
+              icon-display="input"
+              class="w-full"
+              input-class="w-full !bg-zinc-50 dark:!bg-zinc-950 !border-zinc-300 dark:!border-zinc-800 !p-3 focus:!border-[#ff3b4e]"
             />
           </div>
         </div>
@@ -177,8 +187,10 @@ const handleSubmit = async () => {
             <label class="text-xs font-bold text-zinc-500 uppercase">{{
               $t('dashboard.owner.animals.form.blood_group')
             }}</label>
-            <InputText
+            <Select
               v-model="form.bloodGroup"
+              :options="bloodOptions"
+              :disabled="!form.species"
               :placeholder="$t('dashboard.owner.animals.form.blood_group_placeholder')"
               class="!bg-zinc-50 dark:!bg-zinc-950 !border-zinc-300 dark:!border-zinc-800 !p-3 focus:!border-[#ff3b4e]"
             />

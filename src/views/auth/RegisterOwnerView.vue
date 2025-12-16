@@ -1,11 +1,12 @@
 <script setup>
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { usePassword } from '@/composables/usePassword'
 import { useI18n } from 'vue-i18n'
 import AddressAutocomplete from '@/components/common/AddressAutocomplete.vue'
 import PhoneInput from '@/components/common/PhoneInput.vue'
+import { Species, BloodGroupsBySpecies } from '@/constants/enums.js'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -31,11 +32,15 @@ const form = ref({
   longitude: null,
 
   animal_name: '',
-  animal_species: 'DOG',
+  animal_species: Species.DOG,
   animal_breed: '',
   animal_birthDate: '',
   animal_weight: null,
   blood_group: '',
+})
+
+const bloodOptions = computed(() => {
+  return BloodGroupsBySpecies[form.value.animal_species] || []
 })
 
 const nextStep = () => {
@@ -231,8 +236,8 @@ const handleRegister = async () => {
             v-model="form.animal_species"
             class="bg-zinc-200 dark:bg-zinc-800 border-none text-zinc-900 dark:text-white p-3 rounded-md w-full appearance-none"
           >
-            <option value="DOG">{{ $t('request.species.dog') }}</option>
-            <option value="CAT">{{ $t('request.species.cat') }}</option>
+            <option :value="Species.DOG">{{ $t('request.species.dog') }}</option>
+            <option :value="Species.CAT">{{ $t('request.species.cat') }}</option>
           </select>
           <InputText
             v-model="form.animal_breed"
@@ -249,8 +254,10 @@ const handleRegister = async () => {
             :placeholder="$t('auth.register_owner.fields.animal_weight')"
             class="!bg-zinc-200 dark:!bg-zinc-800 !border-none !text-zinc-900 dark:!text-white !p-3 !rounded-md"
           />
-          <InputText
+          <Select
             v-model="form.blood_group"
+            :options="bloodOptions"
+            :disabled="!form.animal_species"
             :placeholder="$t('auth.register_owner.fields.blood_group')"
             class="!bg-zinc-200 dark:!bg-zinc-800 !border-none !text-zinc-900 dark:!text-white !p-3 !rounded-md"
           />

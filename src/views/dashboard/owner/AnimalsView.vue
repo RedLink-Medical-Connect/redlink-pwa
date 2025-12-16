@@ -7,6 +7,7 @@ import { useToast } from 'primevue/usetoast'
 import Dialog from 'primevue/dialog'
 
 import { useAnimals } from '@/composables/useAnimals'
+import { Species, DonationFrequency, BloodGroupsBySpecies } from '@/constants/enums.js'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -21,14 +22,17 @@ const selectedAnimal = ref(null)
 const editForm = ref({})
 
 const speciesOptions = computed(() => [
-  { label: t('request.species.dog'), value: 'DOG' },
-  { label: t('request.species.cat'), value: 'CAT' },
+  { label: t('request.species.dog'), value: Species.DOG },
+  { label: t('request.species.cat'), value: Species.CAT },
 ])
 
+const bloodOptions = computed(
+  () => BloodGroupsBySpecies[editForm.value.species] || [],
+)
 const frequencyOptions = computed(() => [
-  { label: t('dashboard.owner.animals.frequency.asap'), value: 'ASAP' },
-  { label: t('dashboard.owner.animals.frequency.twice_year'), value: 'TWICE_YEAR' },
-  { label: t('dashboard.owner.animals.frequency.once_year'), value: 'ONCE_YEAR' },
+  { label: t('dashboard.owner.animals.frequency.asap'), value: DonationFrequency.ASAP },
+  { label: t('dashboard.owner.animals.frequency.twice_year'), value: DonationFrequency.TWICE_YEAR },
+  { label: t('dashboard.owner.animals.frequency.once_year'), value: DonationFrequency.ONCE_YEAR },
 ])
 
 onMounted(() => {
@@ -120,7 +124,10 @@ const onDelete = async () => {
             option-label="label"
             option-value="value"
           />
-          <InputText v-model="editForm.breed" :placeholder="$t('dashboard.owner.animals.form.breed')" />
+          <InputText
+            v-model="editForm.breed"
+            :placeholder="$t('dashboard.owner.animals.form.breed')"
+          />
         </div>
         <div class="grid grid-cols-2 gap-2">
           <InputNumber
@@ -129,11 +136,22 @@ const onDelete = async () => {
             :placeholder="$t('dashboard.owner.animals.form.weight')"
             :min-fraction-digits="1"
           />
-          <InputText v-model="editForm.birthDate" type="date" />
+          <Calendar
+            v-model="editForm.birthDate"
+            date-format="dd/mm/yy"
+            :placeholder="$t('auth.register_owner.fields.animal_birth_date')"
+            :manual-input="false"
+            show-icon
+            icon-display="input"
+            class="w-full"
+            input-class="w-full !bg-zinc-50 dark:!bg-zinc-950 !border-zinc-300 dark:!border-zinc-800"
+          />
         </div>
         <div class="grid grid-cols-2 gap-2">
-          <InputText
+          <Select
             v-model="editForm.bloodGroup"
+            :options="bloodOptions"
+            :disabled="!editForm.species"
             :placeholder="$t('dashboard.owner.animals.form.blood_group_placeholder')"
           />
           <Select

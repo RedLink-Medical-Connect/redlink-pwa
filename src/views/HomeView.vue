@@ -247,7 +247,7 @@ const testimonials = computed(() => [
               <h2 class="text-2xl font-bold leading-tight text-zinc-900 dark:text-white">
                 {{ $t('home.faq.title') }}
               </h2>
-              <p class="text-zinc-500 mt-2 text-sm">FAQ</p>
+              <p class="text-zinc-500 mt-2 text-sm">{{ $t('home.faq.label') }}</p>
             </div>
 
             <div class="md:w-2/3">
