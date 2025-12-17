@@ -19,10 +19,6 @@ export const getClinic = /* GraphQL */ `
         nextToken
         __typename
       }
-      availabilities {
-        nextToken
-        __typename
-      }
       requests {
         nextToken
         __typename
@@ -67,67 +63,6 @@ export const listClinics = /* GraphQL */ `
     }
   }
 `;
-export const getClinicAvailability = /* GraphQL */ `
-  query GetClinicAvailability($id: ID!) {
-    getClinicAvailability(id: $id) {
-      id
-      dayOfWeek
-      startTime
-      endTime
-      clinicID
-      clinic {
-        id
-        name
-        rpps
-        email
-        phone
-        address
-        latitude
-        longitude
-        hasEmergencyService
-        transfusionsDone
-        donorOwnersCount
-        createdAt
-        updatedAt
-        owner
-        __typename
-      }
-      createdAt
-      updatedAt
-      clinicAvailabilitiesId
-      owner
-      __typename
-    }
-  }
-`;
-export const listClinicAvailabilities = /* GraphQL */ `
-  query ListClinicAvailabilities(
-    $filter: ModelClinicAvailabilityFilterInput
-    $limit: Int
-    $nextToken: String
-  ) {
-    listClinicAvailabilities(
-      filter: $filter
-      limit: $limit
-      nextToken: $nextToken
-    ) {
-      items {
-        id
-        dayOfWeek
-        startTime
-        endTime
-        clinicID
-        createdAt
-        updatedAt
-        clinicAvailabilitiesId
-        owner
-        __typename
-      }
-      nextToken
-      __typename
-    }
-  }
-`;
 export const getVeterinarian = /* GraphQL */ `
   query GetVeterinarian($id: ID!) {
     getVeterinarian(id: $id) {
@@ -159,7 +94,6 @@ export const getVeterinarian = /* GraphQL */ `
       }
       createdAt
       updatedAt
-      clinicVeterinariansId
       owner
       __typename
     }
@@ -180,7 +114,6 @@ export const listVeterinarians = /* GraphQL */ `
         clinicID
         createdAt
         updatedAt
-        clinicVeterinariansId
         owner
         __typename
       }
@@ -346,7 +279,6 @@ export const getAnimal = /* GraphQL */ `
       }
       createdAt
       updatedAt
-      ownerAnimalsId
       owner
       __typename
     }
@@ -374,7 +306,6 @@ export const listAnimals = /* GraphQL */ `
         ownerID
         createdAt
         updatedAt
-        ownerAnimalsId
         owner
         __typename
       }
@@ -546,6 +477,21 @@ export const getMission = /* GraphQL */ `
     getMission(id: $id) {
       id
       requestID
+      request {
+        id
+        requestType
+        requiredSpecies
+        requiredBloodGroup
+        quantity
+        status
+        createdAt
+        clinicID
+        activeMissionID
+        updatedAt
+        clinicRequestsId
+        owner
+        __typename
+      }
       animalID
       animal {
         id
@@ -562,7 +508,6 @@ export const getMission = /* GraphQL */ `
         ownerID
         createdAt
         updatedAt
-        ownerAnimalsId
         owner
         __typename
       }
@@ -581,7 +526,6 @@ export const getMission = /* GraphQL */ `
         clinicID
         createdAt
         updatedAt
-        clinicVeterinariansId
         owner
         __typename
       }
@@ -624,38 +568,6 @@ export const listMissions = /* GraphQL */ `
     }
   }
 `;
-export const clinicAvailabilitiesByClinicID = /* GraphQL */ `
-  query ClinicAvailabilitiesByClinicID(
-    $clinicID: ID!
-    $sortDirection: ModelSortDirection
-    $filter: ModelClinicAvailabilityFilterInput
-    $limit: Int
-    $nextToken: String
-  ) {
-    clinicAvailabilitiesByClinicID(
-      clinicID: $clinicID
-      sortDirection: $sortDirection
-      filter: $filter
-      limit: $limit
-      nextToken: $nextToken
-    ) {
-      items {
-        id
-        dayOfWeek
-        startTime
-        endTime
-        clinicID
-        createdAt
-        updatedAt
-        clinicAvailabilitiesId
-        owner
-        __typename
-      }
-      nextToken
-      __typename
-    }
-  }
-`;
 export const veterinariansByClinicID = /* GraphQL */ `
   query VeterinariansByClinicID(
     $clinicID: ID!
@@ -679,7 +591,6 @@ export const veterinariansByClinicID = /* GraphQL */ `
         clinicID
         createdAt
         updatedAt
-        clinicVeterinariansId
         owner
         __typename
       }
@@ -750,7 +661,6 @@ export const animalsByOwnerID = /* GraphQL */ `
         ownerID
         createdAt
         updatedAt
-        ownerAnimalsId
         owner
         __typename
       }

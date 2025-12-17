@@ -22,10 +22,6 @@ export const onCreateClinic = /* GraphQL */ `
         nextToken
         __typename
       }
-      availabilities {
-        nextToken
-        __typename
-      }
       requests {
         nextToken
         __typename
@@ -59,10 +55,6 @@ export const onUpdateClinic = /* GraphQL */ `
       transfusionsDone
       donorOwnersCount
       veterinarians {
-        nextToken
-        __typename
-      }
-      availabilities {
         nextToken
         __typename
       }
@@ -102,10 +94,6 @@ export const onDeleteClinic = /* GraphQL */ `
         nextToken
         __typename
       }
-      availabilities {
-        nextToken
-        __typename
-      }
       requests {
         nextToken
         __typename
@@ -116,114 +104,6 @@ export const onDeleteClinic = /* GraphQL */ `
       }
       createdAt
       updatedAt
-      owner
-      __typename
-    }
-  }
-`;
-export const onCreateClinicAvailability = /* GraphQL */ `
-  subscription OnCreateClinicAvailability(
-    $filter: ModelSubscriptionClinicAvailabilityFilterInput
-    $owner: String
-  ) {
-    onCreateClinicAvailability(filter: $filter, owner: $owner) {
-      id
-      dayOfWeek
-      startTime
-      endTime
-      clinicID
-      clinic {
-        id
-        name
-        rpps
-        email
-        phone
-        address
-        latitude
-        longitude
-        hasEmergencyService
-        transfusionsDone
-        donorOwnersCount
-        createdAt
-        updatedAt
-        owner
-        __typename
-      }
-      createdAt
-      updatedAt
-      clinicAvailabilitiesId
-      owner
-      __typename
-    }
-  }
-`;
-export const onUpdateClinicAvailability = /* GraphQL */ `
-  subscription OnUpdateClinicAvailability(
-    $filter: ModelSubscriptionClinicAvailabilityFilterInput
-    $owner: String
-  ) {
-    onUpdateClinicAvailability(filter: $filter, owner: $owner) {
-      id
-      dayOfWeek
-      startTime
-      endTime
-      clinicID
-      clinic {
-        id
-        name
-        rpps
-        email
-        phone
-        address
-        latitude
-        longitude
-        hasEmergencyService
-        transfusionsDone
-        donorOwnersCount
-        createdAt
-        updatedAt
-        owner
-        __typename
-      }
-      createdAt
-      updatedAt
-      clinicAvailabilitiesId
-      owner
-      __typename
-    }
-  }
-`;
-export const onDeleteClinicAvailability = /* GraphQL */ `
-  subscription OnDeleteClinicAvailability(
-    $filter: ModelSubscriptionClinicAvailabilityFilterInput
-    $owner: String
-  ) {
-    onDeleteClinicAvailability(filter: $filter, owner: $owner) {
-      id
-      dayOfWeek
-      startTime
-      endTime
-      clinicID
-      clinic {
-        id
-        name
-        rpps
-        email
-        phone
-        address
-        latitude
-        longitude
-        hasEmergencyService
-        transfusionsDone
-        donorOwnersCount
-        createdAt
-        updatedAt
-        owner
-        __typename
-      }
-      createdAt
-      updatedAt
-      clinicAvailabilitiesId
       owner
       __typename
     }
@@ -263,7 +143,6 @@ export const onCreateVeterinarian = /* GraphQL */ `
       }
       createdAt
       updatedAt
-      clinicVeterinariansId
       owner
       __typename
     }
@@ -303,7 +182,6 @@ export const onUpdateVeterinarian = /* GraphQL */ `
       }
       createdAt
       updatedAt
-      clinicVeterinariansId
       owner
       __typename
     }
@@ -343,7 +221,6 @@ export const onDeleteVeterinarian = /* GraphQL */ `
       }
       createdAt
       updatedAt
-      clinicVeterinariansId
       owner
       __typename
     }
@@ -599,7 +476,6 @@ export const onCreateAnimal = /* GraphQL */ `
       }
       createdAt
       updatedAt
-      ownerAnimalsId
       owner
       __typename
     }
@@ -645,7 +521,6 @@ export const onUpdateAnimal = /* GraphQL */ `
       }
       createdAt
       updatedAt
-      ownerAnimalsId
       owner
       __typename
     }
@@ -691,7 +566,6 @@ export const onDeleteAnimal = /* GraphQL */ `
       }
       createdAt
       updatedAt
-      ownerAnimalsId
       owner
       __typename
     }
@@ -1032,6 +906,21 @@ export const onCreateMission = /* GraphQL */ `
     onCreateMission(filter: $filter, owner: $owner) {
       id
       requestID
+      request {
+        id
+        requestType
+        requiredSpecies
+        requiredBloodGroup
+        quantity
+        status
+        createdAt
+        clinicID
+        activeMissionID
+        updatedAt
+        clinicRequestsId
+        owner
+        __typename
+      }
       animalID
       animal {
         id
@@ -1048,7 +937,6 @@ export const onCreateMission = /* GraphQL */ `
         ownerID
         createdAt
         updatedAt
-        ownerAnimalsId
         owner
         __typename
       }
@@ -1067,7 +955,6 @@ export const onCreateMission = /* GraphQL */ `
         clinicID
         createdAt
         updatedAt
-        clinicVeterinariansId
         owner
         __typename
       }
@@ -1088,6 +975,21 @@ export const onUpdateMission = /* GraphQL */ `
     onUpdateMission(filter: $filter, owner: $owner) {
       id
       requestID
+      request {
+        id
+        requestType
+        requiredSpecies
+        requiredBloodGroup
+        quantity
+        status
+        createdAt
+        clinicID
+        activeMissionID
+        updatedAt
+        clinicRequestsId
+        owner
+        __typename
+      }
       animalID
       animal {
         id
@@ -1104,7 +1006,6 @@ export const onUpdateMission = /* GraphQL */ `
         ownerID
         createdAt
         updatedAt
-        ownerAnimalsId
         owner
         __typename
       }
@@ -1123,7 +1024,6 @@ export const onUpdateMission = /* GraphQL */ `
         clinicID
         createdAt
         updatedAt
-        clinicVeterinariansId
         owner
         __typename
       }
@@ -1144,6 +1044,21 @@ export const onDeleteMission = /* GraphQL */ `
     onDeleteMission(filter: $filter, owner: $owner) {
       id
       requestID
+      request {
+        id
+        requestType
+        requiredSpecies
+        requiredBloodGroup
+        quantity
+        status
+        createdAt
+        clinicID
+        activeMissionID
+        updatedAt
+        clinicRequestsId
+        owner
+        __typename
+      }
       animalID
       animal {
         id
@@ -1160,7 +1075,6 @@ export const onDeleteMission = /* GraphQL */ `
         ownerID
         createdAt
         updatedAt
-        ownerAnimalsId
         owner
         __typename
       }
@@ -1179,7 +1093,6 @@ export const onDeleteMission = /* GraphQL */ `
         clinicID
         createdAt
         updatedAt
-        clinicVeterinariansId
         owner
         __typename
       }

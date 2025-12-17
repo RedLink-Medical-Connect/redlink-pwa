@@ -64,11 +64,15 @@ const handleVerify = async () => {
     }
 
     const pwd = showPasswordInput.value ? confirmPassword.value : registrationData.password
+    let currentUser
     try {
-      await getCurrentUser()
+      currentUser = await getCurrentUser()
     } catch {
       await auth.login(email.value, pwd)
+      currentUser = await getCurrentUser()
     }
+
+    const cognitoUserId = currentUser.userId
 
     const data = registrationData
 
@@ -76,6 +80,7 @@ const handleVerify = async () => {
       const ownerRes = await client.graphql({
         query: createOwnerSimple,
         variables: { input: {
+            id: cognitoUserId,
             firstname: data.firstname,
             lastname: data.lastname,
             email: data.email,
@@ -137,6 +142,7 @@ const handleVerify = async () => {
       await client.graphql({
         query: createVeterinarianSimple,
         variables: { input: {
+            id: cognitoUserId,
             clinicID: clinicRes.data.createClinic.id,
             firstname: data.firstname,
             lastname: data.lastname,

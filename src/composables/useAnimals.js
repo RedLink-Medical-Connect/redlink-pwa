@@ -1,9 +1,9 @@
 import { ref } from 'vue'
 import { generateClient } from 'aws-amplify/api'
-import { fetchAuthSession } from 'aws-amplify/auth'
-import { listAnimals } from '@/graphql/queries'
+import { getCurrentUser } from 'aws-amplify/auth'
 import { updateAnimal, deleteAnimal } from '@/graphql/mutations'
 import { createAnimalSimple } from '@/graphql/custom-mutations.js'
+import { listMyAnimalsByOwnerId } from '@/graphql/custom-queries.js'
 
 export function useAnimals() {
   const client = generateClient()
@@ -21,20 +21,29 @@ export function useAnimals() {
   const fetchAnimals = async () => {
     isLoading.value = true
     try {
-      const session = await fetchAuthSession()
-      if (!session.tokens) throw new Error('SessionExpired')
+      const { userId } = await getCurrentUser()
+
+      if (!userId) throw new Error("Impossible de récupérer l'ID utilisateur")
 
       const { data } = await client.graphql({
-        query: listAnimals,
+        query: listMyAnimalsByOwnerId,
+        variables: { ownerID: userId },
         authMode: 'userPool',
       })
 
-      const validItems = (data.listAnimals?.items || []).filter((item) => item && !item._deleted)
+      const rawAnimals = data.listAnimals?.items || []
+
+      const validItems = rawAnimals.filter((item) => item && !item._deleted)
 
       animals.value = validItems.map((animal) => ({
         ...animal,
         age: calculateAge(animal.birthDate),
       }))
+
+      return userId
+    } catch (e) {
+      console.error('Erreur fetch animals:', e)
+      animals.value = []
     } finally {
       isLoading.value = false
     }

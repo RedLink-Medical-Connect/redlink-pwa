@@ -11,26 +11,26 @@ export function useMenu() {
       label: 'dashboard.sidebar.requests',
       icon: 'pi pi-bolt',
       to: '/dashboard/requests',
-      command: () => router.push('/dashboard/requests')
+      command: () => router.push('/dashboard/requests'),
     },
     {
       label: 'dashboard.sidebar.donors',
       icon: 'pi pi-users',
       to: '/dashboard/donors',
-      command: () => router.push('/dashboard/donors')
+      command: () => router.push('/dashboard/donors'),
     },
     {
       label: 'dashboard.sidebar.history',
       icon: 'pi pi-history',
       to: '/dashboard/history',
-      command: () => router.push('/dashboard/history')
+      command: () => router.push('/dashboard/history'),
     },
     {
       label: 'dashboard.sidebar.settings',
       icon: 'pi pi-cog',
       to: '/dashboard/settings',
-      command: () => router.push('/dashboard/settings')
-    }
+      command: () => router.push('/dashboard/settings'),
+    },
   ])
 
   // MENU PROPRIÉTAIRE (Commun)
@@ -52,6 +52,12 @@ export function useMenu() {
       icon: 'pi pi-heart',
       to: '/dashboard/animals',
       command: () => router.push('/dashboard/animals'),
+    },
+    {
+      label: 'dashboard.owner.tabs.missions',
+      icon: 'pi pi-list-check',
+      to: '/dashboard/missions',
+      command: () => router.push('/dashboard/missions'),
     },
     {
       label: 'dashboard.owner.tabs.availability',

@@ -1,6 +1,6 @@
 import { ref } from 'vue'
 import { generateClient } from 'aws-amplify/api'
-import { deleteUser } from 'aws-amplify/auth'
+import { deleteUser, getCurrentUser } from 'aws-amplify/auth'
 import {
   updateClinic,
 } from '@/graphql/mutations'
@@ -44,9 +44,17 @@ export function useClinicSettings() {
   const fetchSettings = async () => {
     isLoading.value = true
     try {
-      const { data } = await client.graphql({ query: getVetWithClinic, authMode: 'userPool' })
+      const { userId } = await getCurrentUser()
 
-      const vet = data.listVeterinarians.items[0]
+      if (!userId) throw new Error("Impossible de récupérer l'ID utilisateur")
+
+      const { data } = await client.graphql({
+        query: getVetWithClinic,
+        variables: { id: userId },
+        authMode: 'userPool',
+      })
+
+      const vet = data.getVeterinarian
 
       if (vet) {
         vetId.value = vet.id
@@ -56,7 +64,7 @@ export function useClinicSettings() {
           email: vet.email,
         }
 
-        if (vet) {
+        if (vet.clinic) {
           clinicId.value = vet.clinic.id
           clinicForm.value = {
             name: vet.clinic.name,

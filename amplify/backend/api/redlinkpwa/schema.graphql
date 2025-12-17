@@ -20,24 +20,9 @@ type Clinic @model @auth(rules: [
   transfusionsDone: Int
   donorOwnersCount: Int
 
-  veterinarians: [Veterinarian] @hasMany
-  availabilities: [ClinicAvailability] @hasMany
+  veterinarians: [Veterinarian] @hasMany(indexName: "byClinicVet", fields: ["id"])
   requests: [Request] @hasMany
   clients: [ClinicOwnerRelation] @hasMany
-}
-
-type ClinicAvailability @model @auth(rules: [
-  { allow: groups, groups: ["Veterinarians"] },
-  { allow: private, operations: [read] },
-  { allow: owner },
-]) {
-  id: ID!
-  dayOfWeek: Int! # 1-7
-  startTime: AWSTime!
-  endTime: AWSTime!
-
-  clinicID: ID! @index(name: "byClinicAvail")
-  clinic: Clinic @belongsTo(fields: ["clinicID"])
 }
 
 type Veterinarian @model @auth(rules: [
@@ -76,14 +61,15 @@ type Owner @model @auth(rules: [
 
   totalDonations: Int
 
-  animals: [Animal] @hasMany
+  animals: [Animal] @hasMany(indexName: "byOwnerAnimal", fields: ["id"])
   availabilities: [OwnerAvailability] @hasMany
   myClinics: [ClinicOwnerRelation] @hasMany
 }
 
 type OwnerAvailability @model @auth(rules: [
   { allow: owner },
-  { allow: groups, groups: ["Veterinarians"], operations: [read] }
+  { allow: groups, groups: ["Veterinarians"], operations: [read] },
+  { allow: private, operations: [read] }
 ]) {
   id: ID!
   dayOfWeek: Int!
@@ -159,6 +145,7 @@ type Mission @model @auth(rules: [
 ]) {
   id: ID!
   requestID: ID! @index(name: "byRequestMission")
+  request: Request @belongsTo(fields: ["requestID"])
   animalID: ID! @index(name: "byAnimalMission")
   animal: Animal @belongsTo(fields: ["animalID"])
 

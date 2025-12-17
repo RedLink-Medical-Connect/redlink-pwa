@@ -96,7 +96,8 @@ const router = createRouter({
       name: 'owner-profile',
       component: () => import('@/views/dashboard/owner/ProfileView.vue'),
       meta: { requiresAuth: true, role: 'owner' },
-    },{
+    },
+    {
       path: '/dashboard/board',
       name: 'owner-dashboard',
       component: () => import('@/views/dashboard/owner/DashboardView.vue'),
@@ -112,6 +113,18 @@ const router = createRouter({
       path: '/dashboard/animals/add',
       name: 'add-animal',
       component: () => import('@/views/dashboard/owner/AddAnimalView.vue'),
+      meta: { requiresAuth: true, role: 'owner' },
+    },
+    {
+      path: '/dashboard/availability',
+      name: 'availability',
+      component: () => import('@/views/dashboard/owner/AvailabilityView.vue'),
+      meta: { requiresAuth: true, role: 'owner' },
+    },
+    {
+      path: '/dashboard/missions',
+      name: 'missions',
+      component: () => import('@/views/dashboard/owner/MissionsView.vue'),
       meta: { requiresAuth: true, role: 'owner' },
     },
     { path: '/test-stripe', component: () => import('@/views/TestStripe.vue') },
