@@ -16,6 +16,7 @@ declare module 'vue' {
     AccordionHeader: typeof import('primevue/accordionheader')['default']
     AccordionPanel: typeof import('primevue/accordionpanel')['default']
     AddressAutocomplete: typeof import('./src/components/common/AddressAutocomplete.vue')['default']
+    AppDatePicker: typeof import('./src/components/common/AppDatePicker.vue')['default']
     AppFooter: typeof import('./src/components/common/AppFooter.vue')['default']
     AppHeader: typeof import('./src/components/common/AppHeader.vue')['default']
     AppMobileMenu: typeof import('./src/components/common/AppMobileMenu.vue')['default']

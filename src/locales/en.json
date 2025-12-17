@@ -393,7 +393,53 @@
         "vacation_mode": "Vacation Mode (Suspend alerts)",
         "vacation_mode_desc": "You will not receive any notifications while this mode is enabled.",
         "min_distance": "5 km",
-        "max_distance": "100 km"
+        "max_distance": "100 km",
+        "form": {
+          "add_title": "Add",
+          "day_label": "Day",
+          "day_placeholder": "Choose a day",
+          "start_label": "Start",
+          "start_placeholder": "09:00",
+          "end_label": "End",
+          "end_placeholder": "18:00",
+          "save_button": "Save"
+        },
+        "toasts": {
+          "missing_fields": "Missing fields",
+          "fill": "Please fill in all fields.",
+          "error": "Error",
+          "end_date_after_start_date": "End time must be after start time.",
+          "slot_added": "Time slot added.",
+          "add_failed": "Unable to add the time slot."
+        },
+        "empty": {
+          "title": "Always available",
+          "description": "Without defined time slots, you appear as available 24/7 for emergencies."
+        }
+      },
+      "missions_list": {
+        "title": "My missions",
+        "tabs": {
+          "active": "Active",
+          "history": "History"
+        },
+        "empty": {
+          "active": "No active missions.",
+          "history": "No history yet."
+        },
+        "go_to_board": "View available requests",
+        "status": {
+          "pending_arrival": "Pending arrival",
+          "accepted": "Accepted",
+          "completed": "Completed",
+          "no_show": "Cancelled (no show)"
+        },
+        "unknown_clinic": "Unknown clinic",
+        "planned_on": "Scheduled on:",
+        "actions": {
+          "call": "Call",
+          "go": "Navigate"
+        }
       }
     },
     "profile": {

@@ -3,14 +3,11 @@ import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { getCurrentUser } from 'aws-amplify/auth'
-import { generateClient } from 'aws-amplify/api'
 import { useAnimals } from '@/composables/useAnimals'
-import { listOwners } from '@/graphql/queries'
 import { Species, DonationFrequency, BloodGroupsBySpecies } from '@/constants/enums.js'
 
 const { t } = useI18n()
 const router = useRouter()
-const client = generateClient()
 
 const error = ref('')
 const currentOwnerId = ref(null)
@@ -33,9 +30,7 @@ const speciesOptions = computed(() => [
   { label: t('request.species.cat'), value: Species.CAT },
 ])
 
-const bloodOptions = computed(
-  () => BloodGroupsBySpecies[form.value.species] || [],
-)
+const bloodOptions = computed(() => BloodGroupsBySpecies[form.value.species] || [])
 
 const frequencyOptions = computed(() => [
   { label: t('dashboard.owner.animals.frequency.asap'), value: DonationFrequency.ASAP },
@@ -45,14 +40,13 @@ const frequencyOptions = computed(() => [
 
 onMounted(async () => {
   try {
-    await getCurrentUser()
+    const { userId } = await getCurrentUser()
 
-    const { data } = await client.graphql({ query: listOwners })
-
-    if (data.listOwners.items.length > 0) {
-      currentOwnerId.value = data.listOwners.items[0].id
+    if (userId) {
+      currentOwnerId.value = userId
     } else {
-      error.value = t('errors.owner_profile_missing')
+      error.value = t('errors.auth_required')
+      await router.push('/login')
     }
   } catch (e) {
     console.error(e)
@@ -71,7 +65,7 @@ const handleSubmit = async () => {
     error.value = ''
 
     await createNewAnimal(form.value, currentOwnerId.value)
-    router.push('/dashboard/animals')
+    await router.push('/dashboard/animals')
   } catch (err) {
     console.error('Erreur Ajout Animal:', err)
     if (err.errors && err.errors.length > 0) {
@@ -153,15 +147,9 @@ const handleSubmit = async () => {
             <label class="text-xs font-bold text-zinc-500 uppercase">{{
               $t('dashboard.owner.animals.form.birthdate')
             }}</label>
-            <Calendar
+            <AppDatePicker
               v-model="form.birthDate"
-              date-format="dd/mm/yy"
               :placeholder="$t('auth.register_owner.fields.animal_birth_date')"
-              :manual-input="false"
-              show-icon
-              icon-display="input"
-              class="w-full"
-              input-class="w-full !bg-zinc-50 dark:!bg-zinc-950 !border-zinc-300 dark:!border-zinc-800 !p-3 focus:!border-[#ff3b4e]"
             />
           </div>
         </div>

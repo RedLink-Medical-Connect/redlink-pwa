@@ -144,9 +144,9 @@
       "send": "OK",
       "rights_reserved": "Tous droits réservés.",
       "made_with": "Fait avec",
-    "in_france": "en France",
-    "company": "RedLink SAS",
-    "version": "v1.0.0"
+      "in_france": "en France",
+      "company": "RedLink SAS",
+      "version": "v1.0.0"
     },
     "mobile": {
       "home": "Accueil",
@@ -364,29 +364,37 @@
           "submit": "Enregistrer l'animal"
         }
       },
-    "missions": {
-      "title": "Missions de sauvetage",
-      "subtitle": "Ces animaux ont besoin de vous. Acceptez une mission pour les sauver.",
-      "empty_title": "Tout va bien !",
-      "empty_subtitle": "Aucune demande de sang en cours pour le moment.",
-      "asap": "Dès que possible",
-      "card": {
-        "title": "Recherche {species}",
-        "blood": "Groupe {group}",
-        "quantity": "Quantité requise",
-        "date": "Date",
-        "immediately": "IMMÉDIATEMENT",
-        "accept_cta": "J'ACCEPTE LA MISSION"
+      "missions": {
+        "title": "Missions de sauvetage",
+        "subtitle": "Ces animaux ont besoin de vous. Acceptez une mission pour les sauver.",
+        "empty_title": "Tout va bien !",
+        "empty_subtitle": "Aucune demande de sang en cours pour le moment.",
+        "asap": "Dès que possible",
+        "card": {
+          "title": "Recherche {species}",
+          "blood": "Groupe {group}",
+          "quantity": "Quantité requise",
+          "date": "Date",
+          "immediately": "IMMÉDIATEMENT",
+          "accept_cta": "J'ACCEPTE LA MISSION"
+        },
+        "toasts": {
+          "accepted_title": "Mission acceptée !",
+          "accepted_detail": "Bravo ! {name} est attendu à la clinique.",
+          "incompatible_title": "Incompatible",
+          "incompatible_detail": "Vous n'avez pas d'animal correspondant (Espèce/Sang) enregistré.",
+          "accept_failed": "Impossible d'accepter la mission."
+        }
       },
-      "toasts": {
-        "accepted_title": "Mission acceptée !",
-        "accepted_detail": "Bravo ! {name} est attendu à la clinique.",
-        "incompatible_title": "Incompatible",
-        "incompatible_detail": "Vous n'avez pas d'animal correspondant (Espèce/Sang) enregistré.",
-        "accept_failed": "Impossible d'accepter la mission."
-      }
-    },
       "availability": {
+        "toasts": {
+          "missing_fields": "Champs manquants",
+          "fill": "Veuillez tout remplir.",
+          "error": "Erreur",
+          "end_date_after_start_date": "L'heure de fin doit être après le début.",
+          "slot_added": "Créneau ajouté.",
+          "add_failed": "Impossible d'ajouter le créneau."
+        },
         "title": "Zone d'intervention",
         "distance_label": "Je suis prêt à me déplacer jusqu'à :",
         "km": "km",
@@ -394,7 +402,46 @@
         "vacation_mode": "Mode vacances (suspendre les alertes)",
         "vacation_mode_desc": "Vous ne recevrez aucune notification tant que ce mode est actif.",
         "min_distance": "5 km",
-        "max_distance": "100 km"
+        "max_distance": "100 km",
+        "form": {
+          "add_title": "Ajouter",
+          "day_label": "Jour",
+          "day_placeholder": "Choisir un jour",
+          "start_label": "Début",
+          "start_placeholder": "09:00",
+          "end_label": "Fin",
+          "end_placeholder": "18:00",
+          "save_button": "Enregistrer"
+        },
+        "empty": {
+          "title": "Toujours disponible",
+          "description": "Sans créneaux définis, vous apparaissez comme disponible 24h/24 pour les urgences."
+        }
+      },
+      "missions_list": {
+        "title": "Mes missions",
+        "tabs": {
+          "active": "En cours",
+          "history": "Historique"
+        },
+        "empty": {
+          "active": "Aucune mission en cours.",
+          "history": "Aucun historique."
+        },
+        "empty_active_cta": "Voir les demandes disponibles",
+        "go_to_board": "Voir les demandes disponibles",
+        "status": {
+          "pending_arrival": "En attente d'arrivée",
+          "accepted": "Acceptée",
+          "completed": "Terminée",
+          "no_show": "Annulée (absence)"
+        },
+        "unknown_clinic": "Clinique inconnue",
+        "planned_on": "Prévu le :",
+        "actions": {
+          "call": "Appeler",
+          "go": "Y aller"
+        }
       }
     },
     "profile": {
@@ -459,7 +506,11 @@
         "blood_group": "GROUPE",
         "status": "STATUT",
         "donors_found": "DONNEURS TROUVÉS",
-        "action": "ACTION"
+        "action": "ACTION",
+        "on_the_way": "En route",
+        "waiting": "En attente...",
+        "donor": "Donneur",
+        "close_tooltip": "Clôturer"
       },
       "status": {
         "open": "OUVERTE",
@@ -478,12 +529,6 @@
         "donor_found": "Donneur trouvé !",
         "owner_contact": "Contact propriétaire",
         "waiting_donor": "En attente de donneur..."
-      },
-      "columns": {
-        "on_the_way": "En route",
-        "waiting": "En attente...",
-        "donor": "Donneur",
-        "close_tooltip": "Clôturer"
       },
       "empty": "Aucune demande en cours.",
       "type_emergency_short": "Urgence",

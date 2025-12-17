@@ -1,7 +1,7 @@
 import { ref } from 'vue'
 import { generateClient } from 'aws-amplify/api'
-import { deleteUser, fetchUserAttributes } from 'aws-amplify/auth'
-import { listOwners, listAnimals } from '@/graphql/queries'
+import { deleteUser, getCurrentUser } from 'aws-amplify/auth'
+import { getOwner, listAnimals } from '@/graphql/queries'
 import { updateOwner, deleteOwner, deleteAnimal } from '@/graphql/mutations'
 import { useAuthStore } from '@/stores/auth'
 import { useRouter } from 'vue-router'
@@ -29,20 +29,19 @@ export function useOwnerProfile() {
   const fetchProfile = async () => {
     isLoading.value = true
     try {
-      const attributes = await fetchUserAttributes()
-      const userEmail = attributes.email
+      const { userId } = await getCurrentUser()
 
-      if (!userEmail) throw new Error("Impossible de récupérer l'email utilisateur")
+      if (!userId) throw new Error("Impossible de récupérer l'ID utilisateur")
 
       const { data } = await client.graphql({
-        query: listOwners,
+        query: getOwner,
         variables: {
-          filter: { email: { eq: userEmail } },
+          id: userId,
         },
         authMode: 'userPool',
       })
 
-      const profile = data.listOwners.items[0]
+      const profile = data.getOwner
 
       if (profile) {
         ownerId.value = profile.id

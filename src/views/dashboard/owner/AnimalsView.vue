@@ -26,9 +26,8 @@ const speciesOptions = computed(() => [
   { label: t('request.species.cat'), value: Species.CAT },
 ])
 
-const bloodOptions = computed(
-  () => BloodGroupsBySpecies[editForm.value.species] || [],
-)
+const bloodOptions = computed(() => BloodGroupsBySpecies[editForm.value.species] || [])
+
 const frequencyOptions = computed(() => [
   { label: t('dashboard.owner.animals.frequency.asap'), value: DonationFrequency.ASAP },
   { label: t('dashboard.owner.animals.frequency.twice_year'), value: DonationFrequency.TWICE_YEAR },
@@ -50,7 +49,6 @@ onMounted(() => {
 })
 
 const openEditModal = (animal) => {
-  selectedAnimal.value = animal
   editForm.value = JSON.parse(JSON.stringify(animal))
   showEditModal.value = true
 }
@@ -136,16 +134,7 @@ const onDelete = async () => {
             :placeholder="$t('dashboard.owner.animals.form.weight')"
             :min-fraction-digits="1"
           />
-          <Calendar
-            v-model="editForm.birthDate"
-            date-format="dd/mm/yy"
-            :placeholder="$t('auth.register_owner.fields.animal_birth_date')"
-            :manual-input="false"
-            show-icon
-            icon-display="input"
-            class="w-full"
-            input-class="w-full !bg-zinc-50 dark:!bg-zinc-950 !border-zinc-300 dark:!border-zinc-800"
-          />
+          <AppDatePicker v-model="editForm.birthDate" date-format="dd/mm/yy" />
         </div>
         <div class="grid grid-cols-2 gap-2">
           <Select

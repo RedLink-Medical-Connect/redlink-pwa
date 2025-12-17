@@ -1,23 +1,21 @@
 export const getVetWithClinic = /* GraphQL */ `
-  query GetVetWithClinic {
-    listVeterinarians {
-      items {
+  query GetVetWithClinic($id: ID!) {
+    getVeterinarian(id: $id) {
+      id
+      firstname
+      lastname
+      email
+      clinicID
+      clinic {
         id
-        firstname
-        lastname
+        name
+        rpps
         email
-        clinicID
-        clinic {
-          id
-          name
-          rpps
-          email
-          phone
-          address
-          latitude
-          longitude
-          hasEmergencyService
-        }
+        phone
+        address
+        latitude
+        longitude
+        hasEmergencyService
       }
     }
   }
@@ -62,6 +60,70 @@ export const listMyAnimalsSimple = /* GraphQL */ `
         name
         species
         bloodGroup
+      }
+    }
+  }
+`
+
+export const listMyAvailabilities = /* GraphQL */ `
+  query ListMyAvailabilities($filter: ModelOwnerAvailabilityFilterInput) {
+    listOwnerAvailabilities(filter: $filter) {
+      items {
+        id
+        dayOfWeek
+        startTime
+        endTime
+      }
+    }
+  }
+`
+
+export const listMyAnimalsMissions = /* GraphQL */ `
+  query ListMyAnimalsMissions($ownerID: ID!) {
+    listAnimals(filter: { ownerID: { eq: $ownerID } }) {
+      items {
+        id
+        name
+        missions {
+          items {
+            id
+            status
+            appointmentDatetime
+            request {
+              id
+              requestType
+              clinic {
+                name
+                address
+                phone
+                latitude
+                longitude
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+`
+
+export const listMyAnimalsByOwnerId = /* GraphQL */ `
+  query ListMyAnimalsByOwnerId($ownerID: ID!) {
+    listAnimals(filter: { ownerID: { eq: $ownerID } }) {
+      items {
+        id
+        name
+        species
+        breed
+        birthDate
+        weight
+        bloodGroup
+        isVaccinated
+        isSterilized
+        donationFrequency
+        ownerID
+        createdAt
+        updatedAt
       }
     }
   }
