@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted } from 'vue'
+import { onMounted, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import DashboardSidebar from '@/components/dashboard/DashboardSidebar.vue'
 import { useOwnerMissions } from '@/composables/useOwnerMissions'
@@ -7,8 +7,16 @@ import { useToast } from 'primevue/usetoast'
 
 const { t } = useI18n()
 const toast = useToast()
-const { missions, isLoading, isAccepting, fetchAvailableMissions, acceptMission } =
-  useOwnerMissions()
+const {
+  availableMissions: missions,
+  isLoading,
+  isAccepting,
+  fetchAvailableMissions,
+  acceptMission,
+} = useOwnerMissions()
+
+// S'assurer que missions est toujours un tableau
+const safeMissions = computed(() => missions.value || [])
 
 onMounted(() => {
   fetchAvailableMissions()
@@ -77,7 +85,7 @@ const handleAccept = async (mission) => {
         </div>
 
         <div
-          v-else-if="missions.length === 0"
+          v-else-if="!safeMissions || safeMissions.length === 0"
           class="flex flex-col items-center justify-center py-12 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800"
         >
           <div
@@ -93,9 +101,12 @@ const handleAccept = async (mission) => {
           </p>
         </div>
 
-        <div v-else class="grid grid-cols-1 lg:grid-cols-2 gap-6 animate-fade-in">
+        <div
+          v-else-if="missions && missions.length > 0"
+          class="grid grid-cols-1 lg:grid-cols-2 gap-6 animate-fade-in"
+        >
           <div
-            v-for="mission in missions"
+            v-for="mission in safeMissions"
             :key="mission.id"
             class="relative overflow-hidden bg-white dark:bg-zinc-900 rounded-xl border transition-all duration-300 hover:shadow-lg group"
             :class="
@@ -137,7 +148,11 @@ const handleAccept = async (mission) => {
                       })
                     }}
                     <span class="text-zinc-400 font-normal">
-                      {{ $t('dashboard.owner.missions.card.blood', { group: mission.requiredBloodGroup }) }}
+                      {{
+                        $t('dashboard.owner.missions.card.blood', {
+                          group: mission.requiredBloodGroup,
+                        })
+                      }}
                     </span>
                   </h3>
                   <p class="text-xs text-zinc-500 mt-1 flex items-center gap-1">
@@ -181,7 +196,6 @@ const handleAccept = async (mission) => {
               </div>
 
               <Button
-                @click="handleAccept(mission)"
                 :label="$t('dashboard.owner.missions.card.accept_cta')"
                 :loading="isAccepting"
                 :icon="mission.requestType === 'EMERGENCY' ? 'pi pi-bolt' : 'pi pi-check'"
@@ -191,6 +205,7 @@ const handleAccept = async (mission) => {
                     ? '!bg-[#ff3b4e] !border-[#ff3b4e] hover:!bg-[#e63545]'
                     : '!bg-zinc-900 !border-zinc-900 dark:!bg-white dark:!text-zinc-900'
                 "
+                @click="handleAccept(mission)"
               />
             </div>
           </div>

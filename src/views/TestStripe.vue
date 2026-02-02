@@ -74,8 +74,8 @@ const handlePayment = async () => {
 
     <button
       class="bg-blue-600 text-white px-6 py-3 rounded font-bold w-full hover:bg-blue-700 disabled:opacity-50"
-      @click="handlePayment"
       :disabled="loading"
+      @click="handlePayment"
     >
       {{ loading ? $t('testStripe.processing') : $t('testStripe.cta') }}
     </button>

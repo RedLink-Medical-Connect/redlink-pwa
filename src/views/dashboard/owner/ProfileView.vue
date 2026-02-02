@@ -127,7 +127,7 @@ onMounted(() => {
           v-else
           class="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-6 md:p-8 shadow-sm animate-fade-in"
         >
-          <form @submit.prevent="onSave" class="flex flex-col gap-6 max-w-3xl">
+          <form class="flex flex-col gap-6 max-w-3xl" @submit.prevent="onSave">
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div class="flex flex-col gap-2">
                 <label class="text-xs font-bold text-zinc-500 uppercase">{{

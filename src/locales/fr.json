@@ -280,6 +280,11 @@
     "species": {
       "dog": "Chien",
       "cat": "Chat"
+    },
+    "toasts": {
+      "create_success": "Demande créée avec succès !",
+      "create_failed": "Erreur lors de la création de la demande",
+      "missing_required": "Veuillez remplir tous les champs obligatoires"
     }
   },
   "dashboard": {
@@ -301,7 +306,8 @@
         "general": "MON PROFIL",
         "animals": "MES ANIMAUX",
         "availability": "DISPONIBILITÉ",
-        "notifications": "NOTIFICATIONS"
+        "notifications": "NOTIFICATIONS",
+        "missions": "MES MISSIONS"
       },
       "general": {
         "firstname": "Prénom",

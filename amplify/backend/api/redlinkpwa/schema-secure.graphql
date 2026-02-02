@@ -1,0 +1,273 @@
+# ==========================================================
+# REDLINK - SCHÉMA GRAPHQL SÉCURISÉ
+# Version: 2.0 - Phase 1 Sprint 1.2
+# ==========================================================
+
+# ---------------------------------------------------------
+# 1. CLINIQUE & VÉTÉRINAIRES
+# ---------------------------------------------------------
+
+type Clinic
+  @model
+  @auth(
+    rules: [
+      { allow: owner, ownerField: "owner" }
+      { allow: private, provider: userPools, operations: [read], condition: "profile = 'vet'" }
+      { allow: public, operations: [read], excludeFields: ["rpps", "email", "phone"] }
+    ]
+  ) {
+  id: ID!
+  name: String!
+  rpps: String!
+  email: String!
+  phone: String!
+  address: String!
+  latitude: Float
+  longitude: Float
+  hasEmergencyService: Boolean!
+
+  transfusionsDone: Int
+  donorOwnersCount: Int
+
+  veterinarians: [Veterinarian] @hasMany(indexName: "byClinicVet", fields: ["id"])
+  requests: [Request] @hasMany
+  clients: [ClinicOwnerRelation] @hasMany
+}
+
+type Veterinarian
+  @model
+  @auth(
+    rules: [
+      { allow: owner, ownerField: "owner" }
+      { allow: private, provider: userPools, operations: [read], condition: "profile = 'vet'" }
+    ]
+  ) {
+  id: ID!
+  firstname: String!
+  lastname: String!
+  email: String!
+
+  clinicID: ID! @index(name: "byClinicVet")
+  clinic: Clinic @belongsTo(fields: ["clinicID"])
+
+  validatedMissions: [Mission] @hasMany
+}
+
+# ---------------------------------------------------------
+# 2. PROPRIÉTAIRES & ANIMAUX
+# ---------------------------------------------------------
+
+type Owner
+  @model
+  @auth(
+    rules: [
+      { allow: owner, ownerField: "owner" }
+      {
+        allow: private
+        provider: userPools
+        operations: [read]
+        condition: "profile = 'vet'"
+        excludeFields: ["email", "phone"]
+      }
+    ]
+  ) {
+  id: ID!
+  firstname: String!
+  lastname: String!
+  email: String!
+  phone: String!
+  address: String!
+  latitude: Float
+  longitude: Float
+  maxTravelDistance: Int!
+
+  totalDonations: Int
+
+  animals: [Animal] @hasMany(indexName: "byOwnerAnimal", fields: ["id"])
+  availabilities: [OwnerAvailability] @hasMany
+  myClinics: [ClinicOwnerRelation] @hasMany
+}
+
+type OwnerAvailability
+  @model
+  @auth(
+    rules: [
+      { allow: owner, ownerField: "ownerID" }
+      { allow: private, provider: userPools, operations: [read], condition: "profile = 'vet'" }
+    ]
+  ) {
+  id: ID!
+  dayOfWeek: Int!
+  startTime: AWSTime!
+  endTime: AWSTime!
+
+  ownerID: ID! @index(name: "byOwnerAvail")
+  ownerProfile: Owner @belongsTo(fields: ["ownerID"])
+}
+
+type Animal
+  @model
+  @auth(
+    rules: [
+      { allow: owner, ownerField: "ownerID" }
+      { allow: private, provider: userPools, operations: [read], condition: "profile = 'vet'" }
+    ]
+  ) {
+  id: ID!
+  name: String!
+  species: Species!
+  breed: String
+  birthDate: AWSDate
+  weight: Float!
+  bloodGroup: String!
+  isVaccinated: Boolean!
+  isSterilized: Boolean
+  lastDonationDate: AWSDate
+  donationFrequency: DonationFrequency
+
+  ownerID: ID! @index(name: "byOwnerAnimal")
+  ownerProfile: Owner @belongsTo(fields: ["ownerID"])
+  missions: [Mission] @hasMany(indexName: "byAnimalMission")
+}
+
+type ClinicOwnerRelation
+  @model
+  @auth(
+    rules: [{ allow: owner, ownerField: "ownerID" }, { allow: owner, ownerField: "clinicID" }]
+  ) {
+  id: ID!
+  clinicID: ID! @index(name: "byClinicClient")
+  clinic: Clinic @belongsTo(fields: ["clinicID"])
+  ownerID: ID! @index(name: "byOwnerClient")
+  ownerProfile: Owner @belongsTo(fields: ["ownerID"])
+  isPrimaryClinic: Boolean
+}
+
+# ---------------------------------------------------------
+# 3. OPÉRATIONS (SÉCURISÉES)
+# ---------------------------------------------------------
+
+type Request
+  @model
+  @auth(
+    rules: [
+      { allow: owner, ownerField: "clinicID", operations: [create, read, update, delete] }
+      { allow: private, provider: userPools, operations: [read], condition: "profile = 'owner'" }
+    ]
+  ) {
+  id: ID!
+  requestType: RequestType!
+  requiredSpecies: Species!
+  requiredBloodGroup: String!
+  quantity: Int!
+  status: RequestStatus!
+  createdAt: AWSDateTime
+
+  clinicID: ID! @index(name: "byClinicRequest")
+  clinic: Clinic @belongsTo(fields: ["clinicID"])
+
+  activeMissionID: ID
+  mission: Mission @hasOne(fields: ["activeMissionID"])
+}
+
+type Mission
+  @model
+  @auth(
+    rules: [
+      { allow: owner, ownerField: "animalID", operations: [create, read, update] }
+      {
+        allow: private
+        provider: userPools
+        operations: [read, update]
+        condition: "profile = 'vet'"
+      }
+    ]
+  ) {
+  id: ID!
+  requestID: ID! @index(name: "byRequestMission")
+  request: Request @belongsTo(fields: ["requestID"])
+  animalID: ID! @index(name: "byAnimalMission")
+  animal: Animal @belongsTo(fields: ["animalID"])
+
+  status: MissionStatus!
+  appointmentDatetime: AWSDateTime
+
+  # Champs de paiement (MVP: désactivés)
+  stripePaymentIntentId: String
+  stripePaymentStatus: String
+
+  # Validation vétérinaire
+  validationCode: String
+  scannedAt: AWSDateTime
+
+  validatedByVeterinarianID: ID
+  validatedBy: Veterinarian @belongsTo(fields: ["validatedByVeterinarianID"])
+}
+
+# ---------------------------------------------------------
+# 4. ENUMS
+# ---------------------------------------------------------
+
+enum Species {
+  DOG
+  CAT
+}
+
+enum DonationFrequency {
+  ASAP
+  TWICE_YEAR
+  ONCE_YEAR
+}
+
+enum RequestType {
+  EMERGENCY
+  APPOINTMENT
+}
+
+enum RequestStatus {
+  OPEN
+  IN_PROGRESS
+  CLOSED
+  CANCELLED
+}
+
+enum MissionStatus {
+  ACCEPTED
+  PENDING_ARRIVAL
+  COMPLETED
+  NO_SHOW
+  # MVP: Statuts simplifiés
+  EN_ROUTE
+  ARRIVED
+}
+
+# ---------------------------------------------------------
+# 5. TYPES PERSONNALISÉS (FUTURS)
+# ---------------------------------------------------------
+
+# Pour Phase 2: Notifications
+# type Notification @model @auth(rules: [
+#   { allow: owner, ownerField: "userID" }
+# ]) {
+#   id: ID!
+#   userID: ID!
+#   type: NotificationType!
+#   title: String!
+#   message: String!
+#   isRead: Boolean!
+#   createdAt: AWSDateTime!
+# }
+
+# Pour Phase 2: Audit Trail
+# type AuditLog @model @auth(rules: [
+#   { allow: private, provider: userPools, operations: [create] },
+#   { allow: groups, groups: ["Admins"], operations: [read] }
+# ]) {
+#   id: ID!
+#   action: String!
+#   entityType: String!
+#   entityId: ID!
+#   userId: ID!
+#   timestamp: AWSDateTime!
+#   changes: AWSJSON
+# }

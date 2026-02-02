@@ -4,12 +4,14 @@ import { useI18n } from 'vue-i18n'
 import DashboardSidebar from '@/components/dashboard/DashboardSidebar.vue'
 import AddressAutocomplete from '@/components/common/AddressAutocomplete.vue'
 import PhoneInput from '@/components/common/PhoneInput.vue'
+import DataMigrationHelper from '@/components/debug/DataMigrationHelper.vue'
 import { useToast } from 'primevue/usetoast'
 import { useClinicSettings } from '@/composables/useClinicSettings'
 import Dialog from 'primevue/dialog'
 
 const { t } = useI18n()
 const showDeleteConfirm = ref(false)
+const showMigrationHelper = ref(false)
 const toast = useToast()
 
 const activeTab = ref('general')
@@ -31,15 +33,40 @@ const tabs = [
 ]
 
 onMounted(() => {
-  fetchSettings().catch(() => {
+  fetchSettings().catch((error) => {
+    console.error('❌ Erreur lors du chargement des paramètres:', error)
+    console.log('🔧 SOLUTIONS DE DÉBOGAGE DISPONIBLES:')
+    console.log('1. Tapez "debugData()" pour analyser les données')
+    console.log('2. Tapez "createTestData()" pour créer des données de test')
+    console.log('3. Tapez "migrateVeterinarianData()" pour migrer les données existantes')
+    console.log('4. Tapez "analyzeCurrentData()" pour analyser la situation actuelle')
+
+    showMigrationHelper.value = true
+
     toast.add({
       severity: 'error',
       summary: t('common.error'),
-      detail: t('dashboard.settings.toasts.load_failed'),
-      life: 3000,
+      detail:
+        'Aucun profil vétérinaire trouvé. Consultez la console pour les solutions de débogage.',
+      life: 10000,
     })
   })
 })
+
+const onMigrationSuccess = async () => {
+  showMigrationHelper.value = false
+  try {
+    await fetchSettings()
+    toast.add({
+      severity: 'success',
+      summary: 'Succès',
+      detail: 'Données rechargées avec succès',
+      life: 3000,
+    })
+  } catch (error) {
+    console.error('Erreur lors du rechargement:', error)
+  }
+}
 
 const onAddressSelect = (data) => {
   clinicForm.value.address = data.address
@@ -61,7 +88,7 @@ const onSaveClinic = async () => {
     toast.add({
       severity: 'error',
       summary: t('common.error'),
-      detail: t('dashboard.settings.toasts.save_failed'),
+      detail: e.message || t('dashboard.settings.toasts.save_failed'),
       life: 3000,
     })
   }
@@ -81,7 +108,7 @@ const onSaveVet = async () => {
     toast.add({
       severity: 'error',
       summary: t('common.error'),
-      detail: t('dashboard.settings.toasts.save_failed'),
+      detail: e.message || t('dashboard.settings.toasts.save_failed'),
       life: 3000,
     })
   }
@@ -172,10 +199,13 @@ const onDelete = async () => {
             <i class="pi pi-spin pi-spinner text-4xl text-[#ff3b4e]"></i>
           </div>
 
+          <!-- Composant d'aide à la migration -->
+          <DataMigrationHelper v-if="showMigrationHelper" @migration-success="onMigrationSuccess" />
+
           <form
             v-if="activeTab === 'general'"
-            @submit.prevent="onSaveClinic"
             class="flex flex-col gap-6 max-w-3xl"
+            @submit.prevent="onSaveClinic"
           >
             <h2
               class="text-xl font-bold text-zinc-900 dark:text-white mb-4 border-l-4 border-[#ff3b4e] pl-3"
@@ -241,7 +271,7 @@ const onDelete = async () => {
               <Checkbox
                 v-model="clinicForm.hasEmergencyService"
                 :binary="true"
-                inputId="emergency"
+                input-id="emergency"
               />
               <label for="emergency" class="text-sm font-medium cursor-pointer">{{
                 $t('dashboard.settings.emergency')
@@ -260,8 +290,8 @@ const onDelete = async () => {
 
           <form
             v-else-if="activeTab === 'vet_ref'"
-            @submit.prevent="onSaveVet"
             class="flex flex-col gap-6 max-w-3xl"
+            @submit.prevent="onSaveVet"
           >
             <h2
               class="text-xl font-bold text-zinc-900 dark:text-white mb-4 border-l-4 border-[#ff3b4e] pl-3"

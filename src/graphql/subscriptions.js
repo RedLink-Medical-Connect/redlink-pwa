@@ -728,11 +728,8 @@ export const onDeleteClinicOwnerRelation = /* GraphQL */ `
   }
 `;
 export const onCreateRequest = /* GraphQL */ `
-  subscription OnCreateRequest(
-    $filter: ModelSubscriptionRequestFilterInput
-    $owner: String
-  ) {
-    onCreateRequest(filter: $filter, owner: $owner) {
+  subscription OnCreateRequest($filter: ModelSubscriptionRequestFilterInput) {
+    onCreateRequest(filter: $filter) {
       id
       requestType
       requiredSpecies
@@ -765,11 +762,11 @@ export const onCreateRequest = /* GraphQL */ `
         animalID
         status
         appointmentDatetime
-        stripePaymentIntentId
-        stripePaymentStatus
         validationCode
         scannedAt
         validatedByVeterinarianID
+        stripePaymentIntentId
+        stripePaymentStatus
         createdAt
         updatedAt
         veterinarianValidatedMissionsId
@@ -779,17 +776,13 @@ export const onCreateRequest = /* GraphQL */ `
       }
       updatedAt
       clinicRequestsId
-      owner
       __typename
     }
   }
 `;
 export const onUpdateRequest = /* GraphQL */ `
-  subscription OnUpdateRequest(
-    $filter: ModelSubscriptionRequestFilterInput
-    $owner: String
-  ) {
-    onUpdateRequest(filter: $filter, owner: $owner) {
+  subscription OnUpdateRequest($filter: ModelSubscriptionRequestFilterInput) {
+    onUpdateRequest(filter: $filter) {
       id
       requestType
       requiredSpecies
@@ -822,11 +815,11 @@ export const onUpdateRequest = /* GraphQL */ `
         animalID
         status
         appointmentDatetime
-        stripePaymentIntentId
-        stripePaymentStatus
         validationCode
         scannedAt
         validatedByVeterinarianID
+        stripePaymentIntentId
+        stripePaymentStatus
         createdAt
         updatedAt
         veterinarianValidatedMissionsId
@@ -836,17 +829,13 @@ export const onUpdateRequest = /* GraphQL */ `
       }
       updatedAt
       clinicRequestsId
-      owner
       __typename
     }
   }
 `;
 export const onDeleteRequest = /* GraphQL */ `
-  subscription OnDeleteRequest(
-    $filter: ModelSubscriptionRequestFilterInput
-    $owner: String
-  ) {
-    onDeleteRequest(filter: $filter, owner: $owner) {
+  subscription OnDeleteRequest($filter: ModelSubscriptionRequestFilterInput) {
+    onDeleteRequest(filter: $filter) {
       id
       requestType
       requiredSpecies
@@ -879,11 +868,11 @@ export const onDeleteRequest = /* GraphQL */ `
         animalID
         status
         appointmentDatetime
-        stripePaymentIntentId
-        stripePaymentStatus
         validationCode
         scannedAt
         validatedByVeterinarianID
+        stripePaymentIntentId
+        stripePaymentStatus
         createdAt
         updatedAt
         veterinarianValidatedMissionsId
@@ -893,7 +882,6 @@ export const onDeleteRequest = /* GraphQL */ `
       }
       updatedAt
       clinicRequestsId
-      owner
       __typename
     }
   }
@@ -918,7 +906,6 @@ export const onCreateMission = /* GraphQL */ `
         activeMissionID
         updatedAt
         clinicRequestsId
-        owner
         __typename
       }
       animalID
@@ -942,8 +929,6 @@ export const onCreateMission = /* GraphQL */ `
       }
       status
       appointmentDatetime
-      stripePaymentIntentId
-      stripePaymentStatus
       validationCode
       scannedAt
       validatedByVeterinarianID
@@ -958,6 +943,8 @@ export const onCreateMission = /* GraphQL */ `
         owner
         __typename
       }
+      stripePaymentIntentId
+      stripePaymentStatus
       createdAt
       updatedAt
       veterinarianValidatedMissionsId
@@ -987,7 +974,6 @@ export const onUpdateMission = /* GraphQL */ `
         activeMissionID
         updatedAt
         clinicRequestsId
-        owner
         __typename
       }
       animalID
@@ -1011,8 +997,6 @@ export const onUpdateMission = /* GraphQL */ `
       }
       status
       appointmentDatetime
-      stripePaymentIntentId
-      stripePaymentStatus
       validationCode
       scannedAt
       validatedByVeterinarianID
@@ -1027,6 +1011,8 @@ export const onUpdateMission = /* GraphQL */ `
         owner
         __typename
       }
+      stripePaymentIntentId
+      stripePaymentStatus
       createdAt
       updatedAt
       veterinarianValidatedMissionsId
@@ -1056,7 +1042,6 @@ export const onDeleteMission = /* GraphQL */ `
         activeMissionID
         updatedAt
         clinicRequestsId
-        owner
         __typename
       }
       animalID
@@ -1080,8 +1065,6 @@ export const onDeleteMission = /* GraphQL */ `
       }
       status
       appointmentDatetime
-      stripePaymentIntentId
-      stripePaymentStatus
       validationCode
       scannedAt
       validatedByVeterinarianID
@@ -1096,6 +1079,8 @@ export const onDeleteMission = /* GraphQL */ `
         owner
         __typename
       }
+      stripePaymentIntentId
+      stripePaymentStatus
       createdAt
       updatedAt
       veterinarianValidatedMissionsId

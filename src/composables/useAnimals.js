@@ -4,13 +4,19 @@ import { getCurrentUser } from 'aws-amplify/auth'
 import { updateAnimal, deleteAnimal } from '@/graphql/mutations'
 import { createAnimalSimple } from '@/graphql/custom-mutations.js'
 import { listMyAnimalsByOwnerId } from '@/graphql/custom-queries.js'
+import { useValidation } from '@/composables/useValidation.js'
+import { animalSchema, validateDonorEligibility } from '@/utils/validation.js'
 
 export function useAnimals() {
   const client = generateClient()
+  // On récupère validate et errors depuis ton composable de validation
+  const { validate, errors } = useValidation()
+
   const isLoading = ref(false)
   const isSaving = ref(false)
   const animals = ref([])
 
+  // Utilitaire interne
   const calculateAge = (d) => {
     if (!d) return '?'
     const ageDifMs = Date.now() - new Date(d).getTime()
@@ -18,11 +24,11 @@ export function useAnimals() {
     return Math.abs(ageDate.getUTCFullYear() - 1970)
   }
 
+  // --- FETCH ---
   const fetchAnimals = async () => {
     isLoading.value = true
     try {
       const { userId } = await getCurrentUser()
-
       if (!userId) throw new Error("Impossible de récupérer l'ID utilisateur")
 
       const { data } = await client.graphql({
@@ -32,13 +38,18 @@ export function useAnimals() {
       })
 
       const rawAnimals = data.listAnimals?.items || []
-
       const validItems = rawAnimals.filter((item) => item && !item._deleted)
 
-      animals.value = validItems.map((animal) => ({
-        ...animal,
-        age: calculateAge(animal.birthDate),
-      }))
+      // On map les animaux et on calcule leur éligibilité dès la récupération
+      animals.value = validItems.map((animal) => {
+        const eligibility = validateDonorEligibility(animal)
+        return {
+          ...animal,
+          age: calculateAge(animal.birthDate),
+          isEligible: eligibility.isEligible, // Ajout utile pour l'affichage
+          eligibilityReasons: eligibility.reasons,
+        }
+      })
 
       return userId
     } catch (e) {
@@ -49,7 +60,14 @@ export function useAnimals() {
     }
   }
 
+  // --- UPDATE ---
   const updateAnimalDetails = async (form) => {
+    // 1. Validation avant envoi
+    const isValid = await validate(form, animalSchema)
+    if (!isValid) {
+      throw new Error('Validation échouée') // Le composant vérifiera l'objet 'errors'
+    }
+
     isSaving.value = true
     let updatedItem = null
 
@@ -76,7 +94,7 @@ export function useAnimals() {
       updatedItem = response.data?.updateAnimal
     } catch (error) {
       if (error.data && error.data.updateAnimal) {
-        console.warn('Update réussi (malgré erreurs relations)', error.errors)
+        console.warn('Update partiel (erreurs relations possibles)', error.errors)
         updatedItem = error.data.updateAnimal
       } else {
         throw error
@@ -85,10 +103,15 @@ export function useAnimals() {
       if (updatedItem) {
         const index = animals.value.findIndex((a) => a.id === updatedItem.id)
         if (index !== -1) {
+          // Recalcul éligibilité après modification
+          const eligibility = validateDonorEligibility(updatedItem)
+
           animals.value[index] = {
             ...animals.value[index],
             ...updatedItem,
             age: calculateAge(updatedItem.birthDate),
+            isEligible: eligibility.isEligible,
+            eligibilityReasons: eligibility.reasons,
           }
         }
       }
@@ -96,11 +119,13 @@ export function useAnimals() {
     }
   }
 
+  // --- DELETE ---
   const deleteAnimalById = async (id) => {
     isSaving.value = true
     const previousAnimals = [...animals.value]
 
     try {
+      // Optimistic UI update
       animals.value = animals.value.filter((a) => a.id !== id)
 
       await client.graphql({
@@ -109,11 +134,11 @@ export function useAnimals() {
         authMode: 'userPool',
       })
     } catch (error) {
-      if (error.data && error.data.deleteAnimal) {
-        return
-      }
+      // Si l'objet est déjà supprimé ou erreur partielle acceptable
+      if (error.data && error.data.deleteAnimal) return
 
-      console.error('Vraie erreur suppression:', error)
+      console.error('Erreur suppression:', error)
+      // Rollback
       animals.value = previousAnimals
       throw error
     } finally {
@@ -121,8 +146,16 @@ export function useAnimals() {
     }
   }
 
+  // --- CREATE ---
   const createNewAnimal = async (form, ownerID) => {
+    // 1. Validation
+    const isValid = await validate(form, animalSchema)
+    if (!isValid) {
+      throw new Error('Validation échouée')
+    }
+
     isSaving.value = true
+
     try {
       const input = {
         ownerID: ownerID,
@@ -135,7 +168,7 @@ export function useAnimals() {
         isVaccinated: form.isVaccinated,
         isSterilized: form.isSterilized,
         donationFrequency: form.donationFrequency,
-        lastDonationDate: null
+        lastDonationDate: null,
       }
 
       const { data } = await client.graphql({
@@ -145,14 +178,21 @@ export function useAnimals() {
       })
 
       if (data.createAnimal) {
-        animals.value.push({
+        const eligibilityCheck = validateDonorEligibility(data.createAnimal)
+
+        const newAnimal = {
           ...data.createAnimal,
-          age: calculateAge(data.createAnimal.birthDate)
-        })
+          age: calculateAge(data.createAnimal.birthDate),
+          isEligible: eligibilityCheck.isEligible,
+          eligibilityReasons: eligibilityCheck.reasons,
+        }
+
+        animals.value.push(newAnimal)
+        return newAnimal // Retourne l'objet complet enrichi
       }
-
-      return data.createAnimal
-
+    } catch (error) {
+      console.error('Erreur création animal:', error)
+      throw error
     } finally {
       isSaving.value = false
     }
@@ -162,6 +202,7 @@ export function useAnimals() {
     animals,
     isLoading,
     isSaving,
+    errors, // Très utile pour le template
     fetchAnimals,
     updateAnimalDetails,
     deleteAnimalById,

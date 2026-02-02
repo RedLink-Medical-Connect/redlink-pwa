@@ -143,9 +143,9 @@
       "send": "OK",
       "rights_reserved": "All rights reserved.",
       "made_with": "Made with",
-    "in_france": "in France",
-    "company": "RedLink SAS",
-    "version": "v1.0.0"
+      "in_france": "in France",
+      "company": "RedLink SAS",
+      "version": "v1.0.0"
     },
     "mobile": {
       "home": "Home",
@@ -279,6 +279,11 @@
     "species": {
       "dog": "Dog",
       "cat": "Cat"
+    },
+    "toasts": {
+      "create_success": "Request created successfully!",
+      "create_failed": "Error creating the request",
+      "missing_required": "Please fill in all required fields"
     }
   },
   "dashboard": {
@@ -300,7 +305,8 @@
         "general": "MY PROFILE",
         "animals": "MY ANIMALS",
         "availability": "AVAILABILITY",
-        "notifications": "NOTIFICATIONS"
+        "notifications": "NOTIFICATIONS",
+        "missions": "MY MISSIONS"
       },
       "general": {
         "firstname": "First name",
@@ -363,28 +369,28 @@
           "submit": "Save the animal"
         }
       },
-    "missions": {
-      "title": "Rescue missions",
-      "subtitle": "These animals need you. Accept a mission to help them.",
-      "empty_title": "All good!",
-      "empty_subtitle": "No blood request at the moment.",
-      "asap": "As soon as possible",
-      "card": {
-        "title": "Looking for {species}",
-        "blood": "Group {group}",
-        "quantity": "Required quantity",
-        "date": "Date",
-        "immediately": "IMMEDIATELY",
-        "accept_cta": "I ACCEPT THE MISSION"
+      "missions": {
+        "title": "Rescue missions",
+        "subtitle": "These animals need you. Accept a mission to help them.",
+        "empty_title": "All good!",
+        "empty_subtitle": "No blood request at the moment.",
+        "asap": "As soon as possible",
+        "card": {
+          "title": "Looking for {species}",
+          "blood": "Group {group}",
+          "quantity": "Required quantity",
+          "date": "Date",
+          "immediately": "IMMEDIATELY",
+          "accept_cta": "I ACCEPT THE MISSION"
+        },
+        "toasts": {
+          "accepted_title": "Mission accepted!",
+          "accepted_detail": "Great! {name} is expected at the clinic.",
+          "incompatible_title": "Incompatible",
+          "incompatible_detail": "You don't have a registered animal matching the required species/blood.",
+          "accept_failed": "Unable to accept the mission."
+        }
       },
-      "toasts": {
-        "accepted_title": "Mission accepted!",
-        "accepted_detail": "Great! {name} is expected at the clinic.",
-        "incompatible_title": "Incompatible",
-        "incompatible_detail": "You don't have a registered animal matching the required species/blood.",
-        "accept_failed": "Unable to accept the mission."
-      }
-    },
       "availability": {
         "title": "Intervention area",
         "distance_label": "I am ready to travel up to:",

@@ -71,3 +71,7 @@ amplifytools.xcconfig
 
 # Fichiers sensibles Amplify
 amplify/team-provider-info.json
+
+# Sauvegardes de configuration (contiennent des secrets)
+src/amplifyconfiguration.json.backup
+src/aws-exports.js.backup

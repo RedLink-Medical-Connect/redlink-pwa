@@ -1,12 +1,22 @@
-# ---------------------------------------------------------
+# ==========================================================
+# REDLINK - SCHÉMA GRAPHQL MVP (OPTIMISÉ)
+# Version: 2.3 - Auth & Relations Consolidées
+# ==========================================================
+
 # 1. CLINIQUE & VÉTÉRINAIRES
 # ---------------------------------------------------------
-
-type Clinic @model @auth(rules: [
-  { allow: owner },
-  { allow: groups, groups: ["Veterinarians"], operations: [create, read, update, delete] },
-  { allow: private, operations: [read] }
-]) {
+type Clinic
+  @model
+  @auth(
+    rules: [
+      # Seuls les admins ou le créateur peuvent supprimer une clinique
+      { allow: owner }
+      # Les vétérinaires peuvent créer et modifier, mais pas supprimer (sécurité)
+      { allow: groups, groups: ["Veterinarians"], operations: [create, read, update] }
+      # Tout utilisateur connecté (Owner) peut voir les détails d'une clinique
+      { allow: private, operations: [read] }
+    ]
+  ) {
   id: ID!
   name: String!
   rpps: String!
@@ -16,20 +26,28 @@ type Clinic @model @auth(rules: [
   latitude: Float
   longitude: Float
   hasEmergencyService: Boolean!
-
   transfusionsDone: Int
   donorOwnersCount: Int
 
+  # Relations
   veterinarians: [Veterinarian] @hasMany(indexName: "byClinicVet", fields: ["id"])
   requests: [Request] @hasMany
   clients: [ClinicOwnerRelation] @hasMany
 }
 
-type Veterinarian @model @auth(rules: [
-  { allow: owner },
-  { allow: groups, groups: ["Admins"], operations: [read, delete] }
-]) {
-  id: ID!
+type Veterinarian
+  @model
+  @auth(
+    rules: [
+      # Le vétérinaire possède son propre profil (ID = Cognito ID)
+      { allow: owner }
+      # Les admins peuvent gérer les vétérinaires si besoin
+      { allow: groups, groups: ["Admins"], operations: [read, delete] }
+      # Les autres vétérinaires et owners peuvent lire les infos basiques (pour l'affichage mission)
+      { allow: private, operations: [read] }
+    ]
+  ) {
+  id: ID! # DOIT ÊTRE ÉGAL AU COGNITO SUB
   firstname: String!
   lastname: String!
   email: String!
@@ -40,16 +58,19 @@ type Veterinarian @model @auth(rules: [
   validatedMissions: [Mission] @hasMany
 }
 
-# ---------------------------------------------------------
 # 2. PROPRIÉTAIRES & ANIMAUX
 # ---------------------------------------------------------
-
-type Owner @model @auth(rules: [
-  { allow: owner },
-  { allow: groups, groups: ["Veterinarians"], operations: [read] },
-  { allow: private, operations: [read] }
-]) {
-  id: ID!
+type Owner
+  @model
+  @auth(
+    rules: [
+      # L'owner gère son profil (ID = Cognito ID)
+      { allow: owner }
+      # Les vétérinaires doivent pouvoir lire le profil d'un donneur lors d'une mission
+      { allow: groups, groups: ["Veterinarians"], operations: [read] }
+    ]
+  ) {
+  id: ID! # DOIT ÊTRE ÉGAL AU COGNITO SUB
   firstname: String!
   lastname: String!
   email: String!
@@ -58,7 +79,6 @@ type Owner @model @auth(rules: [
   latitude: Float
   longitude: Float
   maxTravelDistance: Int!
-
   totalDonations: Int
 
   animals: [Animal] @hasMany(indexName: "byOwnerAnimal", fields: ["id"])
@@ -66,11 +86,11 @@ type Owner @model @auth(rules: [
   myClinics: [ClinicOwnerRelation] @hasMany
 }
 
-type OwnerAvailability @model @auth(rules: [
-  { allow: owner },
-  { allow: groups, groups: ["Veterinarians"], operations: [read] },
-  { allow: private, operations: [read] }
-]) {
+type OwnerAvailability
+  @model
+  @auth(
+    rules: [{ allow: owner }, { allow: groups, groups: ["Veterinarians"], operations: [read] }]
+  ) {
   id: ID!
   dayOfWeek: Int!
   startTime: AWSTime!
@@ -80,11 +100,11 @@ type OwnerAvailability @model @auth(rules: [
   ownerProfile: Owner @belongsTo(fields: ["ownerID"])
 }
 
-type Animal @model @auth(rules: [
-  { allow: owner },
-  { allow: groups, groups: ["Veterinarians"], operations: [read] },
-  { allow: private, operations: [read] }
-]) {
+type Animal
+  @model
+  @auth(
+    rules: [{ allow: owner }, { allow: groups, groups: ["Veterinarians"], operations: [read] }]
+  ) {
   id: ID!
   name: String!
   species: Species!
@@ -102,10 +122,10 @@ type Animal @model @auth(rules: [
   missions: [Mission] @hasMany(indexName: "byAnimalMission")
 }
 
-type ClinicOwnerRelation @model @auth(rules: [
-  { allow: owner },
-  { allow: groups, groups: ["Veterinarians"] }
-]) {
+# Table de jointure Many-to-Many
+type ClinicOwnerRelation
+  @model
+  @auth(rules: [{ allow: owner }, { allow: groups, groups: ["Veterinarians"] }]) {
   id: ID!
   clinicID: ID! @index(name: "byClinicClient")
   clinic: Clinic @belongsTo(fields: ["clinicID"])
@@ -114,15 +134,18 @@ type ClinicOwnerRelation @model @auth(rules: [
   isPrimaryClinic: Boolean
 }
 
+# 3. OPÉRATIONS (URGENCES & MISSIONS)
 # ---------------------------------------------------------
-# 3. OPÉRATIONS
-# ---------------------------------------------------------
-
-type Request @model @auth(rules: [
-  { allow: groups, groups: ["Veterinarians"] },
-  { allow: owner },
-  { allow: private, operations: [read, update] }
-]) {
+type Request
+  @model
+  @auth(
+    rules: [
+      # Créé par les vétérinaires
+      { allow: groups, groups: ["Veterinarians"] }
+      # Visible par tous les utilisateurs connectés (pour recevoir les notifs/voir la liste)
+      { allow: private, operations: [read] }
+    ]
+  ) {
   id: ID!
   requestType: RequestType!
   requiredSpecies: Species!
@@ -138,11 +161,16 @@ type Request @model @auth(rules: [
   mission: Mission @hasOne(fields: ["activeMissionID"])
 }
 
-type Mission @model @auth(rules: [
-  { allow: owner },
-  { allow: groups, groups: ["Veterinarians"] },
-  { allow: private, operations: [read] }
-]) {
+type Mission
+  @model
+  @auth(
+    rules: [
+      # L'Owner (donneur) peut voir et mettre à jour (ex: accepter la mission)
+      { allow: owner }
+      # Les vétérinaires peuvent tout gérer
+      { allow: groups, groups: ["Veterinarians"] }
+    ]
+  ) {
   id: ID!
   requestID: ID! @index(name: "byRequestMission")
   request: Request @belongsTo(fields: ["requestID"])
@@ -152,19 +180,19 @@ type Mission @model @auth(rules: [
   status: MissionStatus!
   appointmentDatetime: AWSDateTime
 
-  stripePaymentIntentId: String
-  stripePaymentStatus: String
+  # Gestion du Scan/Validation
   validationCode: String
   scannedAt: AWSDateTime
-
   validatedByVeterinarianID: ID
   validatedBy: Veterinarian @belongsTo(fields: ["validatedByVeterinarianID"])
+
+  # Paiement (Optionnel pour MVP mais prêt)
+  stripePaymentIntentId: String
+  stripePaymentStatus: String
 }
 
-# ---------------------------------------------------------
 # 4. ENUMS
 # ---------------------------------------------------------
-
 enum Species {
   DOG
   CAT
@@ -191,6 +219,8 @@ enum RequestStatus {
 enum MissionStatus {
   ACCEPTED
   PENDING_ARRIVAL
-  COMPLETED
-  NO_SHOW
+  EN_ROUTE # Ajouté : le donneur est en route
+  ARRIVED # Ajouté : le donneur est arrivé
+  COMPLETED # Don effectué
+  NO_SHOW # Lapin posé
 }
