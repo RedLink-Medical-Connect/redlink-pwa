@@ -1,0 +1,91 @@
+# redlink-pwa — editor rules
+
+Vue 3 (`<script setup>`) + Vite PWA, plain JavaScript (no TypeScript in this repo —
+don't introduce `.ts`/`tsconfig.json` or TS-only syntax; there is no `any` to ban
+because there is no type system here). AWS Amplify (GraphQL) backend. Tailwind for
+styling, PrimeVue for UI components, vue-i18n for copy.
+
+## Naming
+
+- **Composables**: `useXxx.js` in `src/composables/`, one exported function
+  `export function useXxx() { ... }` returning a plain object of refs/computed/functions.
+  Match the file name to the exported function name (`useAnimals.js` → `useAnimals`).
+- **Components**: PascalCase filenames (`PhoneInput.vue`, `AppDatePicker.vue`,
+  `DashboardSidebar.vue`). Multi-word names are not required
+  (`vue/multi-word-component-names` is off in eslint.config.js) but prefer them for
+  anything that isn't a page-level view.
+- **Views**: PascalCase, suffixed `View.vue`, under `src/views/<area>/` where `<area>`
+  mirrors the route/role (`auth/`, `dashboard/owner/`, `dashboard/clinic/`).
+- **Services**: kebab-case, suffixed `-service.js`, under `src/services/` — reserved for
+  pure, framework-free functions (see "Deep modules" below).
+- **Functions/variables**: camelCase. Async data-fetchers read as `fetchX`/`listX`;
+  mutators read as `createX`/`updateXDetails`/`deleteXById`.
+- **Constants/enums**: PascalCase export names, `UPPER_SNAKE` values, grouped in
+  `src/constants/enums.js`, always `Object.freeze`d.
+
+## Component structure (`.vue` files)
+
+Order inside `<script setup>`, matching the existing components:
+
+1. Framework/library imports (`vue`, `vue-router`, `vue-i18n`, third-party)
+2. Local imports (`@/composables/...`, `@/constants/...`, `@/services/...`)
+3. `defineOptions` (only when needed, e.g. `inheritAttrs: false`)
+4. `defineEmits` before `defineProps`
+5. Local reactive state (`ref`/`computed`)
+6. `watch`/`onMounted` and other lifecycle/effects
+7. Handler functions (`handleXxx`, or the specific verb for the action)
+
+Use `@/...` path aliases, never relative `../../..` climbs, for anything outside the
+current directory.
+
+## Enums over string literals
+
+`src/constants/enums.js` is the single source of truth for domain values
+(`Species`, `RequestStatus`, `MissionStatus`, `RequestType`, `BloodGroupsBySpecies`,
+`DonationFrequency`). Import from there — never hardcode `'OPEN'`, `'EMERGENCY'`,
+`'DOG'`, etc. as string literals in composables or components. If a value doesn't
+have an enum entry yet, add one instead of inlining the string.
+
+## Composables: own data + state, not navigation
+
+A composable returns `{ data refs, isLoading/isSaving, action functions }` and nothing
+else. It must not call `useRouter()` or perform `router.push(...)` itself — the calling
+view owns navigation after `await`ing the composable's action. (Some existing
+composables violate this — don't copy that pattern into new code.)
+
+## GraphQL calls
+
+- Always go through `generateClient()` from `aws-amplify/api`, with an explicit
+  `authMode: 'userPool'`.
+- Wrap every call in `try/catch/finally`, toggling a dedicated loading ref
+  (`isLoading`/`isSaving`/`isAccepting`) in `finally`.
+- Prefer the `*Simple` mutations in `src/graphql/custom-mutations.js` when a full
+  relation-graph mutation would otherwise error on nested fields.
+- Log failures via `console.error('<French, contextual message>:', error)` before
+  rethrowing or resetting state — match the existing French error-message style used
+  throughout the composables.
+
+## Deep modules for domain logic
+
+Pure business rules (blood/species compatibility, distance calculation, eligibility)
+belong in `src/services/*-service.js` as framework-free exported functions — no Vue
+reactivity, no GraphQL client, no DOM. `src/services/geolocation-service.js` is the
+reference shape: small interface (`calculateDistance`, `isBloodCompatible`), everything
+else internal. Route new domain rules through the existing service file for the same
+domain rather than reimplementing the rule inline in a composable or component — check
+for an existing rule before writing a new one.
+
+## i18n
+
+User-facing copy goes through vue-i18n keys backed by `src/locales/*.json`. The
+`@intlify/vue-i18n/no-missing-keys` eslint rule is `error` — a key referenced in code
+that isn't in the locale JSON fails lint. Don't hardcode UI strings when a locale key
+convention already exists for that screen; when hardcoding is unavoidable (rare, e.g. a
+brand-new screen with no established key yet), match the existing French phrasing style
+used elsewhere before wiring i18n.
+
+## Linting
+
+Runs `eslint . --fix --cache` (`npm run lint` / `pnpm lint`). Prettier formatting is
+delegated (`skipFormatting` in eslint.config.js) — don't fight the formatter, don't hand
+format.
