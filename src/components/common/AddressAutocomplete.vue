@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import AutoComplete from 'primevue/autocomplete'
 import { Geo } from '@aws-amplify/geo'
 
@@ -17,6 +17,12 @@ const props = defineProps({
 
 const suggestions = ref([])
 const selectedAddress = ref(props.modelValue)
+
+watch(() => props.modelValue, (newVal) => {
+  if (newVal !== selectedAddress.value) {
+    selectedAddress.value = newVal
+  }
+}, { immediate: true })
 
 const searchAddress = async (event) => {
   if (!event.query || event.query.length < 3) return

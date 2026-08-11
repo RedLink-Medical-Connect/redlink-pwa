@@ -42,7 +42,17 @@
   "auth": {
     "redlinkpwa056b43b0056b43b0": {
       "customAuth": false,
-      "dependsOn": [],
+      "dependsOn": [
+        {
+          "attributes": [
+            "Arn",
+            "Name"
+          ],
+          "category": "function",
+          "resourceName": "redlinkpwa056b43b0056b43b0PostConfirmation",
+          "triggerProvider": "Cognito"
+        }
+      ],
       "frontendAuthConfig": {
         "mfaConfiguration": "OFF",
         "mfaTypes": [
@@ -69,6 +79,11 @@
   },
   "function": {
     "createPaymentIntent": {
+      "build": true,
+      "providerPlugin": "awscloudformation",
+      "service": "Lambda"
+    },
+    "redlinkpwa056b43b0056b43b0PostConfirmation": {
       "build": true,
       "providerPlugin": "awscloudformation",
       "service": "Lambda"
@@ -115,6 +130,30 @@
         {
           "category": "function",
           "resourceName": "createPaymentIntent"
+        }
+      ]
+    },
+    "AMPLIFY_function_redlinkpwa056b43b0056b43b0PostConfirmation_GROUP": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "redlinkpwa056b43b0056b43b0PostConfirmation"
+        }
+      ]
+    },
+    "AMPLIFY_function_redlinkpwa056b43b0056b43b0PostConfirmation_deploymentBucketName": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "redlinkpwa056b43b0056b43b0PostConfirmation"
+        }
+      ]
+    },
+    "AMPLIFY_function_redlinkpwa056b43b0056b43b0PostConfirmation_s3Key": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "redlinkpwa056b43b0056b43b0PostConfirmation"
         }
       ]
     }

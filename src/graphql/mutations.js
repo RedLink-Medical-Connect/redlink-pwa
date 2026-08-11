@@ -360,7 +360,6 @@ export const createOwnerAvailability = /* GraphQL */ `
       }
       createdAt
       updatedAt
-      ownerAvailabilitiesId
       owner
       __typename
     }
@@ -395,7 +394,6 @@ export const updateOwnerAvailability = /* GraphQL */ `
       }
       createdAt
       updatedAt
-      ownerAvailabilitiesId
       owner
       __typename
     }
@@ -430,7 +428,6 @@ export const deleteOwnerAvailability = /* GraphQL */ `
       }
       createdAt
       updatedAt
-      ownerAvailabilitiesId
       owner
       __typename
     }
@@ -616,8 +613,6 @@ export const createClinicOwnerRelation = /* GraphQL */ `
       isPrimaryClinic
       createdAt
       updatedAt
-      clinicClientsId
-      ownerMyClinicsId
       owner
       __typename
     }
@@ -668,8 +663,6 @@ export const updateClinicOwnerRelation = /* GraphQL */ `
       isPrimaryClinic
       createdAt
       updatedAt
-      clinicClientsId
-      ownerMyClinicsId
       owner
       __typename
     }
@@ -720,8 +713,6 @@ export const deleteClinicOwnerRelation = /* GraphQL */ `
       isPrimaryClinic
       createdAt
       updatedAt
-      clinicClientsId
-      ownerMyClinicsId
       owner
       __typename
     }
@@ -765,21 +756,18 @@ export const createRequest = /* GraphQL */ `
         animalID
         status
         appointmentDatetime
-        stripePaymentIntentId
-        stripePaymentStatus
         validationCode
         scannedAt
         validatedByVeterinarianID
+        stripePaymentIntentId
+        stripePaymentStatus
         createdAt
         updatedAt
         veterinarianValidatedMissionsId
-        animalMissionsId
         owner
         __typename
       }
       updatedAt
-      clinicRequestsId
-      owner
       __typename
     }
   }
@@ -822,21 +810,18 @@ export const updateRequest = /* GraphQL */ `
         animalID
         status
         appointmentDatetime
-        stripePaymentIntentId
-        stripePaymentStatus
         validationCode
         scannedAt
         validatedByVeterinarianID
+        stripePaymentIntentId
+        stripePaymentStatus
         createdAt
         updatedAt
         veterinarianValidatedMissionsId
-        animalMissionsId
         owner
         __typename
       }
       updatedAt
-      clinicRequestsId
-      owner
       __typename
     }
   }
@@ -879,21 +864,18 @@ export const deleteRequest = /* GraphQL */ `
         animalID
         status
         appointmentDatetime
-        stripePaymentIntentId
-        stripePaymentStatus
         validationCode
         scannedAt
         validatedByVeterinarianID
+        stripePaymentIntentId
+        stripePaymentStatus
         createdAt
         updatedAt
         veterinarianValidatedMissionsId
-        animalMissionsId
         owner
         __typename
       }
       updatedAt
-      clinicRequestsId
-      owner
       __typename
     }
   }
@@ -917,8 +899,6 @@ export const createMission = /* GraphQL */ `
         clinicID
         activeMissionID
         updatedAt
-        clinicRequestsId
-        owner
         __typename
       }
       animalID
@@ -942,8 +922,6 @@ export const createMission = /* GraphQL */ `
       }
       status
       appointmentDatetime
-      stripePaymentIntentId
-      stripePaymentStatus
       validationCode
       scannedAt
       validatedByVeterinarianID
@@ -958,10 +936,11 @@ export const createMission = /* GraphQL */ `
         owner
         __typename
       }
+      stripePaymentIntentId
+      stripePaymentStatus
       createdAt
       updatedAt
       veterinarianValidatedMissionsId
-      animalMissionsId
       owner
       __typename
     }
@@ -986,8 +965,6 @@ export const updateMission = /* GraphQL */ `
         clinicID
         activeMissionID
         updatedAt
-        clinicRequestsId
-        owner
         __typename
       }
       animalID
@@ -1011,8 +988,6 @@ export const updateMission = /* GraphQL */ `
       }
       status
       appointmentDatetime
-      stripePaymentIntentId
-      stripePaymentStatus
       validationCode
       scannedAt
       validatedByVeterinarianID
@@ -1027,10 +1002,11 @@ export const updateMission = /* GraphQL */ `
         owner
         __typename
       }
+      stripePaymentIntentId
+      stripePaymentStatus
       createdAt
       updatedAt
       veterinarianValidatedMissionsId
-      animalMissionsId
       owner
       __typename
     }
@@ -1055,8 +1031,6 @@ export const deleteMission = /* GraphQL */ `
         clinicID
         activeMissionID
         updatedAt
-        clinicRequestsId
-        owner
         __typename
       }
       animalID
@@ -1080,8 +1054,6 @@ export const deleteMission = /* GraphQL */ `
       }
       status
       appointmentDatetime
-      stripePaymentIntentId
-      stripePaymentStatus
       validationCode
       scannedAt
       validatedByVeterinarianID
@@ -1096,10 +1068,11 @@ export const deleteMission = /* GraphQL */ `
         owner
         __typename
       }
+      stripePaymentIntentId
+      stripePaymentStatus
       createdAt
       updatedAt
       veterinarianValidatedMissionsId
-      animalMissionsId
       owner
       __typename
     }

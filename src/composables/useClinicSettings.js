@@ -65,6 +65,7 @@ export function useClinicSettings() {
         }
 
         if (vet.clinic) {
+          console.log("🔍 Données Clinic reçues de l'API :", vet.clinic)
           clinicId.value = vet.clinic.id
           clinicForm.value = {
             name: vet.clinic.name,

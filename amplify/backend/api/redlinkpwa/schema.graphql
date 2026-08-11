@@ -1,10 +1,13 @@
-# ---------------------------------------------------------
+# ==========================================================
+# REDLINK - SCHÉMA GRAPHQL MVP (FINAL)
+# ==========================================================
+
 # 1. CLINIQUE & VÉTÉRINAIRES
 # ---------------------------------------------------------
 
 type Clinic @model @auth(rules: [
   { allow: owner },
-  { allow: groups, groups: ["Veterinarians"], operations: [create, read, update, delete] },
+  { allow: groups, groups: ["Veterinarians"], operations: [create, read, update] },
   { allow: private, operations: [read] }
 ]) {
   id: ID!
@@ -20,16 +23,18 @@ type Clinic @model @auth(rules: [
   transfusionsDone: Int
   donorOwnersCount: Int
 
+  # 👇 CORRECTIONS ICI : Ajout des indexName et fields
   veterinarians: [Veterinarian] @hasMany(indexName: "byClinicVet", fields: ["id"])
-  requests: [Request] @hasMany
-  clients: [ClinicOwnerRelation] @hasMany
+  requests: [Request] @hasMany(indexName: "byClinicRequest", fields: ["id"])
+  clients: [ClinicOwnerRelation] @hasMany(indexName: "byClinicClient", fields: ["id"])
 }
 
 type Veterinarian @model @auth(rules: [
   { allow: owner },
-  { allow: groups, groups: ["Admins"], operations: [read, delete] }
+  { allow: groups, groups: ["Admins"], operations: [read, delete] },
+  { allow: private, operations: [read] }
 ]) {
-  id: ID!
+  id: ID! # = COGNITO SUB
   firstname: String!
   lastname: String!
   email: String!
@@ -37,19 +42,18 @@ type Veterinarian @model @auth(rules: [
   clinicID: ID! @index(name: "byClinicVet")
   clinic: Clinic @belongsTo(fields: ["clinicID"])
 
+  # Optionnel : Liste des missions validées (nécessite index dans Mission si activé pleinement)
   validatedMissions: [Mission] @hasMany
 }
 
-# ---------------------------------------------------------
 # 2. PROPRIÉTAIRES & ANIMAUX
 # ---------------------------------------------------------
 
 type Owner @model @auth(rules: [
   { allow: owner },
-  { allow: groups, groups: ["Veterinarians"], operations: [read] },
-  { allow: private, operations: [read] }
+  { allow: groups, groups: ["Veterinarians"], operations: [read] }
 ]) {
-  id: ID!
+  id: ID! # = COGNITO SUB
   firstname: String!
   lastname: String!
   email: String!
@@ -58,18 +62,17 @@ type Owner @model @auth(rules: [
   latitude: Float
   longitude: Float
   maxTravelDistance: Int!
-
   totalDonations: Int
 
+  # 👇 CORRECTIONS ICI :
   animals: [Animal] @hasMany(indexName: "byOwnerAnimal", fields: ["id"])
-  availabilities: [OwnerAvailability] @hasMany
-  myClinics: [ClinicOwnerRelation] @hasMany
+  availabilities: [OwnerAvailability] @hasMany(indexName: "byOwnerAvail", fields: ["id"])
+  myClinics: [ClinicOwnerRelation] @hasMany(indexName: "byOwnerClient", fields: ["id"])
 }
 
 type OwnerAvailability @model @auth(rules: [
   { allow: owner },
-  { allow: groups, groups: ["Veterinarians"], operations: [read] },
-  { allow: private, operations: [read] }
+  { allow: groups, groups: ["Veterinarians"], operations: [read] }
 ]) {
   id: ID!
   dayOfWeek: Int!
@@ -82,8 +85,7 @@ type OwnerAvailability @model @auth(rules: [
 
 type Animal @model @auth(rules: [
   { allow: owner },
-  { allow: groups, groups: ["Veterinarians"], operations: [read] },
-  { allow: private, operations: [read] }
+  { allow: groups, groups: ["Veterinarians"], operations: [read] }
 ]) {
   id: ID!
   name: String!
@@ -99,7 +101,7 @@ type Animal @model @auth(rules: [
 
   ownerID: ID! @index(name: "byOwnerAnimal")
   ownerProfile: Owner @belongsTo(fields: ["ownerID"])
-  missions: [Mission] @hasMany(indexName: "byAnimalMission")
+  missions: [Mission] @hasMany(indexName: "byAnimalMission", fields: ["id"])
 }
 
 type ClinicOwnerRelation @model @auth(rules: [
@@ -114,14 +116,12 @@ type ClinicOwnerRelation @model @auth(rules: [
   isPrimaryClinic: Boolean
 }
 
-# ---------------------------------------------------------
 # 3. OPÉRATIONS
 # ---------------------------------------------------------
 
 type Request @model @auth(rules: [
   { allow: groups, groups: ["Veterinarians"] },
-  { allow: owner },
-  { allow: private, operations: [read, update] }
+  { allow: private, operations: [read] }
 ]) {
   id: ID!
   requestType: RequestType!
@@ -140,28 +140,29 @@ type Request @model @auth(rules: [
 
 type Mission @model @auth(rules: [
   { allow: owner },
-  { allow: groups, groups: ["Veterinarians"] },
-  { allow: private, operations: [read] }
+  { allow: groups, groups: ["Veterinarians"] }
 ]) {
   id: ID!
   requestID: ID! @index(name: "byRequestMission")
   request: Request @belongsTo(fields: ["requestID"])
+
   animalID: ID! @index(name: "byAnimalMission")
   animal: Animal @belongsTo(fields: ["animalID"])
 
   status: MissionStatus!
   appointmentDatetime: AWSDateTime
 
-  stripePaymentIntentId: String
-  stripePaymentStatus: String
   validationCode: String
   scannedAt: AWSDateTime
 
+  # Note : Si vous voulez lister les missions par véto, ajoutez @index(name: "byVet") ici
   validatedByVeterinarianID: ID
   validatedBy: Veterinarian @belongsTo(fields: ["validatedByVeterinarianID"])
+
+  stripePaymentIntentId: String
+  stripePaymentStatus: String
 }
 
-# ---------------------------------------------------------
 # 4. ENUMS
 # ---------------------------------------------------------
 
@@ -191,6 +192,8 @@ enum RequestStatus {
 enum MissionStatus {
   ACCEPTED
   PENDING_ARRIVAL
+  EN_ROUTE
+  ARRIVED
   COMPLETED
   NO_SHOW
 }

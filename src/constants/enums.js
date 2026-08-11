@@ -26,6 +26,11 @@ export const MissionStatus = Object.freeze({
   NO_SHOW: 'NO_SHOW',
 })
 
+export const RequestType = Object.freeze({
+  EMERGENCY: 'EMERGENCY',
+  APPOINTMENT: 'APPOINTMENT'
+})
+
 // Groupes sanguins par espèce (non typés côté schéma, mais centralisés ici)
 export const BloodGroupsBySpecies = Object.freeze({
   [Species.DOG]: ['DEA 1.1-', 'DEA 1.1+', 'Dal', 'Kai'],
