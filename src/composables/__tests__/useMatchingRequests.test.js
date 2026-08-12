@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
+import { listRequests } from '@/graphql/queries'
 
 // Regression / integration coverage for the "matching engine silently finds
 // nothing" bug fixed on this branch (commit 82c8d44). Three independent breaks
@@ -124,6 +125,16 @@ describe('useMatchingRequests', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     graphqlMock.mockReset()
+  })
+
+  // Pin la définition réelle de la query (pas le mock) : si `clinic { ... }`
+  // est un jour retiré de listRequests (régression du bug #3), ce test échoue
+  // même si les fixtures mockées ci-dessous continuent, elles, d'injecter
+  // `clinic` à la main.
+  it('la query listRequests sélectionne bien l\'objet clinic imbriqué', () => {
+    expect(listRequests).toContain('clinic {')
+    expect(listRequests).toContain('latitude')
+    expect(listRequests).toContain('longitude')
   })
 
   it('trouve un Match réel de bout en bout (profil + animal compatible + clinique proche)', async () => {
