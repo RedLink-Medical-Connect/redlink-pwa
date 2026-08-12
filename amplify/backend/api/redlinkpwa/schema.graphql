@@ -99,6 +99,20 @@ type Animal @model @auth(rules: [
   lastDonationDate: AWSDate
   donationFrequency: DonationFrequency
 
+  # @auth au niveau champ (remplace, pour ces deux champs uniquement, les règles de
+  # type ci-dessus — Transformer v1 ne les fusionne pas) : Owner en lecture seule,
+  # écriture réservée aux Veterinarians. Voir docs/adr/0002 (amendement 2026-08-12).
+  isValidatedDonor: Boolean
+    @auth(rules: [
+      { allow: owner, operations: [read] },
+      { allow: groups, groups: ["Veterinarians"], operations: [read, update] }
+    ])
+  validationExpiresAt: AWSDateTime
+    @auth(rules: [
+      { allow: owner, operations: [read] },
+      { allow: groups, groups: ["Veterinarians"], operations: [read, update] }
+    ])
+
   ownerID: ID! @index(name: "byOwnerAnimal")
   ownerProfile: Owner @belongsTo(fields: ["ownerID"])
   missions: [Mission] @hasMany(indexName: "byAnimalMission", fields: ["id"])
