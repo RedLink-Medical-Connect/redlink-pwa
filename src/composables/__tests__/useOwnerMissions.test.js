@@ -98,6 +98,40 @@ describe('useOwnerMissions.acceptMission', () => {
     await acceptMission(buildMatchedRequest({ requestType: 'APPOINTMENT' }))
   })
 
+  // BUG PRE-EXISTANT (hors scope de ce diff, non introduit ni corrigé par 82c8d44) :
+  // searchMatches()/isBloodCompatible traite requiredBloodGroup === 'UNKNOWN' comme
+  // "n'importe quel animal de la bonne espèce est compatible" (geolocation-service.js),
+  // donc une Request UNKNOWN apparaît légitimement dans matches.value avec un
+  // matchingAnimal attaché. Mais acceptMission() ici cherche le candidat par égalité
+  // stricte `a.bloodGroup === request.requiredBloodGroup`, donc `bloodGroup === 'UNKNOWN'`
+  // — un Animal Validated Donor n'a jamais de groupe UNKNOWN (cf. CONTEXT.md), donc ce
+  // test échoue systématiquement. Résultat : une Request "peu importe le groupe" que
+  // l'Owner a vue comme un Match acceptable est rejetée (NO_MATCHING_ANIMAL) au moment
+  // d'accepter. Documenté ici plutôt que corrigé silencieusement — à traiter dans un
+  // sous-tâche dédiée (probablement en réutilisant isBloodCompatible ici aussi).
+  it('[BUG CONNU] rejette à tort une Request requiredBloodGroup=UNKNOWN alors que searchMatches la considère comme un Match valide', async () => {
+    graphqlMock.mockImplementation(async ({ query }) => {
+      if (query.includes('ListMyAnimals')) {
+        return {
+          data: {
+            listAnimals: {
+              items: [{ id: 'animal-1', name: 'Rex', species: 'DOG', bloodGroup: 'DEA 1.1-' }],
+            },
+          },
+        }
+      }
+      throw new Error(`Unexpected graphql call in test: ${query.slice(0, 60)}`)
+    })
+
+    const { acceptMission } = useOwnerMissions()
+    const request = buildMatchedRequest({ requiredBloodGroup: 'UNKNOWN' })
+
+    // Comportement ACTUEL (bug) : rejette malgré un Animal de la bonne espèce.
+    // Si cette assertion se met à échouer, c'est que le bug a été corrigé —
+    // remplacer par une assertion de succès et retirer ce commentaire.
+    await expect(acceptMission(request)).rejects.toThrow('NO_MATCHING_ANIMAL')
+  })
+
   it("rejette si aucun animal de l'Owner ne correspond à l'espèce/groupe demandés (protège contre un appel avec un objet Request mal formé)", async () => {
     graphqlMock.mockImplementation(async ({ query }) => {
       if (query.includes('ListMyAnimals')) {
