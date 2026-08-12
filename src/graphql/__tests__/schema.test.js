@@ -84,16 +84,28 @@ describe('schema.graphql — Animal.isValidatedDonor / validationExpiresAt (ADR-
     }
   )
 
-  it("le reste du type Animal (ex: name, weight, bloodGroup) n'est pas concerné par ce scoping champ-par-champ", () => {
+  it("le reste du type Animal (avant ET après isValidatedDonor/validationExpiresAt, ex: name, weight, bloodGroup, ownerID, ownerProfile, missions) n'est pas concerné par ce scoping champ-par-champ", () => {
     // Régression : si un @auth au niveau champ était accidentellement ajouté sur un
-    // champ saisi par l'Owner (name, breed, weight...), ce test le détecterait — le
-    // seul segment de animalType contenant '@auth' hors du directive de type doit
-    // être celui d'isValidatedDonor/validationExpiresAt.
+    // champ saisi par l'Owner (name, breed, weight...) OU sur un champ après
+    // validationExpiresAt (ownerID, ownerProfile, missions...), ce test le
+    // détecterait. Couvre tout le type, pas seulement le segment name->isValidatedDonor
+    // (une revue précédente a signalé que la version initiale ne couvrait pas la
+    // fin du type) : on retire uniquement le bloc légitime des deux champs de
+    // validation et on vérifie qu'aucun '@auth(' ne subsiste ailleurs.
+    // On part de `name:`, pas du début du type, pour exclure le bloc @auth
+    // *au niveau type* sur `type Animal @model @auth(rules: [...])` lui-même
+    // (légitime, ce n'est pas le scoping champ-par-champ qu'on vérifie ici).
     const nameFieldIdx = animalType.indexOf('name: String!')
-    const isValidatedDonorIdx = animalType.indexOf('isValidatedDonor:')
-    const betweenNameAndValidation = animalType.slice(nameFieldIdx, isValidatedDonorIdx)
+    const isValidatedDonorBlock = extractFieldBlock('isValidatedDonor')
+    const validationExpiresAtBlock = extractFieldBlock('validationExpiresAt')
+    const validationBlocksStart = animalType.indexOf(isValidatedDonorBlock)
+    const validationBlocksEnd =
+      animalType.indexOf(validationExpiresAtBlock) + validationExpiresAtBlock.length
+    const restOfType =
+      animalType.slice(nameFieldIdx, validationBlocksStart) +
+      animalType.slice(validationBlocksEnd)
     // `@auth(` (avec parenthèse) plutôt que `@auth` seul : le commentaire qui précède
     // isValidatedDonor mentionne "@auth" en prose sans l'appliquer à un champ.
-    expect(betweenNameAndValidation).not.toContain('@auth(')
+    expect(restOfType).not.toContain('@auth(')
   })
 })
