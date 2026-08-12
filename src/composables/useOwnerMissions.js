@@ -63,14 +63,14 @@ export function useOwnerMissions() {
       const { data } = await client.graphql({
         query: listRequests,
         variables: {
-          filter: { status: { eq: 'OPEN' } },
+          filter: { status: { eq: RequestStatus.OPEN } },
         },
         authMode: 'userPool',
       })
 
       missions.value = data.listRequests.items.sort((a, b) => {
-        if (a.requestType === 'EMERGENCY' && b.requestType !== 'EMERGENCY') return -1
-        if (a.requestType !== 'EMERGENCY' && b.requestType === 'EMERGENCY') return 1
+        if (a.requestType === RequestType.EMERGENCY && b.requestType !== RequestType.EMERGENCY) return -1
+        if (a.requestType !== RequestType.EMERGENCY && b.requestType === RequestType.EMERGENCY) return 1
         return new Date(b.createdAt) - new Date(a.createdAt)
       })
     } catch (e) {
@@ -238,11 +238,17 @@ export function useOwnerMissions() {
     }
   }
   const activeMissions = computed(() => {
-    return myMissions.value.filter((m) => ['ACCEPTED', 'PENDING_ARRIVAL'].includes(m.status))
+    return myMissions.value.filter((m) =>
+      [MissionStatus.ACCEPTED, MissionStatus.PENDING_ARRIVAL].includes(m.status),
+    )
   })
 
   const historyMissions = computed(() => {
-    return myMissions.value.filter((m) => ['COMPLETED', 'NO_SHOW', 'CANCELLED'].includes(m.status))
+    // 'CANCELLED' n'a pas d'équivalent dans MissionStatus (constants/enums.js) — laissé en
+    // littéral, pas touché par cette substitution mécanique (hors périmètre de ce sous-tâche).
+    return myMissions.value.filter((m) =>
+      [MissionStatus.COMPLETED, MissionStatus.NO_SHOW, 'CANCELLED'].includes(m.status),
+    )
   })
 
   return {
