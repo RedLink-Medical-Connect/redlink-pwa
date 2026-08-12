@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { AsYouType, isValidPhoneNumber } from 'libphonenumber-js'
 
 defineOptions({
@@ -17,6 +17,10 @@ const props = defineProps({
 
 const phone = ref(props.modelValue)
 const isValid = ref(true)
+
+watch(() => props.modelValue, (newVal) => {
+  phone.value = newVal
+}, { immediate: true })
 
 const handleInput = (event) => {
   const rawValue = event.target.value

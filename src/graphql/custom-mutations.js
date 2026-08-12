@@ -67,6 +67,14 @@ export const createOwnerAvailabilitySimple = /* GraphQL */ `
   }
 `
 
+export const deleteOwnerAvailabilitySimple = /* GraphQL */ `
+  mutation DeleteOwnerAvailability($input: DeleteOwnerAvailabilityInput!) {
+    deleteOwnerAvailability(input: $input) {
+      id
+    }
+  }
+`
+
 export const createRequestSimple = /* GraphQL */ `
   mutation CreateRequest($input: CreateRequestInput!) {
     createRequest(input: $input) {

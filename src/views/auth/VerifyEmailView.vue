@@ -126,6 +126,7 @@ const handleVerify = async () => {
       const clinicRes = await client.graphql({
         query: createClinicSimple,
         variables: { input: {
+            id: cognitoUserId,
             name: data.clinic_name,
             rpps: data.rpps,
             email: data.email,

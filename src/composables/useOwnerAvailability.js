@@ -1,7 +1,7 @@
 import { ref } from 'vue'
 import { generateClient } from 'aws-amplify/api'
 import { getCurrentUser } from 'aws-amplify/auth'
-import { createOwnerAvailability, deleteOwnerAvailability } from '@/graphql/mutations'
+import { createOwnerAvailabilitySimple, deleteOwnerAvailabilitySimple } from '@/graphql/custom-mutations'
 import { listMyAvailabilities } from '@/graphql/custom-queries'
 
 export function useOwnerAvailability() {
@@ -45,8 +45,9 @@ export function useOwnerAvailability() {
         endTime: end,
       }
 
+      // 👇 2. On utilise la mutation SIMPLE
       await client.graphql({
-        query: createOwnerAvailability,
+        query: createOwnerAvailabilitySimple,
         variables: { input },
         authMode: 'userPool',
       })
@@ -61,8 +62,9 @@ export function useOwnerAvailability() {
 
   const removeAvailability = async (id) => {
     try {
+      // 👇 3. On utilise la mutation SIMPLE pour la suppression aussi
       await client.graphql({
-        query: deleteOwnerAvailability,
+        query: deleteOwnerAvailabilitySimple,
         variables: { input: { id } },
         authMode: 'userPool',
       })
