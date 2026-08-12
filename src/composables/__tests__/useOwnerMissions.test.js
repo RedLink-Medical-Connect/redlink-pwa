@@ -96,6 +96,41 @@ describe('useOwnerMissions.acceptMission', () => {
     expect(graphqlMock).toHaveBeenCalledTimes(4)
   })
 
+  it('retire uniquement la Request acceptée de missions.value (les autres Requests OPEN restent affichées)', async () => {
+    const request = buildRequest()
+    const animal = buildEligibleAnimal()
+    mockHappyPathBeforeLink({ request, animal })
+    // mockHappyPathBeforeLink ne mocke pas CreateMission/LinkRequestToMission ; on les
+    // rajoute par-dessus pour ce test.
+    const baseImpl = graphqlMock.getMockImplementation()
+    graphqlMock.mockImplementation(async (args) => {
+      if (args.query.includes('CreateMission')) {
+        return { data: { createMission: { id: 'mission-1', status: 'PENDING_ARRIVAL' } } }
+      }
+      if (args.query.includes('LinkRequestToMission')) {
+        return {
+          data: {
+            updateRequest: { id: 'request-1', status: 'IN_PROGRESS', activeMissionID: 'mission-1' },
+          },
+        }
+      }
+      return baseImpl(args)
+    })
+
+    const { acceptMission, missions } = useOwnerMissions()
+    // missions.value simule le résultat d'un fetchAvailableMissions() précédent, avec
+    // plusieurs Requests OPEN affichées, dont celle qu'on va accepter.
+    missions.value = [
+      { id: 'request-1', status: 'OPEN' },
+      { id: 'request-2', status: 'OPEN' },
+      { id: 'request-3', status: 'OPEN' },
+    ]
+
+    await acceptMission('request-1', 'animal-1')
+
+    expect(missions.value.map((m) => m.id)).toEqual(['request-2', 'request-3'])
+  })
+
   it('utilise le statut ACCEPTED (et non PENDING_ARRIVAL) pour une Request de type APPOINTMENT', async () => {
     const request = buildRequest({ requestType: 'APPOINTMENT' })
     const animal = buildEligibleAnimal()
@@ -192,6 +227,43 @@ describe('useOwnerMissions.acceptMission', () => {
     await expect(acceptMission('request-1', 'animal-1')).rejects.toThrow(
       'FREQUENCY_RULE_NOT_SATISFIED',
     )
+  })
+
+  // Les tests ci-dessus ne prouvent chacun qu'un seul gate en isolation (les 2 autres
+  // passent toujours pour cet Animal) : ça ne suffit pas à prouver l'ORDRE hiérarchisé
+  // documenté dans acceptMission (CONTEXT.md critères 1 à 3). Les deux tests suivants
+  // construisent un Animal qui échoue simultanément à DEUX gates, et vérifient que
+  // l'erreur remontée est bien celle du gate le plus prioritaire des deux — pas l'autre.
+  it('rapporte NOT_VALIDATED_DONOR (et pas BLOOD_INCOMPATIBLE) pour un Animal qui échoue aux deux gates 1 et 2 à la fois', async () => {
+    mockHappyPathBeforeLink({
+      request: buildRequest({ requiredBloodGroup: 'DEA 1.1+' }),
+      // Pas Validated Donor (gate 1) ET mauvais groupe sanguin (gate 2) : si l'ordre
+      // hiérarchisé n'était pas respecté (ou testé par erreur au gate 2 en premier), ce
+      // test échouerait en récupérant BLOOD_INCOMPATIBLE au lieu de NOT_VALIDATED_DONOR.
+      animal: buildEligibleAnimal({ isValidatedDonor: false, bloodGroup: 'DEA 1.1-' }),
+    })
+
+    const { acceptMission } = useOwnerMissions()
+
+    await expect(acceptMission('request-1', 'animal-1')).rejects.toThrow('NOT_VALIDATED_DONOR')
+  })
+
+  it('rapporte BLOOD_INCOMPATIBLE (et pas FREQUENCY_RULE_NOT_SATISFIED) pour un Animal Validated Donor qui échoue simultanément aux gates 2 et 3', async () => {
+    mockHappyPathBeforeLink({
+      request: buildRequest({ requiredBloodGroup: 'DEA 1.1+' }),
+      // Validated Donor (gate 1 OK), mauvais groupe sanguin (gate 2) ET don trop récent
+      // (gate 3) : l'erreur attendue est celle du gate 2, le plus prioritaire des deux qui
+      // échouent.
+      animal: buildEligibleAnimal({
+        bloodGroup: 'DEA 1.1-',
+        lastDonationDate: new Date().toISOString(),
+        donationFrequency: 'ONCE_YEAR',
+      }),
+    })
+
+    const { acceptMission } = useOwnerMissions()
+
+    await expect(acceptMission('request-1', 'animal-1')).rejects.toThrow('BLOOD_INCOMPATIBLE')
   })
 
   // Bug #? (documenté précédemment comme [BUG CONNU], désormais corrigé sur cette
@@ -307,6 +379,47 @@ describe('useOwnerMissions.acceptMission', () => {
       'Not Authorized to access updateRequest on type Request',
     )
     // Pas de deleteMission tenté : ce n'est pas un échec de condition.
+    expect(graphqlMock).toHaveBeenCalledTimes(4)
+  })
+
+  // Scrutin spécifique de isConditionalCheckFailure (cf. commentaire en tête de fichier
+  // useOwnerMissions.js) : une erreur qui A BIEN la forme `{ data, errors: [...] }` produite
+  // par client.graphql() (donc pas juste une Error JS simple, cf. le test précédent) mais
+  // dont l'errorType/message ne correspond pas à un ConditionalCheckFailedException ne doit
+  // PAS être traitée comme REQUEST_ALREADY_TAKEN. Forme reprise de
+  // node_modules/@aws-amplify/api-graphql/dist/cjs/utils/errors/repackageAuthError.js
+  // (repackageUnauthorizedError) pour une erreur Unauthorized réelle.
+  it('ne confond pas une erreur Unauthorized (même forme { errors: [...] } que le succès) avec un échec de condition', async () => {
+    const request = buildRequest()
+    const animal = buildEligibleAnimal()
+
+    const unauthorizedError = {
+      data: { updateRequest: null },
+      errors: [
+        {
+          message: 'Unauthorized',
+          originalError: { name: 'UnauthorizedException' },
+        },
+      ],
+    }
+
+    graphqlMock.mockImplementation(async ({ query }) => {
+      if (query.includes('GetRequest')) return { data: { getRequest: request } }
+      if (query.includes('ListMyAnimals')) return { data: { listAnimals: { items: [animal] } } }
+      if (query.includes('CreateMission')) {
+        return { data: { createMission: { id: 'mission-1', status: 'PENDING_ARRIVAL' } } }
+      }
+      if (query.includes('LinkRequestToMission')) throw unauthorizedError
+      throw new Error(`Unexpected graphql call in test: ${query.slice(0, 60)}`)
+    })
+
+    const { acceptMission } = useOwnerMissions()
+
+    // Propage l'erreur Unauthorized telle quelle plutôt que de la travestir en
+    // REQUEST_ALREADY_TAKEN.
+    await expect(acceptMission('request-1', 'animal-1')).rejects.toBe(unauthorizedError)
+    // Pas de deleteMission tenté : ce n'est pas un échec de condition, donc pas de Mission
+    // orpheline à nettoyer selon la logique de l'implémentation.
     expect(graphqlMock).toHaveBeenCalledTimes(4)
   })
 })
