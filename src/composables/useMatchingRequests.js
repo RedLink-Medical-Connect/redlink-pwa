@@ -1,7 +1,7 @@
 import { ref } from 'vue'
 import { generateClient } from 'aws-amplify/api'
 import { listOpenRequestsWithClinic } from '@/graphql/custom-queries'
-import { calculateDistance, isBloodCompatible } from '@/services/geolocation-service'
+import { calculateDistance, isBloodCompatible } from '@/services/eligibility-service'
 import { useAnimals } from '@/composables/useAnimals'
 import { useOwnerProfile } from '@/composables/useOwnerProfile'
 

@@ -1,12 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import { calculateDistance, isBloodCompatible } from '@/services/geolocation-service'
+import { calculateDistance, isBloodCompatible } from '@/services/eligibility-service'
 
 // Ces deux fonctions sont au coeur du moteur d'Eligibility (critères "proximité
 // géographique" et "compatibilité sanguine") consommé par
 // useMatchingRequests.searchMatches(). C'est la logique qui était silencieusement
 // jamais atteinte avant le fix (cf. src/composables/__tests__/useMatchingRequests.test.js).
 
-describe('geolocation-service', () => {
+describe('eligibility-service', () => {
   describe('calculateDistance', () => {
     it('renvoie 0 pour deux points identiques', () => {
       expect(calculateDistance(48.8566, 2.3522, 48.8566, 2.3522)).toBeCloseTo(0, 5)

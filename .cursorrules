@@ -69,10 +69,11 @@ composables violate this — don't copy that pattern into new code.)
 
 Pure business rules (blood/species compatibility, distance calculation, eligibility)
 belong in `src/services/*-service.js` as framework-free exported functions — no Vue
-reactivity, no GraphQL client, no DOM. `src/services/geolocation-service.js` is the
-reference shape: small interface (`calculateDistance`, `isBloodCompatible`), everything
-else internal. Route new domain rules through the existing service file for the same
-domain rather than reimplementing the rule inline in a composable or component — check
+reactivity, no GraphQL client, no DOM. `src/services/eligibility-service.js` is the
+reference shape: small interface (`checkEligibility` as the composite seam, plus its
+five underlying criteria functions), everything else internal. Route new domain rules
+through the existing service file for the same domain rather than reimplementing the
+rule inline in a composable or component — check
 for an existing rule before writing a new one.
 
 ## i18n
