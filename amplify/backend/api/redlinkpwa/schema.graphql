@@ -121,7 +121,13 @@ type ClinicOwnerRelation @model @auth(rules: [
 
 type Request @model @auth(rules: [
   { allow: groups, groups: ["Veterinarians"] },
-  { allow: private, operations: [read] }
+  # "update" est requis ici : linkRequestToMission (appelée par acceptMission) fait un
+  # updateRequest en tant qu'Owner pour passer la Request en IN_PROGRESS. Sans cette règle,
+  # l'acceptation d'une Mission par un Owner échoue au niveau @auth.
+  # NB : un scoping plus fin (mutation dédiée ne touchant que le statut, à la ADR-0002 pour
+  # la validation véto) serait plus propre mais empiéterait sur l'écriture conditionnelle
+  # atomique prévue par l'ADR-0001 pour la Phase 0.3 — volontairement hors périmètre ici.
+  { allow: private, operations: [read, update] }
 ]) {
   id: ID!
   requestType: RequestType!

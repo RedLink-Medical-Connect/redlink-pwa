@@ -53,6 +53,17 @@ exports.handler = async (event) => {
 
   } catch (error) {
     console.error(`❌ ERREUR ajout groupe:`, error);
+    // On re-throw volontairement plutôt que d'avaler l'erreur : un échec silencieux ici
+    // laisserait l'utilisateur CONFIRMED côté Cognito mais sans groupe (Veterinarians/Owners),
+    // donc sans autorisation, sans qu'aucun signal ne remonte nulle part.
+    // PostConfirmation est invoqué par Cognito de façon synchrone APRÈS que le statut de
+    // l'utilisateur soit passé à CONFIRMED : un throw ici ne fait donc PAS revenir cet
+    // utilisateur en non-confirmé, mais fait échouer l'appel ConfirmSignUp/AdminConfirmSignUp
+    // côté client (erreur remontée à l'appelant) et apparaît comme une erreur d'invocation
+    // Lambda dans les métriques CloudWatch/Amplify de cette fonction — donc monitorable.
+    // Pas de retry/DLQ ici (hors de propos pour un projet à échelle pilote) : l'objectif est
+    // seulement de rendre l'échec visible au lieu de le laisser passer inaperçu.
+    throw error;
   }
 
   return event;

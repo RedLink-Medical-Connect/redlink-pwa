@@ -123,10 +123,12 @@ const handleVerify = async () => {
       })
 
     } else if (data.role === 'vet') {
+      // Clinic.id est un identifiant propre généré côté backend (comme Animal/OwnerAvailability) :
+      // Clinic.veterinarians est une relation @hasMany, un Clinic peut donc avoir plusieurs
+      // Veterinarian, et Clinic.id ne doit jamais être aliasé sur le cognitoUserId d'un vétérinaire.
       const clinicRes = await client.graphql({
         query: createClinicSimple,
         variables: { input: {
-            id: cognitoUserId,
             name: data.clinic_name,
             rpps: data.rpps,
             email: data.email,

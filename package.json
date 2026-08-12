@@ -39,6 +39,7 @@
     "vue-router": "^4.6.3"
   },
   "devDependencies": {
+    "@aws-sdk/client-cognito-identity-provider": "3.1108.0",
     "@eslint/js": "^9.39.1",
     "@intlify/eslint-plugin-vue-i18n": "^4.1.0",
     "@intlify/unplugin-vue-i18n": "^11.0.1",
