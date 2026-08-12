@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { calculateDistance, isBloodCompatible } from '@/services/geolocation-service'
+import { calculateDistance, isBloodCompatible } from '@/services/eligibility-service'
 
 // Ces deux fonctions sont au coeur du moteur d'Eligibility (critères "proximité
 // géographique" et "compatibilité sanguine") consommé par
