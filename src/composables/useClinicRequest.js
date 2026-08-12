@@ -9,6 +9,7 @@ import { listRequestsByClinic, getVetWithClinic } from '@/graphql/custom-queries
 
 // 👇 On importe les mutations SIMPLES pour éviter les erreurs de sous-champs
 import { createRequestSimple, updateRequestStatusSimple } from '@/graphql/custom-mutations'
+import { Species } from '@/constants/enums'
 
 export function useClinicRequests() {
   const client = generateClient()
@@ -79,11 +80,18 @@ export function useClinicRequests() {
       // 2. MAPPING SÉCURISÉ DES ENUMS (C'est souvent là que ça plante)
       // On s'assure que "Chien" ou "dog" devient bien "DOG" pour GraphQL
       const speciesMap = {
-        'dog': 'DOG', 'chien': 'DOG', 'DOG': 'DOG',
-        'cat': 'CAT', 'chat': 'CAT', 'CAT': 'CAT'
+        dog: Species.DOG, chien: Species.DOG,
+        cat: Species.CAT, chat: Species.CAT,
       }
-      // Par sécurité, on met en majuscule, et si c'est inconnu on force DOG par défaut
-      const safeSpecies = speciesMap[formData.species?.toLowerCase()] || 'DOG'
+      const safeSpecies = speciesMap[formData.species?.toLowerCase()]
+      // Contexte médical vétérinaire : une Request créée pour la mauvaise espèce est un
+      // risque sécurité, pas un simple bug d'UI. On ne défaulte JAMAIS silencieusement sur
+      // DOG — une espèce non reconnue doit bloquer la soumission.
+      if (!safeSpecies) {
+        throw new Error(
+          `Espèce non reconnue : "${formData.species}". Impossible de créer la demande.`,
+        )
+      }
 
       const input = {
         clinicID: cId,
