@@ -23,6 +23,11 @@ describe('eligibility-service — nouveaux critères', () => {
       expect(isValidatedDonor({ validationExpiresAt: '2027-01-01' }, NOW)).toBe(false)
     })
 
+    it('est false sans planter si animal est null/undefined', () => {
+      expect(isValidatedDonor(null, NOW)).toBe(false)
+      expect(isValidatedDonor(undefined, NOW)).toBe(false)
+    })
+
     it('est false si validationExpiresAt est absent, même si isValidatedDonor est true', () => {
       expect(isValidatedDonor({ isValidatedDonor: true, validationExpiresAt: null }, NOW)).toBe(false)
       expect(isValidatedDonor({ isValidatedDonor: true }, NOW)).toBe(false)
@@ -161,6 +166,28 @@ describe('eligibility-service — nouveaux critères', () => {
       expect(result.distanceKM).toBeNull()
     })
 
+    it(
+      'échoue sur NOT_VALIDATED_DONOR même quand le même animal échoue AUSSI les critères 2 à 4 ' +
+        '— preuve que le court-circuit teste le critère 1 en premier, pas juste que chaque échec produit ' +
+        'individuellement un rejet',
+      () => {
+        const result = checkEligibility({
+          ...baseParams,
+          animal: {
+            ...baseAnimal,
+            isValidatedDonor: false, // criterion 1: fails
+            bloodGroup: 'DEA 1.1-', // criterion 2: also fails (baseRequest wants DEA 1.1+)
+            lastDonationDate: new Date(NOW.getTime() - 10 * 24 * 60 * 60 * 1000).toISOString(), // criterion 3: also fails
+          },
+          request: { ...baseRequest, clinic: { id: 'clinic-1', latitude: 45.764, longitude: 4.8357 } }, // criterion 4: also fails (Lyon, ~390km)
+          maxTravelDistance: 50,
+        })
+        expect(result.eligible).toBe(false)
+        expect(result.reason).toBe('NOT_VALIDATED_DONOR')
+        expect(result.distanceKM).toBeNull()
+      },
+    )
+
     it('échoue sur BLOOD_INCOMPATIBLE quand le groupe animal ne correspond pas', () => {
       const result = checkEligibility({
         ...baseParams,
@@ -168,7 +195,28 @@ describe('eligibility-service — nouveaux critères', () => {
       })
       expect(result.eligible).toBe(false)
       expect(result.reason).toBe('BLOOD_INCOMPATIBLE')
+      expect(result.distanceKM).toBeNull()
     })
+
+    it(
+      'échoue sur BLOOD_INCOMPATIBLE (pas FREQUENCY_RULE ni TOO_FAR) quand un animal Validated Donor échoue AUSSI ' +
+        'les critères 3 et 4 — preuve que le critère 2 est testé avant 3 et 4',
+      () => {
+        const result = checkEligibility({
+          ...baseParams,
+          animal: {
+            ...baseAnimal,
+            bloodGroup: 'DEA 1.1-', // criterion 2: fails
+            lastDonationDate: new Date(NOW.getTime() - 10 * 24 * 60 * 60 * 1000).toISOString(), // criterion 3: also fails
+          },
+          request: { ...baseRequest, clinic: { id: 'clinic-1', latitude: 45.764, longitude: 4.8357 } }, // criterion 4: also fails
+          maxTravelDistance: 50,
+        })
+        expect(result.eligible).toBe(false)
+        expect(result.reason).toBe('BLOOD_INCOMPATIBLE')
+        expect(result.distanceKM).toBeNull()
+      },
+    )
 
     it('la Request UNKNOWN reste universellement compatible (ne bloque pas sur le groupe)', () => {
       const result = checkEligibility({
@@ -199,7 +247,80 @@ describe('eligibility-service — nouveaux critères', () => {
       })
       expect(result.eligible).toBe(false)
       expect(result.reason).toBe('FREQUENCY_RULE')
+      expect(result.distanceKM).toBeNull()
     })
+
+    it(
+      'échoue sur FREQUENCY_RULE (pas TOO_FAR) quand un animal Validated Donor et compatible échoue AUSSI le ' +
+        'critère 4 — preuve que le critère 3 est testé avant le critère 4',
+      () => {
+        const result = checkEligibility({
+          ...baseParams,
+          animal: {
+            ...baseAnimal,
+            lastDonationDate: new Date(NOW.getTime() - 10 * 24 * 60 * 60 * 1000).toISOString(), // criterion 3: fails
+          },
+          request: { ...baseRequest, clinic: { id: 'clinic-1', latitude: 45.764, longitude: 4.8357 } }, // criterion 4: also fails
+          maxTravelDistance: 50,
+        })
+        expect(result.eligible).toBe(false)
+        expect(result.reason).toBe('FREQUENCY_RULE')
+        expect(result.distanceKM).toBeNull()
+      },
+    )
+
+    it(
+      'cascade complète : en corrigeant un critère exclusif à la fois sur un animal qui les échoue tous, la ' +
+        'reason avance dans l\'ordre imposé par le CdC (1 -> 2 -> 3 -> 4 -> eligible)',
+      () => {
+        const farClinic = { id: 'clinic-1', latitude: 45.764, longitude: 4.8357 } // Lyon, ~390km
+        const recentDonation = new Date(NOW.getTime() - 10 * 24 * 60 * 60 * 1000).toISOString()
+
+        // Fails all 4 exclusive criteria at once.
+        let animal = {
+          isValidatedDonor: false,
+          validationExpiresAt: '2020-01-01T00:00:00.000Z',
+          species: 'DOG',
+          bloodGroup: 'DEA 1.1-',
+          lastDonationDate: recentDonation,
+          donationFrequency: DonationFrequency.ONCE_YEAR,
+        }
+        let request = { ...baseRequest, clinic: farClinic }
+        const params = { ...baseParams, maxTravelDistance: 50 }
+
+        expect(checkEligibility({ ...params, animal, request }).reason).toBe('NOT_VALIDATED_DONOR')
+
+        animal = { ...animal, isValidatedDonor: true, validationExpiresAt: '2027-01-01T00:00:00.000Z' }
+        expect(checkEligibility({ ...params, animal, request }).reason).toBe('BLOOD_INCOMPATIBLE')
+
+        animal = { ...animal, bloodGroup: 'DEA 1.1+' }
+        expect(checkEligibility({ ...params, animal, request }).reason).toBe('FREQUENCY_RULE')
+
+        animal = { ...animal, lastDonationDate: null }
+        expect(checkEligibility({ ...params, animal, request }).reason).toBe('TOO_FAR')
+
+        request = { ...baseRequest, clinic: { id: 'clinic-1', latitude: 48.8566, longitude: 2.3522 } }
+        const finalResult = checkEligibility({ ...params, animal, request })
+        expect(finalResult.eligible).toBe(true)
+        expect(finalResult.reason).toBeNull()
+      },
+    )
+
+    it(
+      "propage le fail-safe de la Frequency Rule au niveau du seam composite : une donationFrequency " +
+        "non reconnue est traitée comme ONCE_YEAR (365j), pas comme TWICE_YEAR (182j) ni comme 'pas de règle'",
+      () => {
+        // 200 days ago: fails ONCE_YEAR (< 365j) but would pass TWICE_YEAR (> 182j) or a
+        // "no rule at all" interpretation — distinguishes the three fallback behaviors.
+        const last = new Date(NOW.getTime() - 200 * 24 * 60 * 60 * 1000).toISOString()
+        const result = checkEligibility({
+          ...baseParams,
+          animal: { ...baseAnimal, lastDonationDate: last, donationFrequency: 'MONTHLY' },
+        })
+        expect(result.eligible).toBe(false)
+        expect(result.reason).toBe('FREQUENCY_RULE')
+      },
+    )
 
     it('lastDonationDate null passe toujours la Frequency Rule (jamais donné)', () => {
       const result = checkEligibility({ ...baseParams, animal: { ...baseAnimal, lastDonationDate: null } })
