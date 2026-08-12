@@ -1,6 +1,6 @@
 import { ref } from 'vue'
 import { generateClient } from 'aws-amplify/api'
-import { listRequests } from '@/graphql/queries'
+import { listOpenRequestsWithClinic } from '@/graphql/custom-queries'
 import { calculateDistance, isBloodCompatible } from '@/services/geolocation-service'
 import { useAnimals } from '@/composables/useAnimals'
 import { useOwnerProfile } from '@/composables/useOwnerProfile'
@@ -41,7 +41,7 @@ export function useMatchingRequests() {
       // 2. Récupérer TOUTES les demandes ouvertes
       // Note : Pour un MVP, filtrer côté client est acceptable et plus simple
       const { data } = await client.graphql({
-        query: listRequests,
+        query: listOpenRequestsWithClinic,
         variables: { filter: { status: { eq: 'OPEN' } } },
         authMode: 'userPool'
       })

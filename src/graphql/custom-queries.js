@@ -107,6 +107,45 @@ export const listMyAnimalsMissions = /* GraphQL */ `
   }
 `
 
+export const listOpenRequestsWithClinic = /* GraphQL */ `
+  query ListOpenRequestsWithClinic($filter: ModelRequestFilterInput) {
+    listRequests(filter: $filter) {
+      items {
+        id
+        requestType
+        requiredSpecies
+        requiredBloodGroup
+        quantity
+        status
+        createdAt
+        clinicID
+        clinic {
+          id
+          name
+          rpps
+          email
+          phone
+          address
+          latitude
+          longitude
+          hasEmergencyService
+          transfusionsDone
+          donorOwnersCount
+          createdAt
+          updatedAt
+          owner
+          __typename
+        }
+        activeMissionID
+        updatedAt
+        __typename
+      }
+      nextToken
+      __typename
+    }
+  }
+`
+
 export const listMyAnimalsByOwnerId = /* GraphQL */ `
   query ListMyAnimalsByOwnerId($ownerID: ID!) {
     listAnimals(filter: { ownerID: { eq: $ownerID } }) {
