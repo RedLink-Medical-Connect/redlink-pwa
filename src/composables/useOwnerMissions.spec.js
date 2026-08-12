@@ -10,6 +10,11 @@ import { useOwnerMissions } from '@/composables/useOwnerMissions'
 // updateRequest-backed linkRequestToMission mutation with authMode: 'userPool' (the Owner's own
 // session, not a group-elevated call), with no client-side gate/role-check that would itself
 // block an Owner from reaching it.
+//
+// Updated for Phase 0.3 (ADR-0001): acceptMission(request) -> acceptMission(requestId,
+// animalId). It now reloads the Request (getRequest) and the Animal (listMyAnimalsSimple)
+// itself instead of trusting objects already in memory client-side, hence the extra
+// getRequest call in the mock sequence below.
 
 vi.mock('aws-amplify/api', () => ({
   generateClient: vi.fn(),
@@ -33,26 +38,39 @@ describe('useOwnerMissions > acceptMission', () => {
     requiredSpecies: 'DOG',
     requiredBloodGroup: 'DEA 1.1-',
     requestType: 'APPOINTMENT',
+    status: 'OPEN',
   }
 
-  const matchingAnimal = { id: 'animal-1', name: 'Rex', species: 'DOG', bloodGroup: 'DEA 1.1-' }
+  const matchingAnimal = {
+    id: 'animal-1',
+    name: 'Rex',
+    species: 'DOG',
+    bloodGroup: 'DEA 1.1-',
+    isValidatedDonor: true,
+    validationExpiresAt: '2099-01-01T00:00:00.000Z',
+    lastDonationDate: null,
+    donationFrequency: 'ONCE_YEAR',
+  }
 
   it('calls linkRequestToMission (updateRequest under the hood) as the Owner via authMode userPool, with no client-side gate blocking it', async () => {
     mockGraphql
+      .mockResolvedValueOnce({ data: { getRequest: request } }) // getRequest
       .mockResolvedValueOnce({ data: { listAnimals: { items: [matchingAnimal] } } }) // listMyAnimalsSimple
       .mockResolvedValueOnce({ data: { createMission: { id: 'mission-1' } } }) // createMissionSimple
       .mockResolvedValueOnce({ data: { updateRequest: { id: 'request-1', status: 'IN_PROGRESS' } } }) // linkRequestToMission
 
     const { acceptMission } = useOwnerMissions()
-    const donorName = await acceptMission(request)
+    const donorName = await acceptMission('request-1', 'animal-1')
 
     expect(donorName).toBe('Rex')
-    expect(mockGraphql).toHaveBeenCalledTimes(3)
+    expect(mockGraphql).toHaveBeenCalledTimes(4)
 
-    const linkCall = mockGraphql.mock.calls[2][0]
+    const linkCall = mockGraphql.mock.calls[3][0]
     expect(linkCall.query).toContain('LinkRequestToMission')
     expect(linkCall.query).toContain('updateRequest')
     expect(linkCall.query).toContain('IN_PROGRESS')
+    // ADR-0001 : l'écriture est conditionnée sur Request.status = OPEN.
+    expect(linkCall.query).toContain('condition')
     expect(linkCall.variables).toEqual({ id: 'request-1', activeMissionID: 'mission-1' })
     // This is the Owner's own authenticated session — not a group-elevated/admin call — which is
     // exactly the case the restored "update" @auth rule on the private/Owner rule exists for.
@@ -62,24 +80,27 @@ describe('useOwnerMissions > acceptMission', () => {
   it('propagates (does not swallow) an auth failure from linkRequestToMission, so a missing @auth rule would surface as a thrown error, not a silently-lost accept', async () => {
     const authError = new Error('Not Authorized to access updateRequest on type Request')
     mockGraphql
+      .mockResolvedValueOnce({ data: { getRequest: request } })
       .mockResolvedValueOnce({ data: { listAnimals: { items: [matchingAnimal] } } })
       .mockResolvedValueOnce({ data: { createMission: { id: 'mission-1' } } })
       .mockRejectedValueOnce(authError)
 
     const { acceptMission, isAccepting } = useOwnerMissions()
 
-    await expect(acceptMission(request)).rejects.toThrow(
+    await expect(acceptMission('request-1', 'animal-1')).rejects.toThrow(
       'Not Authorized to access updateRequest on type Request',
     )
     expect(isAccepting.value).toBe(false)
   })
 
-  it('throws before attempting any mutation when the Owner has no matching animal', async () => {
-    mockGraphql.mockResolvedValueOnce({ data: { listAnimals: { items: [] } } })
+  it('throws ANIMAL_NOT_FOUND before attempting any mutation when the Owner has no matching animal', async () => {
+    mockGraphql
+      .mockResolvedValueOnce({ data: { getRequest: request } })
+      .mockResolvedValueOnce({ data: { listAnimals: { items: [] } } })
 
     const { acceptMission } = useOwnerMissions()
 
-    await expect(acceptMission(request)).rejects.toThrow('NO_MATCHING_ANIMAL')
-    expect(mockGraphql).toHaveBeenCalledTimes(1)
+    await expect(acceptMission('request-1', 'animal-1')).rejects.toThrow('ANIMAL_NOT_FOUND')
+    expect(mockGraphql).toHaveBeenCalledTimes(2)
   })
 })
