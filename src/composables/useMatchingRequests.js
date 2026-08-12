@@ -12,7 +12,9 @@ export function useMatchingRequests() {
 
   // On réutilise vos composables existants pour avoir les données du user
   const { animals, fetchAnimals } = useAnimals()
-  const { ownerProfile, fetchProfile } = useOwnerProfile()
+  // useOwnerProfile() expose `form` (et non `ownerProfile`) : on l'alias ici
+  // pour ne pas toucher au reste de la logique de ce composable.
+  const { form: ownerProfile, fetchProfile } = useOwnerProfile()
 
   const searchMatches = async () => {
     isLoading.value = true
@@ -20,11 +22,14 @@ export function useMatchingRequests() {
 
     try {
       // 1. S'assurer qu'on a bien les infos du propriétaire et ses animaux
-      if (!ownerProfile.value) await fetchProfile()
+      // `form` (alias ownerProfile) est toujours un objet non-nul par défaut,
+      // donc on ne peut pas se fier à sa nullité pour savoir s'il faut le
+      // récupérer : on le charge systématiquement.
+      await fetchProfile()
       if (animals.value.length === 0) await fetchAnimals()
 
-      // Si pas de profil ou pas d'animaux, on ne peut rien faire
-      if (!ownerProfile.value || animals.value.length === 0) {
+      // Si pas d'animaux, on ne peut rien faire
+      if (animals.value.length === 0) {
         return
       }
 
