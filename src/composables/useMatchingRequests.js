@@ -1,9 +1,10 @@
 import { ref } from 'vue'
 import { generateClient } from 'aws-amplify/api'
 import { listOpenRequestsWithClinic } from '@/graphql/custom-queries'
-import { calculateDistance, isBloodCompatible } from '@/services/eligibility-service'
+import { checkEligibility } from '@/services/eligibility-service'
 import { useAnimals } from '@/composables/useAnimals'
 import { useOwnerProfile } from '@/composables/useOwnerProfile'
+import { RequestStatus } from '@/constants/enums'
 
 export function useMatchingRequests() {
   const client = generateClient()
@@ -42,39 +43,35 @@ export function useMatchingRequests() {
       // Note : Pour un MVP, filtrer côté client est acceptable et plus simple
       const { data } = await client.graphql({
         query: listOpenRequestsWithClinic,
-        variables: { filter: { status: { eq: 'OPEN' } } },
+        variables: { filter: { status: { eq: RequestStatus.OPEN } } },
         authMode: 'userPool'
       })
 
       const allRequests = data.listRequests.items
 
-      // 3. Le Moteur de Matching
+      // 3. Le Moteur de Matching : on passe par le composite checkEligibility()
+      // (src/services/eligibility-service.js) pour que les 5 critères de
+      // l'Eligibility (CONTEXT.md) soient réellement appliqués ici, et pas
+      // seulement dans useOwnerMissions.acceptMission comme avant ce fix.
+      // Clinic Priority (critère 5, tri seulement) est explicitement hors
+      // périmètre ici : ownerClinicIds reste à sa valeur par défaut ([]).
       const compatibleRequests = allRequests.filter(req => {
-        // A. Vérification Géographique
-        if (!req.clinic || !req.clinic.latitude || !req.clinic.longitude) return false
+        for (const animal of animals.value) {
+          const result = checkEligibility({
+            animal,
+            request: req,
+            ownerLatitude: myLat,
+            ownerLongitude: myLon,
+            maxTravelDistance: maxDist,
+          })
 
-        const dist = calculateDistance(myLat, myLon, req.clinic.latitude, req.clinic.longitude)
-
-        // On attache la distance calculée à l'objet pour l'affichage
-        req.distanceKM = Math.round(dist * 10) / 10
-
-        if (dist > maxDist) return false
-
-        // B. Vérification Compatibilité Animaux
-        // On cherche SI l'un de mes animaux correspond à la demande
-        const potentialDonor = animals.value.find(animal =>
-          isBloodCompatible(
-            req.requiredSpecies,
-            req.requiredBloodGroup,
-            animal.species,
-            animal.bloodGroup
-          )
-        )
-
-        if (potentialDonor) {
-          // On attache l'animal qui matche pour pouvoir dire "Rex peut aider !"
-          req.matchingAnimal = potentialDonor
-          return true
+          if (result.eligible) {
+            // On attache l'animal qui matche et la distance pour l'affichage,
+            // même arrondi qu'avant ce fix.
+            req.matchingAnimal = animal
+            req.distanceKM = Math.round(result.distanceKM * 10) / 10
+            return true
+          }
         }
 
         return false

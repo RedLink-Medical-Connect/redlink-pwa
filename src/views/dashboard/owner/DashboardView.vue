@@ -23,6 +23,18 @@ onMounted(() => {
   searchMatches()
 })
 
+// Messages spécifiques par code d'erreur levé par useOwnerMissions().acceptMission
+// (voir la doc de la fonction dans useOwnerMissions.js pour le détail de chaque
+// étape qui peut lever ces erreurs). Fallback générique pour tout code non reconnu.
+const ACCEPT_ERROR_MESSAGES = {
+  REQUEST_NOT_OPEN: "Cette demande n'est plus ouverte.",
+  ANIMAL_NOT_FOUND: "Cet animal est introuvable parmi vos animaux.",
+  NOT_VALIDATED_DONOR: "Cet animal n'est plus un donneur validé.",
+  BLOOD_INCOMPATIBLE: "Le groupe sanguin de cet animal n'est plus compatible avec cette demande.",
+  FREQUENCY_RULE_NOT_SATISFIED: "Cet animal a donné trop récemment pour donner à nouveau.",
+  REQUEST_ALREADY_TAKEN: 'Cette demande vient d\'être prise en charge par un autre propriétaire.',
+}
+
 const handleAccept = async (request) => {
   try {
     // On appelle la fonction d'acceptation (crée la mission dans la DB)
@@ -45,9 +57,14 @@ const handleAccept = async (request) => {
     toast.add({
       severity: 'error',
       summary: t('common.error'),
-      detail: "Impossible d'accepter la mission.",
+      detail: ACCEPT_ERROR_MESSAGES[e.message] || "Impossible d'accepter la mission.",
       life: 3000
     })
+
+    // L'état local (matches) peut être périmé : la Request ou l'Animal ont changé
+    // depuis la dernière recherche, c'est précisément ce qui a causé l'erreur.
+    // On rafraîchit plutôt que de laisser une carte obsolète cliquable.
+    searchMatches()
   }
 }
 </script>

@@ -164,6 +164,9 @@ export const listMyAnimalsByOwnerId = /* GraphQL */ `
         isVaccinated
         isSterilized
         donationFrequency
+        isValidatedDonor
+        validationExpiresAt
+        lastDonationDate
         ownerID
         createdAt
         updatedAt

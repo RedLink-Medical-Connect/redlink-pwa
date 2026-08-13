@@ -76,6 +76,11 @@ const buildOwnerProfile = (overrides = {}) => ({
   ...overrides,
 })
 
+// Un an dans le futur, calculé relativement à "maintenant" pour ne pas pourrir
+// avec le temps (checkEligibility utilise `now = new Date()` par défaut).
+const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000
+const FUTURE_VALIDATION_EXPIRY = new Date(Date.now() + ONE_YEAR_MS).toISOString()
+
 const buildAnimal = (overrides = {}) => ({
   id: 'animal-1',
   name: 'Rex',
@@ -87,6 +92,15 @@ const buildAnimal = (overrides = {}) => ({
   isVaccinated: true,
   isSterilized: true,
   donationFrequency: 'TWICE_YEAR',
+  // Requis par checkEligibility (critère 1, isValidatedDonor) et critère 3
+  // (satisfiesFrequencyRule) -- voir src/services/eligibility-service.js.
+  // Ces champs manquaient dans listMyAnimalsByOwnerId avant ce fix, ce qui
+  // aurait fait échouer silencieusement le critère 1 (undefined n'est jamais
+  // Validated Donor) : le fixture les fournit désormais explicitement, comme
+  // le fait la query réelle une fois étendue (custom-queries.js).
+  isValidatedDonor: true,
+  validationExpiresAt: FUTURE_VALIDATION_EXPIRY,
+  lastDonationDate: null,
   ownerID: 'owner-1',
   createdAt: '2024-01-01T00:00:00.000Z',
   ...overrides,
@@ -226,6 +240,72 @@ describe('useMatchingRequests', () => {
     expect(graphqlMock).not.toHaveBeenCalledWith(
       expect.objectContaining({ query: expect.stringContaining('ListRequests') }),
     )
+  })
+
+  // Cette régression n'existait PAS avant ce fix : searchMatches() filtrait
+  // uniquement sur la géo puis `.find(isBloodCompatible)`, sans jamais
+  // consulter isValidatedDonor/validationExpiresAt (critère 1 de
+  // l'Eligibility, CONTEXT.md). Un animal non-validé, ou dont la validation
+  // a expiré, aurait donc été proposé comme match sur `main`, alors même que
+  // son groupe sanguin et la distance étaient parfaitement compatibles. Ce
+  // test aurait échoué sur `main` (matches.value aurait eu 1 élément).
+  it("exclut une Request si l'unique animal compatible n'est pas (ou plus) un Validated Donor", async () => {
+    mockGraphqlResponses({
+      profile: buildOwnerProfile(),
+      animals: [buildAnimal({ isValidatedDonor: false })],
+      requests: [buildRequest()],
+    })
+
+    const { matches, searchMatches } = useMatchingRequests()
+
+    await searchMatches()
+
+    expect(matches.value).toHaveLength(0)
+  })
+
+  it('exclut une Request si la validation Donor de l\'unique animal compatible a expiré', async () => {
+    mockGraphqlResponses({
+      profile: buildOwnerProfile(),
+      animals: [
+        buildAnimal({
+          isValidatedDonor: true,
+          validationExpiresAt: '2020-01-01T00:00:00.000Z', // expirée depuis longtemps
+        }),
+      ],
+      requests: [buildRequest()],
+    })
+
+    const { matches, searchMatches } = useMatchingRequests()
+
+    await searchMatches()
+
+    expect(matches.value).toHaveLength(0)
+  })
+
+  // Même constat que ci-dessus pour la Frequency Rule (critère 3) : l'ancienne
+  // version de searchMatches() ne consultait ni lastDonationDate ni
+  // donationFrequency. Un animal ayant donné il y a 5 jours avec une
+  // TWICE_YEAR (minimum 182 jours, cf. MIN_DAYS_BETWEEN_DONATIONS) serait
+  // ressorti comme match sur `main`. Ce test aurait échoué sur `main`.
+  it("exclut une Request si l'unique animal compatible a donné trop récemment (Frequency Rule)", async () => {
+    const fiveDaysAgo = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString()
+
+    mockGraphqlResponses({
+      profile: buildOwnerProfile(),
+      animals: [
+        buildAnimal({
+          donationFrequency: 'TWICE_YEAR',
+          lastDonationDate: fiveDaysAgo,
+        }),
+      ],
+      requests: [buildRequest()],
+    })
+
+    const { matches, searchMatches } = useMatchingRequests()
+
+    await searchMatches()
+
+    expect(matches.value).toHaveLength(0)
   })
 
   it('trie les Matches par distance croissante', async () => {
