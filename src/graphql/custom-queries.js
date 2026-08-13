@@ -60,6 +60,10 @@ export const listMyAnimalsSimple = /* GraphQL */ `
         name
         species
         bloodGroup
+        isValidatedDonor
+        validationExpiresAt
+        lastDonationDate
+        donationFrequency
       }
     }
   }

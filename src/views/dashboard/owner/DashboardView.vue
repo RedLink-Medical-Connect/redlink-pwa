@@ -26,9 +26,10 @@ onMounted(() => {
 const handleAccept = async (request) => {
   try {
     // On appelle la fonction d'acceptation (crée la mission dans la DB)
-    // useOwnerMissions().acceptMission attend l'objet Request complet (id,
-    // requiredSpecies, requestType), pas des identifiants séparés.
-    await acceptMission(request)
+    // useOwnerMissions().acceptMission attend (requestId, animalId) : elle recharge la
+    // Request et l'Animal elle-même plutôt que de faire confiance aux objets déjà en
+    // mémoire côté client (voir ADR-0001).
+    await acceptMission(request.id, request.matchingAnimal.id)
 
     toast.add({
       severity: 'success',
