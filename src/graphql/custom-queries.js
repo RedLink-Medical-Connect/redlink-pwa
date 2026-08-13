@@ -150,6 +150,33 @@ export const listOpenRequestsWithClinic = /* GraphQL */ `
   }
 `
 
+// Phase 1.1 (ADR-0002) : liste des Animals "en attente de validation vétérinaire"
+// (useAnimalValidation.js). Volontairement GLOBALE, pas de filtre `ownerID` ni
+// `clinicID` — `Animal` n'accorde de toute façon aux Veterinarians qu'un accès `read`
+// global (pas de scoping par clinique dans le schéma actuel, cf. schema.graphql et le
+// rapport de sous-tâche), donc filtrer côté client donnerait l'illusion d'une frontière
+// de sécurité par clinique qui n'existe pas réellement.
+export const listAnimalsForValidation = /* GraphQL */ `
+  query ListAnimalsForValidation {
+    listAnimals {
+      items {
+        id
+        name
+        species
+        breed
+        bloodGroup
+        isValidatedDonor
+        validationExpiresAt
+        ownerID
+        ownerProfile {
+          firstname
+          lastname
+        }
+      }
+    }
+  }
+`
+
 export const listMyAnimalsByOwnerId = /* GraphQL */ `
   query ListMyAnimalsByOwnerId($ownerID: ID!) {
     listAnimals(filter: { ownerID: { eq: $ownerID } }) {
