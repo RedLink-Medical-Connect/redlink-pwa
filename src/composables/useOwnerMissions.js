@@ -15,6 +15,36 @@ import {
 } from '@/services/eligibility-service'
 import { RequestStatus, RequestType, MissionStatus } from '@/constants/enums'
 
+// Messages spécifiques par code d'erreur levé par `acceptMission` (voir sa doc
+// ci-dessous pour le détail de chaque étape qui peut lever ces erreurs). Fonction
+// pure, exportée séparément de tout composant Vue pour rester testable sans monter
+// de composant (ce repo n'a aucun test de composant `.vue` à ce jour — voir la
+// Lead Dev review de feat/wire-eligibility-engine).
+const ACCEPT_MISSION_ERROR_MESSAGES = {
+  REQUEST_NOT_OPEN: "Cette demande n'est plus ouverte.",
+  ANIMAL_NOT_FOUND: 'Cet animal est introuvable parmi vos animaux.',
+  NOT_VALIDATED_DONOR: "Cet animal n'est plus un donneur validé.",
+  BLOOD_INCOMPATIBLE: "Le groupe sanguin de cet animal n'est plus compatible avec cette demande.",
+  FREQUENCY_RULE_NOT_SATISFIED: 'Cet animal a donné trop récemment pour donner à nouveau.',
+  REQUEST_ALREADY_TAKEN: "Cette demande vient d'être prise en charge par un autre propriétaire.",
+}
+
+/**
+ * Traduit une erreur levée par `acceptMission` (son `.message`, l'un des codes
+ * ci-dessus) en message utilisateur clair. Retourne `fallback` pour tout code non
+ * reconnu (erreur réseau, etc.).
+ *
+ * @param {string} errorMessage
+ * @param {string} [fallback]
+ * @returns {string}
+ */
+export function mapAcceptMissionError(
+  errorMessage,
+  fallback = "Impossible d'accepter la mission.",
+) {
+  return ACCEPT_MISSION_ERROR_MESSAGES[errorMessage] || fallback
+}
+
 /**
  * Détecte si une erreur renvoyée par `client.graphql()` correspond à l'échec de la
  * condition atomique posée sur `linkRequestToMission` (ADR-0001 : `Request.status = OPEN`),

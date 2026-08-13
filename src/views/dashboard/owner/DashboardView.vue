@@ -7,7 +7,7 @@ import DashboardSidebar from '@/components/dashboard/DashboardSidebar.vue'
 
 // Nos Logiques
 import { useMatchingRequests } from '@/composables/useMatchingRequests'
-import { useOwnerMissions } from '@/composables/useOwnerMissions'
+import { useOwnerMissions, mapAcceptMissionError } from '@/composables/useOwnerMissions'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -45,9 +45,14 @@ const handleAccept = async (request) => {
     toast.add({
       severity: 'error',
       summary: t('common.error'),
-      detail: "Impossible d'accepter la mission.",
+      detail: mapAcceptMissionError(e.message),
       life: 3000
     })
+
+    // L'état local (matches) peut être périmé : la Request ou l'Animal ont changé
+    // depuis la dernière recherche, c'est précisément ce qui a causé l'erreur.
+    // On rafraîchit plutôt que de laisser une carte obsolète cliquable.
+    searchMatches()
   }
 }
 </script>
