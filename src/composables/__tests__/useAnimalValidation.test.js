@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 // Phase 1.1 (ADR-0002) : useAnimalValidation() expose la liste (globale, voir doc du
 // composable) des Animals en attente de validation vétérinaire, et l'action de
@@ -12,6 +12,7 @@ vi.mock('aws-amplify/api', () => ({
 }))
 
 import { useAnimalValidation } from '@/composables/useAnimalValidation'
+import { listAnimalsForValidation } from '@/graphql/custom-queries'
 
 const buildAnimal = (overrides = {}) => ({
   id: 'animal-1',
@@ -29,6 +30,75 @@ const buildAnimal = (overrides = {}) => ({
 describe('useAnimalValidation.fetchPendingValidations', () => {
   beforeEach(() => {
     graphqlMock.mockReset()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it("frontière stricte de la comparaison temporelle : une validation qui expire dans quelques secondes reste exclue (pas en attente), une qui a expiré il y a quelques secondes ou exactement 'maintenant' revient en attente — pas seulement testé avec des dates lointaines (2099/2020) qui masqueraient un off-by-one", async () => {
+    vi.useFakeTimers()
+    const now = new Date('2026-08-13T12:00:00.000Z')
+    vi.setSystemTime(now)
+
+    const stillValidByOneSecond = buildAnimal({
+      id: 'animal-boundary-still-valid',
+      isValidatedDonor: true,
+      validationExpiresAt: new Date(now.getTime() + 1000).toISOString(),
+    })
+    const expiredByOneSecond = buildAnimal({
+      id: 'animal-boundary-just-expired',
+      isValidatedDonor: true,
+      validationExpiresAt: new Date(now.getTime() - 1000).toISOString(),
+    })
+    // Expire exactement à l'instant présent : isValidatedDonor() compare avec `>` strict
+    // (eligibility-service.js), donc "expire maintenant" doit être traité comme expiré,
+    // pas comme encore valide.
+    const expiresExactlyNow = buildAnimal({
+      id: 'animal-boundary-exact-now',
+      isValidatedDonor: true,
+      validationExpiresAt: now.toISOString(),
+    })
+
+    graphqlMock.mockImplementation(async ({ query }) => {
+      if (query.includes('ListAnimalsForValidation')) {
+        return {
+          data: {
+            listAnimals: { items: [stillValidByOneSecond, expiredByOneSecond, expiresExactlyNow] },
+          },
+        }
+      }
+      throw new Error(`Unexpected graphql call in test: ${query.slice(0, 60)}`)
+    })
+
+    const { fetchPendingValidations, pendingAnimals } = useAnimalValidation()
+    await fetchPendingValidations()
+
+    expect(pendingAnimals.value.map((a) => a.id).sort()).toEqual(
+      ['animal-boundary-exact-now', 'animal-boundary-just-expired'].sort(),
+    )
+  })
+
+  it("n'envoie aucun filtre de scoping (ownerID/clinicID) : appelle bien la query globale listAnimalsForValidation sans `variables`, conformément à la portée volontairement globale documentée dans useAnimalValidation.js", async () => {
+    let capturedArgs = null
+
+    graphqlMock.mockImplementation(async (args) => {
+      capturedArgs = args
+      return { data: { listAnimals: { items: [] } } }
+    })
+
+    const { fetchPendingValidations } = useAnimalValidation()
+    await fetchPendingValidations()
+
+    expect(capturedArgs.query).toBe(listAnimalsForValidation)
+    expect(capturedArgs.authMode).toBe('userPool')
+    // Aucune variable envoyée : pas de filter/ownerID/clinicID — la restriction de portée
+    // ne peut venir que d'@auth côté schéma, jamais d'un filtre client.
+    expect(capturedArgs.variables).toBeUndefined()
+    // La query elle-même ne déclare aucun paramètre sur l'opération ni de `filter` sur
+    // listAnimals — non plus juste "le mock l'accepte", mais la query réellement envoyée.
+    expect(listAnimalsForValidation).toContain('query ListAnimalsForValidation {')
+    expect(listAnimalsForValidation).toContain('listAnimals {')
   })
 
   it('inclut un Animal jamais validé (isValidatedDonor: false)', async () => {
@@ -240,5 +310,21 @@ describe('useAnimalValidation.validateAnimal', () => {
   it('isValidating est un ref distinct de isLoading', () => {
     const { isValidating, isLoading } = useAnimalValidation()
     expect(isValidating).not.toBe(isLoading)
+  })
+
+  it("valide un animalId absent de pendingAnimals.value (ex. déjà validé dans un autre onglet/session) sans planter : la mutation part quand même (le backend/@auth reste juge), et le filtre local est un no-op qui laisse la liste inchangée", async () => {
+    let capturedInput = null
+    graphqlMock.mockImplementation(async ({ variables }) => {
+      capturedInput = variables.input
+      return { data: { updateAnimal: { ...variables.input } } }
+    })
+
+    const { validateAnimal, pendingAnimals } = useAnimalValidation()
+    pendingAnimals.value = [buildAnimal({ id: 'animal-2' }), buildAnimal({ id: 'animal-3' })]
+
+    await expect(validateAnimal('animal-absent-ailleurs')).resolves.toBeUndefined()
+
+    expect(capturedInput.id).toBe('animal-absent-ailleurs')
+    expect(pendingAnimals.value.map((a) => a.id).sort()).toEqual(['animal-2', 'animal-3'])
   })
 })
