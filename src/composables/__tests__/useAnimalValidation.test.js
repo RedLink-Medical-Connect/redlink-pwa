@@ -243,6 +243,37 @@ describe('useAnimalValidation.validateAnimal', () => {
     expect(capturedInput.isValidatedDonor).toBe(true)
   })
 
+  it.each([
+    ['absent (chaîne vide)', ''],
+    ['non renseigné (null)', null],
+    ["littéral 'UNKNOWN'", 'UNKNOWN'],
+  ])(
+    "refuse la validation (BLOOD_GROUP_UNKNOWN) sans appeler la mutation quand le bloodGroup connu localement est %s — CONTEXT.md interdit un Validated Donor à groupe sanguin inconnu",
+    async (_label, bloodGroup) => {
+      const { validateAnimal, pendingAnimals, isValidating } = useAnimalValidation()
+      pendingAnimals.value = [buildAnimal({ id: 'animal-1', bloodGroup })]
+
+      await expect(validateAnimal('animal-1')).rejects.toThrow('BLOOD_GROUP_UNKNOWN')
+
+      expect(graphqlMock).not.toHaveBeenCalled()
+      expect(isValidating.value).toBe(false)
+      // La liste locale n'est pas modifiée : la validation a été refusée, pas acceptée.
+      expect(pendingAnimals.value.map((a) => a.id)).toEqual(['animal-1'])
+    },
+  )
+
+  it('valide normalement un animal dont le bloodGroup connu localement est renseigné et différent de UNKNOWN', async () => {
+    graphqlMock.mockImplementation(async ({ variables }) => ({
+      data: { updateAnimal: { ...variables.input } },
+    }))
+
+    const { validateAnimal, pendingAnimals } = useAnimalValidation()
+    pendingAnimals.value = [buildAnimal({ id: 'animal-1', bloodGroup: 'DEA 1.1-' })]
+
+    await expect(validateAnimal('animal-1')).resolves.toBeUndefined()
+    expect(graphqlMock).toHaveBeenCalledTimes(1)
+  })
+
   it('calcule validationExpiresAt à ~1 an dans le futur (ISO 8601 / AWSDateTime)', async () => {
     const before = Date.now()
     let capturedInput = null

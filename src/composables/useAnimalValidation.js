@@ -14,13 +14,15 @@ const VALIDATION_DURATION_MS = 365 * 24 * 60 * 60 * 1000
  *
  * ⚠️ Portée volontairement GLOBALE, pas "ma clinique" : `Animal` n'accorde aux
  * Veterinarians qu'un accès `read` global dans le schéma actuel (aucun scoping par
- * clinique — voir schema.graphql, type Animal), et l'infrastructure de requête
- * `ClinicOwnerRelation` nécessaire à un vrai filtrage par clinique n'existe encore nulle
- * part dans ce repo (déferrée à une phase ultérieure, avec le même trou pour "Clinic
- * Priority"). Pour ce pilote (une seule école vétérinaire partenaire), une liste globale
- * est une simplification honnête : elle correspond exactement à ce que le modèle @auth
- * permet déjà, plutôt que de simuler côté client une frontière de sécurité par clinique
- * qui n'existe pas réellement.
+ * clinique — voir schema.graphql, type Animal). Un filtrage réel par clinique existerait en
+ * combinant `getVeterinarian` (résout le `clinicID` du vétérinaire courant, cf.
+ * `fetchClinicId()` dans `useClinicRequest.js`) avec la query générée
+ * `clinicOwnerRelationsByClinicID` (existe déjà dans queries.js, mais jamais composée avec
+ * une liste d'Animals nulle part dans ce repo) — pas construit ici, déferré à une phase
+ * ultérieure avec le même trou pour "Clinic Priority". Pour ce pilote (une seule école
+ * vétérinaire partenaire), une liste globale est une simplification honnête : elle
+ * correspond exactement à ce que le modèle @auth permet déjà, plutôt que de simuler côté
+ * client une frontière de sécurité par clinique qui n'existe pas réellement.
  *
  * Un Animal est "en attente" si `!isValidatedDonor(animal)` (eligibility-service.js) :
  * ça couvre aussi bien un Animal jamais validé qu'un Animal dont `isValidatedDonor` vaut
@@ -31,10 +33,12 @@ const VALIDATION_DURATION_MS = 365 * 24 * 60 * 60 * 1000
  *
  * `bloodGroup` n'est JAMAIS écrit ici : les Veterinarians n'ont aucun accès en écriture
  * dessus (seuls `isValidatedDonor` et `validationExpiresAt` sont ouverts en écriture par
- * @auth, cf. ADR-0002) — la règle "un groupe sanguin connu est un prérequis à la
- * validation" (CONTEXT.md) reste donc une vérification à faire côté UI (Phase 1.2, hors
- * périmètre de ce composable), pas quelque chose que ce composable peut faire respecter
- * en écrivant sur `bloodGroup`.
+ * @auth, cf. ADR-0002). En revanche, la règle "un groupe sanguin connu est un prérequis à
+ * la validation" (CONTEXT.md, "un Animal Validated Donor à groupe sanguin inconnu ne peut
+ * pas exister") EST appliquée ici, comme l'assigne explicitement l'amendement de l'ADR-0002
+ * à ce fichier précis — `validateAnimal` refuse la validation si le `bloodGroup` connu
+ * localement (issu de `pendingAnimals`) est absent/`''`/`'UNKNOWN'`, même prédicat que celui
+ * déjà utilisé par `isBloodCompatible` (eligibility-service.js) pour rester cohérent.
  */
 export function useAnimalValidation() {
   const client = generateClient()
@@ -69,11 +73,23 @@ export function useAnimalValidation() {
    * `isValidatedDonor` et `validationExpiresAt` (validateAnimalDonorSimple, ADR-0002) —
    * jamais `bloodGroup` ni aucun autre champ.
    *
+   * Refuse (throw `BLOOD_GROUP_UNKNOWN`) si l'Animal est trouvé dans `pendingAnimals` et que
+   * son `bloodGroup` est absent/`'UNKNOWN'` — CONTEXT.md interdit un Validated Donor à groupe
+   * sanguin inconnu. Si l'Animal n'est PAS (plus) dans `pendingAnimals` (ex. déjà validé par
+   * un autre vétérinaire entre-temps), on ne peut pas vérifier son `bloodGroup` sans un fetch
+   * supplémentaire — on laisse alors la mutation partir telle quelle, comme avant : ce cas
+   * limite reste couvert par la revue humaine de la Mission plutôt que bloqué ici.
+   *
    * @param {string} animalId
    */
   const validateAnimal = async (animalId) => {
     isValidating.value = true
     try {
+      const knownAnimal = pendingAnimals.value.find((a) => a.id === animalId)
+      if (knownAnimal && (!knownAnimal.bloodGroup || knownAnimal.bloodGroup === 'UNKNOWN')) {
+        throw new Error('BLOOD_GROUP_UNKNOWN')
+      }
+
       const validationExpiresAt = new Date(Date.now() + VALIDATION_DURATION_MS).toISOString()
 
       await client.graphql({
