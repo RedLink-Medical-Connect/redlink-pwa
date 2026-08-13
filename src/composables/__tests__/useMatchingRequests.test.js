@@ -308,6 +308,41 @@ describe('useMatchingRequests', () => {
     expect(matches.value).toHaveLength(0)
   })
 
+  // La boucle de useMatchingRequests.searchMatches() est un `for...of` classique
+  // (pas un `.find()`/`.some()` qui s'arrêterait sur le premier animal testé,
+  // qu'il soit éligible ou non) : si le premier animal du propriétaire échoue
+  // un critère de l'Eligibility, le deuxième doit quand même être évalué et,
+  // s'il est éligible, faire matcher la Request. Un refactor qui réintroduirait
+  // un `.find(animal => checkEligibility(...).eligible)` court-circuiterait
+  // silencieusement sur le premier animal et exclurait à tort toute la Request
+  // dès que le premier animal listé n'est pas le bon donneur.
+  it("matche la Request avec le deuxième animal du propriétaire quand le premier échoue un critère d'Eligibility", async () => {
+    mockGraphqlResponses({
+      profile: buildOwnerProfile(),
+      animals: [
+        buildAnimal({ id: 'animal-not-donor', isValidatedDonor: false }),
+        buildAnimal({ id: 'animal-eligible' }),
+      ],
+      requests: [buildRequest()],
+    })
+
+    const { matches, searchMatches } = useMatchingRequests()
+
+    await searchMatches()
+
+    expect(matches.value).toHaveLength(1)
+    expect(matches.value[0].matchingAnimal.id).toBe('animal-eligible')
+    // distanceKM doit provenir du checkEligibility() de l'animal réellement
+    // éligible (animal-eligible), pas rester `null`/`undefined` comme le
+    // renvoie checkEligibility() pour l'animal non-donneur testé en premier
+    // (NOT_VALIDATED_DONOR court-circuite avant le calcul de distance, cf.
+    // eligibility-service.js) -- preuve qu'aucune valeur périmée d'un animal
+    // précédemment testé ne "fuit" sur le résultat final.
+    expect(matches.value[0].distanceKM).toBeTypeOf('number')
+    expect(matches.value[0].distanceKM).toBeGreaterThan(0)
+    expect(matches.value[0].distanceKM).toBeLessThan(50)
+  })
+
   it('trie les Matches par distance croissante', async () => {
     mockGraphqlResponses({
       profile: buildOwnerProfile({ maxTravelDistance: 500 }),
