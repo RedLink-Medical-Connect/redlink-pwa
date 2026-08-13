@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { generateClient } from 'aws-amplify/api'
-import { useOwnerMissions } from '@/composables/useOwnerMissions'
+import { useOwnerMissions, mapAcceptMissionError } from '@/composables/useOwnerMissions'
 
 // Regression coverage for fix #2 on branch fix/data-model-risks: schema.graphql's Request
 // @auth rule was missing "update" on the private (Owner) rule, so linkRequestToMission (called
@@ -102,5 +102,41 @@ describe('useOwnerMissions > acceptMission', () => {
 
     await expect(acceptMission('request-1', 'animal-1')).rejects.toThrow('ANIMAL_NOT_FOUND')
     expect(mockGraphql).toHaveBeenCalledTimes(2)
+  })
+})
+
+// Extracted from DashboardView.vue's handleAccept during the Lead Dev review of
+// feat/wire-eligibility-engine: this codebase has no precedent for mounting/testing
+// .vue components, so the error-code-to-message mapping lives here as a plain
+// function instead, testable without that infrastructure.
+describe('mapAcceptMissionError', () => {
+  it.each([
+    ['REQUEST_NOT_OPEN', "Cette demande n'est plus ouverte."],
+    ['ANIMAL_NOT_FOUND', 'Cet animal est introuvable parmi vos animaux.'],
+    ['NOT_VALIDATED_DONOR', "Cet animal n'est plus un donneur validé."],
+    [
+      'BLOOD_INCOMPATIBLE',
+      "Le groupe sanguin de cet animal n'est plus compatible avec cette demande.",
+    ],
+    ['FREQUENCY_RULE_NOT_SATISFIED', 'Cet animal a donné trop récemment pour donner à nouveau.'],
+    [
+      'REQUEST_ALREADY_TAKEN',
+      "Cette demande vient d'être prise en charge par un autre propriétaire.",
+    ],
+  ])('maps %s to its specific French message', (code, expected) => {
+    expect(mapAcceptMissionError(code)).toBe(expected)
+  })
+
+  it('falls back to the generic message for an unrecognized code (e.g. a raw network error)', () => {
+    expect(mapAcceptMissionError('Network request failed')).toBe(
+      "Impossible d'accepter la mission.",
+    )
+    expect(mapAcceptMissionError(undefined)).toBe("Impossible d'accepter la mission.")
+  })
+
+  it('accepts a custom fallback message', () => {
+    expect(mapAcceptMissionError('UNKNOWN_CODE', 'Erreur personnalisée.')).toBe(
+      'Erreur personnalisée.',
+    )
   })
 })

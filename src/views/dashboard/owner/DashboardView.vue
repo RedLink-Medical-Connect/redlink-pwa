@@ -7,7 +7,7 @@ import DashboardSidebar from '@/components/dashboard/DashboardSidebar.vue'
 
 // Nos Logiques
 import { useMatchingRequests } from '@/composables/useMatchingRequests'
-import { useOwnerMissions } from '@/composables/useOwnerMissions'
+import { useOwnerMissions, mapAcceptMissionError } from '@/composables/useOwnerMissions'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -22,18 +22,6 @@ const { acceptMission, isLoading: loadingAccept } = useOwnerMissions()
 onMounted(() => {
   searchMatches()
 })
-
-// Messages spécifiques par code d'erreur levé par useOwnerMissions().acceptMission
-// (voir la doc de la fonction dans useOwnerMissions.js pour le détail de chaque
-// étape qui peut lever ces erreurs). Fallback générique pour tout code non reconnu.
-const ACCEPT_ERROR_MESSAGES = {
-  REQUEST_NOT_OPEN: "Cette demande n'est plus ouverte.",
-  ANIMAL_NOT_FOUND: "Cet animal est introuvable parmi vos animaux.",
-  NOT_VALIDATED_DONOR: "Cet animal n'est plus un donneur validé.",
-  BLOOD_INCOMPATIBLE: "Le groupe sanguin de cet animal n'est plus compatible avec cette demande.",
-  FREQUENCY_RULE_NOT_SATISFIED: "Cet animal a donné trop récemment pour donner à nouveau.",
-  REQUEST_ALREADY_TAKEN: 'Cette demande vient d\'être prise en charge par un autre propriétaire.',
-}
 
 const handleAccept = async (request) => {
   try {
@@ -57,7 +45,7 @@ const handleAccept = async (request) => {
     toast.add({
       severity: 'error',
       summary: t('common.error'),
-      detail: ACCEPT_ERROR_MESSAGES[e.message] || "Impossible d'accepter la mission.",
+      detail: mapAcceptMissionError(e.message),
       life: 3000
     })
 
