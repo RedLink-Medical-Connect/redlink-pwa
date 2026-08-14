@@ -529,14 +529,20 @@
         "quantity": "Quantité :",
         "donor_found": "Donneur trouvé !",
         "owner_contact": "Contact propriétaire",
-        "waiting_donor": "En attente de donneur..."
+        "waiting_donor": "En attente de donneur...",
+        "complete_btn": "Terminé",
+        "no_show_btn": "Absent"
       },
       "empty": "Aucune demande en cours.",
       "type_emergency_short": "Urgence",
       "type_appointment_short": "RDV",
       "toasts": {
         "close_success": "Demande clôturée avec succès",
-        "close_failed": "Erreur lors de la clôture"
+        "close_failed": "Erreur lors de la clôture",
+        "mission_completed_success": "Mission clôturée : don enregistré",
+        "mission_no_show_success": "Mission clôturée : donneur absent",
+        "mission_closure_failed": "Erreur lors de la clôture de la mission",
+        "mission_closed_request_still_open": "Mission clôturée, mais la demande n'a pas pu être fermée automatiquement — vérifiez son statut."
       }
     },
     "donors": {

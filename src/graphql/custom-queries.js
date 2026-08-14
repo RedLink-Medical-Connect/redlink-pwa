@@ -36,6 +36,7 @@ export const listRequestsByClinic = /* GraphQL */ `
         mission {
           id
           status
+          animalID
           animal {
             name
             breed

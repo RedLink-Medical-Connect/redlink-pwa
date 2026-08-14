@@ -4,15 +4,27 @@ import { useI18n } from 'vue-i18n'
 import { useToast } from 'primevue/usetoast'
 import DashboardSidebar from '@/components/dashboard/DashboardSidebar.vue'
 import { useClinicRequests } from '@/composables/useClinicRequest.js'
+import { useMissionClosure } from '@/composables/useMissionClosure.js'
+import { MissionStatus } from '@/constants/enums'
 
 const { t } = useI18n()
 const toast = useToast()
 
 const { requests, isLoading, fetchRequests, closeRequest } = useClinicRequests()
+const { closeMission } = useMissionClosure()
 
 const showDetails = ref(false)
 const selectedRequest = ref(null)
 const selectedMission = ref(null)
+
+// `closeMission()` expose un seul `isClosing` par instance de composable (voir
+// useMissionClosure.js) : ici, une seule instance sert les deux boutons "Terminé"/"Absent"
+// de la dialog, donc ce ref serait partagé entre les deux (même limitation que
+// `isValidating` dans useAnimalValidation.js / ValidationsView.vue). On retrace ici l'issue
+// (outcome) en cours de clôture pour n'afficher le spinner que sur le bon bouton, et
+// désactiver l'AUTRE pendant ce temps plutôt que de laisser un second clic déclencher un
+// second appel concurrent sur la même Mission.
+const closingOutcome = ref(null)
 
 onMounted(() => {
   fetchRequests()
@@ -65,6 +77,90 @@ const openDetails = (request) => {
   selectedRequest.value = request
   selectedMission.value = request.mission
   showDetails.value = true
+}
+
+/**
+ * Clôture la Mission de `selectedRequest` avec `outcome` (COMPLETED ou NO_SHOW), PUIS
+ * clôture la Request sous-jacente (`closeRequest`, useClinicRequest.js — déjà exportée,
+ * aucune nouvelle mutation ici).
+ *
+ * Pourquoi les deux écritures ensemble (choix délibéré, hors périmètre strict de la
+ * Phase 2.1 qui ne posait que `closeMission`) : sans `closeRequest`, une Request dont la
+ * Mission vient de conclure (succès ou no-show) resterait indéfiniment `IN_PROGRESS` dans
+ * la liste de la clinique, sans aucune clôture de cycle de vie visible — `closeRequest`
+ * fait exactement l'écriture `Request.status -> CLOSED` nécessaire et existe déjà, donc
+ * pas de nouvelle mutation à écrire.
+ *
+ * Limitation connue et volontairement non traitée ici : sur NO_SHOW, la Request se
+ * retrouve CLOSED sans qu'aucun nouveau donneur n'ait été trouvé — il n'existe aucun
+ * mécanisme pour la "rouvrir" en vue d'une nouvelle recherche de donneur. La clinique doit
+ * recréer une Request de zéro si elle a toujours besoin de sang. Non construit ici
+ * (explicitement hors périmètre de cette sous-tâche) — trou fonctionnel à garder visible
+ * pour une phase ultérieure plutôt qu'à masquer.
+ */
+const handleCloseMission = async (outcome) => {
+  closingOutcome.value = outcome
+  // Distingue "rien n'a été écrit" de "la Mission a fermé mais pas la Request" (relevé en
+  // Lead Dev review) : sans ça, un échec de `closeRequest` après un `closeMission` réussi
+  // affichait un message générique d'échec total — un vétérinaire confus pouvait alors
+  // cliquer l'AUTRE bouton en pensant que rien n'avait marché, écrasant silencieusement le
+  // statut réel de la Mission (et, sur un second clic "Terminé" après un "Absent" déjà
+  // écrit ailleurs, désynchronisant Animal.lastDonationDate de ce que la Mission dit
+  // vraiment s'être passé). `closeMission()` n'a pas d'écriture atomique conditionnelle
+  // (voir useMissionClosure.js) : c'est ici, côté UI, que ce risque doit être coupé.
+  let missionClosed = false
+  try {
+    await closeMission(selectedRequest.value.mission.id, selectedRequest.value.mission.animalID, outcome)
+    missionClosed = true
+    await closeRequest(selectedRequest.value.id)
+
+    toast.add({
+      severity: 'success',
+      summary: t('common.success'),
+      detail: t(
+        outcome === MissionStatus.COMPLETED
+          ? 'dashboard.requests.toasts.mission_completed_success'
+          : 'dashboard.requests.toasts.mission_no_show_success',
+      ),
+      life: 3000,
+    })
+
+    showDetails.value = false
+    await fetchRequests()
+  } catch (e) {
+    console.error('Erreur clôture mission/request:', e)
+    // closeMission() n'a pas de contrat de codes d'erreur documenté (contrairement à
+    // acceptMission/validateAnimal) — voir useMissionClosure.js : elle relaie telle quelle
+    // toute erreur du client GraphQL. Message générique ici, pas de mapping par code.
+    if (missionClosed) {
+      // La Mission a réellement fermé — on rafraîchit pour que l'UI reflète cet état
+      // (retrouve la version à jour de la Request dans la liste rechargée : `requests`
+      // change de référence à chaque fetch, `selectedRequest` doit être resynchronisé,
+      // sinon le v-if des boutons continuerait de lire l'ancien statut ACCEPTED/
+      // PENDING_ARRIVAL et laisserait les deux boutons cliquables sur une Mission déjà
+      // close). Ça retire les deux boutons du DOM (Mission plus dans cet état), coupant
+      // court à tout second clic sur l'autre issue.
+      await fetchRequests()
+      const refreshed = requests.value.find((r) => r.id === selectedRequest.value.id)
+      if (refreshed) selectedRequest.value = refreshed
+
+      toast.add({
+        severity: 'warn',
+        summary: t('common.error'),
+        detail: t('dashboard.requests.toasts.mission_closed_request_still_open'),
+        life: 6000,
+      })
+    } else {
+      toast.add({
+        severity: 'error',
+        summary: t('common.error'),
+        detail: t('dashboard.requests.toasts.mission_closure_failed'),
+        life: 4000,
+      })
+    }
+  } finally {
+    closingOutcome.value = null
+  }
 }
 </script>
 
@@ -141,6 +237,34 @@ const openDetails = (request) => {
               >
                 <i class="pi pi-phone"></i> {{ selectedRequest.mission.animal.ownerProfile?.phone }}
               </a>
+            </div>
+
+            <div
+              v-if="
+                selectedRequest.mission.status === MissionStatus.ACCEPTED ||
+                selectedRequest.mission.status === MissionStatus.PENDING_ARRIVAL
+              "
+              class="border-t border-green-200 dark:border-green-800 pt-3 mt-2 flex gap-2"
+            >
+              <Button
+                :label="$t('dashboard.requests.dialog.complete_btn')"
+                icon="pi pi-check"
+                size="small"
+                severity="success"
+                :loading="closingOutcome === MissionStatus.COMPLETED"
+                :disabled="closingOutcome !== null && closingOutcome !== MissionStatus.COMPLETED"
+                @click="handleCloseMission(MissionStatus.COMPLETED)"
+              />
+              <Button
+                :label="$t('dashboard.requests.dialog.no_show_btn')"
+                icon="pi pi-times"
+                size="small"
+                severity="danger"
+                outlined
+                :loading="closingOutcome === MissionStatus.NO_SHOW"
+                :disabled="closingOutcome !== null && closingOutcome !== MissionStatus.NO_SHOW"
+                @click="handleCloseMission(MissionStatus.NO_SHOW)"
+              />
             </div>
           </div>
         </div>
