@@ -154,7 +154,6 @@ describe('useClinicDonors.fetchDonors', () => {
       expect(row.ownerFirstname).toBe('Jean')
       expect(row.ownerLastname).toBe('Dupont')
       expect(row.ownerPhone).toBe('0600000000')
-      expect(row.ownerAddress).toBe('1 rue de la Paix')
     }
     // Et chaque ligne garde bien SES propres infos Animal (pas celles de l'autre ligne).
     const rex = donors.value.find((d) => d.animalId === 'animal-1')

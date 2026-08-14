@@ -70,6 +70,11 @@ const formatDate = (dateString) => {
 
           <DataTable v-else :value="donors" striped-rows class="p-datatable-sm" table-style="min-width: 50rem">
             <Column field="animalName" :header="$t('dashboard.donors.columns.animal')" class="!text-zinc-900 dark:!text-white font-bold"></Column>
+            <Column :header="$t('dashboard.donors.columns.owner')" class="!text-zinc-600 dark:!text-zinc-400">
+              <template #body="slotProps">
+                {{ slotProps.data.ownerFirstname }} {{ slotProps.data.ownerLastname }}
+              </template>
+            </Column>
             <Column field="bloodGroup" :header="$t('dashboard.donors.columns.blood')">
               <template #body="slotProps">
                 <Tag :value="slotProps.data.bloodGroup" severity="warning" />

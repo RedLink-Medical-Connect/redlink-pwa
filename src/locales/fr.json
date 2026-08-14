@@ -551,6 +551,7 @@
       "search_placeholder": "Rechercher par nom, ville...",
       "columns": {
         "animal": "ANIMAL",
+        "owner": "PROPRIÉTAIRE",
         "blood": "SANG",
         "distance": "DISTANCE",
         "last_donation": "DERNIER DON",

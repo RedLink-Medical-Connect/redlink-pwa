@@ -209,7 +209,6 @@ export const listClinicDonorsByClinicID = /* GraphQL */ `
           firstname
           lastname
           phone
-          address
           latitude
           longitude
           animals {

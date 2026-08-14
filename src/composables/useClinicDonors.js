@@ -138,7 +138,6 @@ export function useClinicDonors() {
             ownerFirstname: owner.firstname,
             ownerLastname: owner.lastname,
             ownerPhone: owner.phone,
-            ownerAddress: owner.address,
           })
         }
       }

@@ -551,6 +551,7 @@
       "search_placeholder": "Search by name, city...",
       "columns": {
         "animal": "ANIMAL",
+        "owner": "OWNER",
         "blood": "BLOOD",
         "distance": "DISTANCE",
         "last_donation": "LAST DONATION",
