@@ -100,8 +100,18 @@ const openDetails = (request) => {
  */
 const handleCloseMission = async (outcome) => {
   closingOutcome.value = outcome
+  // Distingue "rien n'a été écrit" de "la Mission a fermé mais pas la Request" (relevé en
+  // Lead Dev review) : sans ça, un échec de `closeRequest` après un `closeMission` réussi
+  // affichait un message générique d'échec total — un vétérinaire confus pouvait alors
+  // cliquer l'AUTRE bouton en pensant que rien n'avait marché, écrasant silencieusement le
+  // statut réel de la Mission (et, sur un second clic "Terminé" après un "Absent" déjà
+  // écrit ailleurs, désynchronisant Animal.lastDonationDate de ce que la Mission dit
+  // vraiment s'être passé). `closeMission()` n'a pas d'écriture atomique conditionnelle
+  // (voir useMissionClosure.js) : c'est ici, côté UI, que ce risque doit être coupé.
+  let missionClosed = false
   try {
     await closeMission(selectedRequest.value.mission.id, selectedRequest.value.mission.animalID, outcome)
+    missionClosed = true
     await closeRequest(selectedRequest.value.id)
 
     toast.add({
@@ -117,16 +127,37 @@ const handleCloseMission = async (outcome) => {
 
     showDetails.value = false
     await fetchRequests()
-  } catch {
+  } catch (e) {
+    console.error('Erreur clôture mission/request:', e)
     // closeMission() n'a pas de contrat de codes d'erreur documenté (contrairement à
     // acceptMission/validateAnimal) — voir useMissionClosure.js : elle relaie telle quelle
     // toute erreur du client GraphQL. Message générique ici, pas de mapping par code.
-    toast.add({
-      severity: 'error',
-      summary: t('common.error'),
-      detail: t('dashboard.requests.toasts.mission_closure_failed'),
-      life: 4000,
-    })
+    if (missionClosed) {
+      // La Mission a réellement fermé — on rafraîchit pour que l'UI reflète cet état
+      // (retrouve la version à jour de la Request dans la liste rechargée : `requests`
+      // change de référence à chaque fetch, `selectedRequest` doit être resynchronisé,
+      // sinon le v-if des boutons continuerait de lire l'ancien statut ACCEPTED/
+      // PENDING_ARRIVAL et laisserait les deux boutons cliquables sur une Mission déjà
+      // close). Ça retire les deux boutons du DOM (Mission plus dans cet état), coupant
+      // court à tout second clic sur l'autre issue.
+      await fetchRequests()
+      const refreshed = requests.value.find((r) => r.id === selectedRequest.value.id)
+      if (refreshed) selectedRequest.value = refreshed
+
+      toast.add({
+        severity: 'warn',
+        summary: t('common.error'),
+        detail: t('dashboard.requests.toasts.mission_closed_request_still_open'),
+        life: 6000,
+      })
+    } else {
+      toast.add({
+        severity: 'error',
+        summary: t('common.error'),
+        detail: t('dashboard.requests.toasts.mission_closure_failed'),
+        life: 4000,
+      })
+    }
   } finally {
     closingOutcome.value = null
   }

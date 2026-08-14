@@ -541,7 +541,8 @@
         "close_failed": "Erreur lors de la clôture",
         "mission_completed_success": "Mission clôturée : don enregistré",
         "mission_no_show_success": "Mission clôturée : donneur absent",
-        "mission_closure_failed": "Erreur lors de la clôture de la mission"
+        "mission_closure_failed": "Erreur lors de la clôture de la mission",
+        "mission_closed_request_still_open": "Mission clôturée, mais la demande n'a pas pu être fermée automatiquement — vérifiez son statut."
       }
     },
     "donors": {

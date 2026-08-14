@@ -547,7 +547,8 @@
         "close_failed": "Error while closing the request",
         "mission_completed_success": "Mission closed: donation recorded",
         "mission_no_show_success": "Mission closed: donor no-show",
-        "mission_closure_failed": "Error while closing the mission"
+        "mission_closure_failed": "Error while closing the mission",
+        "mission_closed_request_still_open": "Mission closed, but the request couldn't be closed automatically — check its status."
       }
     },
     "donors": {
