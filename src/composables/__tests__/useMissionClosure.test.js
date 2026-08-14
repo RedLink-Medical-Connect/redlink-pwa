@@ -1,12 +1,19 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
-// Phase 2.1 (ADR-0003) : useMissionClosure() expose closeMission(missionId, animalId,
-// outcome) — logique + mutations uniquement, aucun câblage UI dans cette sous-tâche.
+// Phase 2.1 (ADR-0003) / 3.1 : useMissionClosure() expose closeMission(missionId, animalId,
+// outcome, clinicID, ownerID) — logique + mutations uniquement, aucun câblage UI dans la
+// sous-tâche 2.1 (câblé depuis dans RequestsView.vue).
 //
 // - Toujours : Mission.status -> outcome (closeMissionSimple).
-// - Seulement si outcome === COMPLETED : Animal.lastDonationDate -> aujourd'hui, format
-//   AWSDate (YYYY-MM-DD), via updateAnimalLastDonationDateSimple.
-// - NO_SHOW ne touche jamais Animal.
+// - Seulement si outcome === COMPLETED :
+//   - Animal.lastDonationDate -> aujourd'hui, format AWSDate (YYYY-MM-DD), via
+//     updateAnimalLastDonationDateSimple.
+//   - Upsert best-effort d'une ClinicOwnerRelation(clinicID, ownerID) — voir
+//     resolveClinicOwnerRelationUpsert (fonction pure) plus bas pour la logique de décision,
+//     et le bloc "closeMission — upsert ClinicOwnerRelation (Phase 3.1)" pour le câblage
+//     bout-en-bout (requête clinicOwnerRelationsByOwnerID puis, si besoin,
+//     createClinicOwnerRelationSimple).
+// - NO_SHOW ne touche jamais Animal, ni ClinicOwnerRelation.
 // - outcome invalide -> throw INVALID_OUTCOME avant tout appel GraphQL.
 
 const graphqlMock = vi.fn()
@@ -15,8 +22,38 @@ vi.mock('aws-amplify/api', () => ({
   generateClient: () => ({ graphql: graphqlMock }),
 }))
 
-import { useMissionClosure } from '@/composables/useMissionClosure'
+import { useMissionClosure, resolveClinicOwnerRelationUpsert } from '@/composables/useMissionClosure'
 import { MissionStatus } from '@/constants/enums'
+
+/**
+ * Mock GraphQL réutilisé par les tests de cette sous-tâche : gère les 4 mutations/queries
+ * que closeMission() peut appeler sur COMPLETED (CloseMission, UpdateAnimalLastDonationDate,
+ * ClinicOwnerRelationsByOwnerID, CreateClinicOwnerRelation). `existingRelations` simule la
+ * réponse de clinicOwnerRelationsByOwnerID pour l'Owner ciblé.
+ */
+function mockGraphqlForCompletedFlow(existingRelations, calls = []) {
+  graphqlMock.mockImplementation(async ({ query, variables }) => {
+    calls.push({ query, variables })
+    if (query.includes('CloseMission')) {
+      return { data: { updateMission: { id: variables.input.id, status: variables.input.status } } }
+    }
+    if (query.includes('UpdateAnimalLastDonationDate')) {
+      return {
+        data: {
+          updateAnimal: { id: variables.input.id, lastDonationDate: variables.input.lastDonationDate },
+        },
+      }
+    }
+    if (query.includes('ClinicOwnerRelationsByOwnerID')) {
+      return { data: { clinicOwnerRelationsByOwnerID: { items: existingRelations } } }
+    }
+    if (query.includes('CreateClinicOwnerRelation')) {
+      return { data: { createClinicOwnerRelation: { id: 'relation-new', ...variables.input } } }
+    }
+    throw new Error(`Unexpected graphql call in test: ${query.slice(0, 60)}`)
+  })
+  return calls
+}
 
 describe('useMissionClosure.closeMission', () => {
   beforeEach(() => {
@@ -27,31 +64,20 @@ describe('useMissionClosure.closeMission', () => {
     vi.useRealTimers()
   })
 
-  it('COMPLETED : met à jour Mission.status ET Animal.lastDonationDate, dans cet ordre, avec la date du jour au format AWSDate exact (YYYY-MM-DD)', async () => {
+  it('COMPLETED : met à jour Mission.status ET Animal.lastDonationDate, dans cet ordre, avec la date du jour au format AWSDate exact (YYYY-MM-DD), puis upserte la ClinicOwnerRelation', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-08-14T21:47:33.123Z'))
 
-    const calls = []
-    graphqlMock.mockImplementation(async ({ query, variables }) => {
-      calls.push({ query, variables })
-      if (query.includes('CloseMission')) {
-        return { data: { updateMission: { id: variables.input.id, status: variables.input.status } } }
-      }
-      if (query.includes('UpdateAnimalLastDonationDate')) {
-        return {
-          data: {
-            updateAnimal: { id: variables.input.id, lastDonationDate: variables.input.lastDonationDate },
-          },
-        }
-      }
-      throw new Error(`Unexpected graphql call in test: ${query.slice(0, 60)}`)
-    })
+    // Owner déjà lié à cette clinique exacte : pas de création, la 3e requête (le check
+    // clinicOwnerRelationsByOwnerID) a quand même bien lieu — voir les tests dédiés
+    // ClinicOwnerRelation plus bas pour les scénarios de création.
+    const calls = mockGraphqlForCompletedFlow([{ clinicID: 'clinic-1', isPrimaryClinic: true }])
 
     const { closeMission, isClosing } = useMissionClosure()
 
-    await closeMission('mission-1', 'animal-1', MissionStatus.COMPLETED)
+    await closeMission('mission-1', 'animal-1', MissionStatus.COMPLETED, 'clinic-1', 'owner-1')
 
-    expect(graphqlMock).toHaveBeenCalledTimes(2)
+    expect(graphqlMock).toHaveBeenCalledTimes(3)
 
     expect(calls[0].query).toContain('CloseMission')
     expect(calls[0].variables).toEqual({
@@ -64,6 +90,9 @@ describe('useMissionClosure.closeMission', () => {
     })
     // Format AWSDate strict : pas d'heure, pas de suffixe 'Z'/timezone.
     expect(calls[1].variables.input.lastDonationDate).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+
+    expect(calls[2].query).toContain('ClinicOwnerRelationsByOwnerID')
+    expect(calls[2].variables).toEqual({ ownerID: 'owner-1' })
 
     expect(isClosing.value).toBe(false)
   })
@@ -121,17 +150,21 @@ describe('useMissionClosure.closeMission', () => {
     }
   })
 
-  it("NO_SHOW : met à jour Mission.status uniquement, n'appelle jamais la mutation Animal", async () => {
+  it("NO_SHOW : met à jour Mission.status uniquement, n'appelle jamais la mutation Animal ni ClinicOwnerRelation (même clinicID/ownerID fournis)", async () => {
     graphqlMock.mockImplementation(async ({ query, variables }) => {
       if (query.includes('CloseMission')) {
         return { data: { updateMission: { id: variables.input.id, status: variables.input.status } } }
       }
+      // Toute requête ClinicOwnerRelation (ou Animal) ici ferait échouer le test — NO_SHOW ne
+      // doit déclencher NI l'écriture Animal NI l'upsert ClinicOwnerRelation, quand bien même
+      // clinicID/ownerID sont fournis à closeMission ci-dessous (contrairement à COMPLETED, où
+      // ils déclenchent l'upsert).
       throw new Error(`Unexpected graphql call in test: ${query.slice(0, 60)}`)
     })
 
     const { closeMission } = useMissionClosure()
 
-    await closeMission('mission-1', 'animal-1', MissionStatus.NO_SHOW)
+    await closeMission('mission-1', 'animal-1', MissionStatus.NO_SHOW, 'clinic-1', 'owner-1')
 
     expect(graphqlMock).toHaveBeenCalledTimes(1)
     expect(graphqlMock).toHaveBeenCalledWith(
@@ -248,5 +281,144 @@ describe('useMissionClosure.closeMission', () => {
     await expect(closeMission('mission-1', 'animal-1', MissionStatus.NO_SHOW)).resolves.toBeUndefined()
 
     expect(graphqlMock).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('useMissionClosure — upsert ClinicOwnerRelation (Phase 3.1, COMPLETED uniquement)', () => {
+  beforeEach(() => {
+    graphqlMock.mockReset()
+  })
+
+  it('Owner sans relation existante (première clinique jamais liée pour cet Owner) : crée la ClinicOwnerRelation avec isPrimaryClinic: true', async () => {
+    const calls = mockGraphqlForCompletedFlow([])
+    const { closeMission } = useMissionClosure()
+
+    await closeMission('mission-1', 'animal-1', MissionStatus.COMPLETED, 'clinic-1', 'owner-1')
+
+    const createCall = calls.find((c) => c.query.includes('CreateClinicOwnerRelation'))
+    expect(createCall).toBeDefined()
+    expect(createCall.variables).toEqual({
+      input: { clinicID: 'clinic-1', ownerID: 'owner-1', isPrimaryClinic: true },
+    })
+    expect(graphqlMock).toHaveBeenCalledTimes(4)
+  })
+
+  it('Owner déjà lié à une AUTRE clinique : crée une nouvelle ClinicOwnerRelation avec isPrimaryClinic: false', async () => {
+    const calls = mockGraphqlForCompletedFlow([{ clinicID: 'clinic-OTHER', isPrimaryClinic: true }])
+    const { closeMission } = useMissionClosure()
+
+    await closeMission('mission-1', 'animal-1', MissionStatus.COMPLETED, 'clinic-1', 'owner-1')
+
+    const createCall = calls.find((c) => c.query.includes('CreateClinicOwnerRelation'))
+    expect(createCall).toBeDefined()
+    expect(createCall.variables).toEqual({
+      input: { clinicID: 'clinic-1', ownerID: 'owner-1', isPrimaryClinic: false },
+    })
+    expect(graphqlMock).toHaveBeenCalledTimes(4)
+  })
+
+  it("Owner déjà lié à CETTE clinique exacte : aucune nouvelle mutation ClinicOwnerRelation n'est appelée (no-op, pas juste \"ne plante pas\")", async () => {
+    mockGraphqlForCompletedFlow([{ clinicID: 'clinic-1', isPrimaryClinic: true }])
+    const { closeMission } = useMissionClosure()
+
+    await expect(
+      closeMission('mission-1', 'animal-1', MissionStatus.COMPLETED, 'clinic-1', 'owner-1'),
+    ).resolves.toBeUndefined()
+
+    // 3 appels seulement : CloseMission, UpdateAnimalLastDonationDate, et le check
+    // ClinicOwnerRelationsByOwnerID lui-même — jamais CreateClinicOwnerRelation. On vérifie le
+    // COMPTE exact d'appels, pas juste l'absence d'exception.
+    expect(graphqlMock).toHaveBeenCalledTimes(3)
+    expect(graphqlMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ query: expect.stringContaining('CreateClinicOwnerRelation') }),
+    )
+  })
+
+  it("l'échec de l'upsert ClinicOwnerRelation ne fait PAS échouer closeMission (best-effort) — Mission/Animal déjà écrits avec succès à ce stade", async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    graphqlMock.mockImplementation(async ({ query, variables }) => {
+      if (query.includes('CloseMission')) {
+        return { data: { updateMission: { id: variables.input.id, status: variables.input.status } } }
+      }
+      if (query.includes('UpdateAnimalLastDonationDate')) {
+        return {
+          data: {
+            updateAnimal: { id: variables.input.id, lastDonationDate: variables.input.lastDonationDate },
+          },
+        }
+      }
+      if (query.includes('ClinicOwnerRelationsByOwnerID')) {
+        throw new Error('DynamoDB throttled')
+      }
+      throw new Error(`Unexpected graphql call in test: ${query.slice(0, 60)}`)
+    })
+
+    const { closeMission, isClosing } = useMissionClosure()
+
+    await expect(
+      closeMission('mission-1', 'animal-1', MissionStatus.COMPLETED, 'clinic-1', 'owner-1'),
+    ).resolves.toBeUndefined()
+
+    expect(isClosing.value).toBe(false)
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('ClinicOwnerRelation'),
+      expect.any(Error),
+    )
+
+    consoleErrorSpy.mockRestore()
+  })
+
+  it('clinicID/ownerID manquants (appelant non migré vers le nouveau contrat) : no-op silencieux, ne bloque pas closeMission, log une erreur contextuelle', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    graphqlMock.mockImplementation(async ({ query, variables }) => {
+      if (query.includes('CloseMission')) {
+        return { data: { updateMission: { id: variables.input.id, status: variables.input.status } } }
+      }
+      if (query.includes('UpdateAnimalLastDonationDate')) {
+        return {
+          data: {
+            updateAnimal: { id: variables.input.id, lastDonationDate: variables.input.lastDonationDate },
+          },
+        }
+      }
+      throw new Error(`Unexpected graphql call in test: ${query.slice(0, 60)}`)
+    })
+
+    const { closeMission } = useMissionClosure()
+
+    // Pas de clinicID/ownerID passés — même contrat que le reste du fichier avant cette
+    // sous-tâche (closeMission(missionId, animalId, outcome)).
+    await expect(closeMission('mission-1', 'animal-1', MissionStatus.COMPLETED)).resolves.toBeUndefined()
+
+    expect(graphqlMock).toHaveBeenCalledTimes(2)
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('ClinicOwnerRelation'))
+
+    consoleErrorSpy.mockRestore()
+  })
+})
+
+describe('resolveClinicOwnerRelationUpsert (fonction pure, testable sans mock GraphQL)', () => {
+  it('retourne null si une relation existe déjà pour ce clinicID exact', () => {
+    const result = resolveClinicOwnerRelationUpsert(
+      [
+        { clinicID: 'clinic-1', isPrimaryClinic: true },
+        { clinicID: 'clinic-2', isPrimaryClinic: false },
+      ],
+      'clinic-1',
+    )
+    expect(result).toBeNull()
+  })
+
+  it('retourne isPrimaryClinic: true si existingRelations est vide (toute première relation de cet Owner)', () => {
+    const result = resolveClinicOwnerRelationUpsert([], 'clinic-1')
+    expect(result).toEqual({ clinicID: 'clinic-1', isPrimaryClinic: true })
+  })
+
+  it("retourne isPrimaryClinic: false si l'Owner a déjà au moins une relation, mais avec une AUTRE clinique", () => {
+    const result = resolveClinicOwnerRelationUpsert(
+      [{ clinicID: 'clinic-OTHER', isPrimaryClinic: true }],
+      'clinic-1',
+    )
+    expect(result).toEqual({ clinicID: 'clinic-1', isPrimaryClinic: false })
   })
 })

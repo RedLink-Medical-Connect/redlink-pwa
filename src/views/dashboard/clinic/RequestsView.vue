@@ -110,7 +110,17 @@ const handleCloseMission = async (outcome) => {
   // (voir useMissionClosure.js) : c'est ici, côté UI, que ce risque doit être coupé.
   let missionClosed = false
   try {
-    await closeMission(selectedRequest.value.mission.id, selectedRequest.value.mission.animalID, outcome)
+    // clinicID/ownerID (Phase 3.1) : déjà présents dans `selectedRequest` via
+    // `listRequestsByClinic` (custom-queries.js, étendue pour cette sous-tâche) — aucun
+    // aller-retour GraphQL dédié pour les obtenir. Utilisés par closeMission() pour upserter
+    // (best-effort) la ClinicOwnerRelation quand outcome === COMPLETED ; ignorés sur NO_SHOW.
+    await closeMission(
+      selectedRequest.value.mission.id,
+      selectedRequest.value.mission.animalID,
+      outcome,
+      selectedRequest.value.clinicID,
+      selectedRequest.value.mission.animal.ownerID,
+    )
     missionClosed = true
     await closeRequest(selectedRequest.value.id)
 
