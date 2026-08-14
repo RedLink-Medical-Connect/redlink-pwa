@@ -11,6 +11,20 @@ import { MissionStatus } from '@/constants/enums'
 const VALID_OUTCOMES = [MissionStatus.COMPLETED, MissionStatus.NO_SHOW]
 
 /**
+ * Date du jour au format `AWSDate` (`YYYY-MM-DD`), dans le fuseau LOCAL — pas
+ * `toISOString().slice(0, 10)`, qui donne la date UTC. Un vétérinaire qui clôture une
+ * Mission entre ~22h et minuit UTC (0h-2h heure de Paris en été) verrait sinon
+ * `Animal.lastDonationDate` daté de la veille, faussant silencieusement la Frequency Rule
+ * d'un jour — trouvé par un test de frontière de fuseau horaire en QA sur cette sous-tâche.
+ */
+function todayAsAWSDate(now = new Date()) {
+  const year = now.getFullYear()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const day = String(now.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+/**
  * Phase 2.1 : composable Veterinarian-facing pour la clôture d'une Mission acceptée
  * (marquer COMPLETED ou NO_SHOW). Logique + mutations uniquement — aucun câblage UI
  * (bouton, vue) dans cette sous-tâche, voir roadmap Phase 2.2.
@@ -64,9 +78,8 @@ export function useMissionClosure() {
       if (outcome === MissionStatus.COMPLETED) {
         // AWSDate attend `YYYY-MM-DD` (pas d'heure) — contrairement à `appointmentDatetime`/
         // `validationExpiresAt` ailleurs dans ce repo, qui sont des AWSDateTime en ISO 8601
-        // complet. `toISOString()` produit toujours un préfixe `YYYY-MM-DDT...` en UTC ; on
-        // ne garde que les 10 premiers caractères.
-        const today = new Date().toISOString().slice(0, 10)
+        // complet. Date LOCALE (todayAsAWSDate), pas UTC — voir son commentaire.
+        const today = todayAsAWSDate()
 
         await client.graphql({
           query: updateAnimalLastDonationDateSimple,
