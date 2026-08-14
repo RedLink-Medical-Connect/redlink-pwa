@@ -7,7 +7,11 @@ export default mergeConfig(
   defineConfig({
     test: {
       environment: 'jsdom',
-      exclude: [...configDefaults.exclude, 'e2e/*'],
+      // configDefaults.exclude ne couvre pas .claude/** : une copie de travail
+      // laissée par un agent isolé (isolation: "worktree") sous
+      // .claude/worktrees/** se fait sinon ramasser comme suite de tests
+      // dupliquée (et potentiellement obsolète/en conflit).
+      exclude: [...configDefaults.exclude, 'e2e/*', '.claude/**'],
       root: fileURLToPath(new URL('./', import.meta.url))
     }
   })
