@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted } from 'vue'
+import { onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useToast } from 'primevue/usetoast'
@@ -14,13 +14,28 @@ const router = useRouter()
 const toast = useToast()
 
 // Matching (Radar)
-const { matches, isLoading: loadingMatches, searchMatches } = useMatchingRequests()
+const {
+  matches,
+  isLoading: loadingMatches,
+  searchMatches,
+  startAutoRefresh,
+  stopAutoRefresh,
+} = useMatchingRequests()
 
 // Missions (Pour accepter)
 const { acceptMission, isLoading: loadingAccept } = useOwnerMissions()
 
 onMounted(() => {
   searchMatches()
+  // Fallback dashboard + email au vrai push PWA (hors périmètre V1, voir roadmap
+  // Phase 4) : polling léger + refresh au retour de focus de l'onglet, tant que ce
+  // composant reste monté (voir useMatchingRequests.startAutoRefresh).
+  startAutoRefresh()
+})
+
+onUnmounted(() => {
+  // Évite un interval/listener orphelin après une navigation SPA hors du dashboard.
+  stopAutoRefresh()
 })
 
 const handleAccept = async (request) => {

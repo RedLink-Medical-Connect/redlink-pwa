@@ -20,6 +20,22 @@ import { RequestStatus } from '@/constants/enums'
 // vétérinaire partenaire avant un vrai déploiement.
 const CLINIC_PRIORITY_BOOST_RADIUS_KM = 15
 
+// Phase 4.1 (rafraîchissement dashboard) : le vrai push PWA est hors périmètre V1,
+// remplacé par ce fallback dashboard + email (décision produit actée, voir
+// `docs/adr/` / roadmap Phase 4). Pour un pilote à faible nombre d'utilisateurs,
+// un polling en arrière-plan toutes les minutes suffit à afficher une urgence sans
+// que l'Owner ait besoin de cliquer sur "Actualiser" — combiné à un refresh
+// immédiat au retour de focus de l'onglet (voir `startAutoRefresh` ci-dessous),
+// pour ne pas faire attendre jusqu'à une minute pleine un Owner qui rouvre
+// l'application après une absence.
+//
+// ⚠️ Interprétation d'ingénierie, même statut que CLINIC_PRIORITY_BOOST_RADIUS_KM /
+// MIN_DAYS_BETWEEN_DONATIONS (eligibility-service.js) : ni le CdC ni CONTEXT.md ne
+// chiffrent d'intervalle. 60s est une estimation raisonnable pour un pilote (assez
+// réactif pour une urgence, assez léger pour ne pas solliciter AppSync en continu
+// avec peu d'utilisateurs) — à revalider si le pilote grossit.
+const DASHBOARD_REFRESH_INTERVAL_MS = 60_000
+
 export function useMatchingRequests() {
   const client = generateClient()
   const matches = ref([])
@@ -31,9 +47,22 @@ export function useMatchingRequests() {
   // pour ne pas toucher au reste de la logique de ce composable.
   const { form: ownerProfile, fetchProfile } = useOwnerProfile()
 
-  const searchMatches = async () => {
-    isLoading.value = true
-    matches.value = []
+  // `searchMatches({ silent: true })` est utilisé par le polling/retour de focus
+  // (voir `refreshIfVisibleAndIdle` ci-dessous) : contrairement à un chargement
+  // explicite (montage, clic "Actualiser"), un refresh en arrière-plan ne doit ni
+  // vider `matches.value` ni piloter `isLoading` — sinon le panneau de résultats
+  // entier est remplacé par le spinner plein écran toutes les 60s (ou à chaque
+  // retour de focus), avec un risque de clic perdu/mal dirigé sur "J'accepte
+  // d'aider" si le DOM sous le curseur est détruit pendant l'interaction, dans un
+  // flux dont tout l'enjeu est justement de ne pas rater une urgence (relevé en
+  // Lead Dev review). `matches.value` n'est réassigné qu'une fois les nouveaux
+  // résultats prêts (fin de la fonction), silencieux ou non.
+  const searchMatches = async ({ silent = false } = {}) => {
+    isFetching = true
+    if (!silent) {
+      isLoading.value = true
+      matches.value = []
+    }
 
     try {
       // 1. S'assurer qu'on a bien les infos du propriétaire et ses animaux
@@ -149,13 +178,69 @@ export function useMatchingRequests() {
     } catch (e) {
       console.error("Erreur matching:", e)
     } finally {
-      isLoading.value = false
+      isFetching = false
+      if (!silent) {
+        isLoading.value = false
+      }
     }
+  }
+
+  // Identifiant du `setInterval` de polling léger, gardé dans la closure (jamais
+  // exposé) — `startAutoRefresh`/`stopAutoRefresh` sont les seules à devoir le lire.
+  let refreshIntervalId = null
+
+  // Vrai pendant N'IMPORTE QUEL appel de searchMatches() en cours, silencieux ou
+  // non — guard interne uniquement (jamais exposé), sert à `refreshIfVisibleAndIdle`
+  // pour éviter d'empiler des appels GraphQL concurrents si le réseau est lent
+  // (polling + retour de focus peuvent se déclencher à quelques secondes d'écart
+  // l'un de l'autre). Distinct de `isLoading`, qui ne pilote que le spinner plein
+  // écran des chargements explicites (voir le commentaire sur `searchMatches`).
+  let isFetching = false
+
+  /**
+   * Relance `searchMatches({ silent: true })` si l'onglet est visible et qu'aucune
+   * recherche n'est déjà en cours.
+   */
+  const refreshIfVisibleAndIdle = () => {
+    if (document.visibilityState === 'visible' && !isFetching) {
+      searchMatches({ silent: true })
+    }
+  }
+
+  /**
+   * Démarre le rafraîchissement automatique du dashboard (Phase 4.1) : polling
+   * léger toutes les `DASHBOARD_REFRESH_INTERVAL_MS` (skip silencieux si l'onglet
+   * est en arrière-plan, pour ne pas solliciter AppSync inutilement) + un refresh
+   * immédiat au retour de focus de l'onglet (`visibilitychange`), pour ne pas
+   * faire attendre un Owner qui revient après une absence jusqu'au prochain tick.
+   *
+   * Idempotent (via `stopAutoRefresh()` en tête) : un appel répété n'empile pas
+   * plusieurs intervals/listeners. À appeler depuis `onMounted` du composant
+   * consommateur ; `stopAutoRefresh()` doit être appelée symétriquement depuis son
+   * `onUnmounted` pour éviter une fuite mémoire (interval + listener survivant à la
+   * navigation SPA hors du dashboard).
+   */
+  const startAutoRefresh = () => {
+    stopAutoRefresh()
+    refreshIntervalId = setInterval(refreshIfVisibleAndIdle, DASHBOARD_REFRESH_INTERVAL_MS)
+    document.addEventListener('visibilitychange', refreshIfVisibleAndIdle)
+  }
+
+  /** Arrête le polling et retire le listener `visibilitychange`. Sûre à appeler
+   * plusieurs fois ou sans `startAutoRefresh()` préalable (no-op). */
+  const stopAutoRefresh = () => {
+    if (refreshIntervalId !== null) {
+      clearInterval(refreshIntervalId)
+      refreshIntervalId = null
+    }
+    document.removeEventListener('visibilitychange', refreshIfVisibleAndIdle)
   }
 
   return {
     matches,
     isLoading,
-    searchMatches
+    searchMatches,
+    startAutoRefresh,
+    stopAutoRefresh
   }
 }
