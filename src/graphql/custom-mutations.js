@@ -127,3 +127,18 @@ export const deleteMissionSimple = /* GraphQL */ `
     }
   }
 `
+
+// ADR-0002 (amendement 2026-08-12) : écriture Veterinarian sur Animal scopée par @auth au
+// niveau champ à EXACTEMENT isValidatedDonor + validationExpiresAt. L'input ne doit donc
+// JAMAIS contenir d'autre champ (ex. bloodGroup) sous peine de rejet par @auth — cette
+// mutation *Simple existe précisément pour empêcher qu'un appelant élargisse l'input par
+// erreur en réutilisant la mutation updateAnimal générique.
+export const validateAnimalDonorSimple = /* GraphQL */ `
+  mutation UpdateAnimal($input: UpdateAnimalInput!) {
+    updateAnimal(input: $input) {
+      id
+      isValidatedDonor
+      validationExpiresAt
+    }
+  }
+`
