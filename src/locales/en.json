@@ -504,10 +504,15 @@
         "id": "#",
         "date": "DATE",
         "patient": "PATIENT",
+        "type": "TYPE",
         "blood_group": "GROUP",
         "status": "STATUS",
         "donors_found": "DONORS FOUND",
-        "action": "ACTION"
+        "action": "ACTION",
+        "on_the_way": "On the way",
+        "waiting": "Waiting...",
+        "donor": "Donor",
+        "close_tooltip": "Close"
       },
       "status": {
         "open": "OPEN",
@@ -527,19 +532,9 @@
         "owner_contact": "Owner contact",
         "waiting_donor": "Waiting for a donor..."
       },
-      "columns": {
-        "on_the_way": "On the way",
-        "waiting": "Waiting...",
-        "donor": "Donor",
-        "close_tooltip": "Close"
-      },
       "empty": "No ongoing requests.",
       "type_emergency_short": "Emergency",
       "type_appointment_short": "Appointment",
-      "toasts": {
-        "close_success": "Request successfully closed",
-        "close_failed": "Error while closing the request"
-      },
       "toasts": {
         "close_success": "Request successfully closed",
         "close_failed": "Error while closing the request"
