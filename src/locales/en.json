@@ -556,7 +556,12 @@
         "last_donation": "LAST DONATION",
         "action": "ACTION"
       },
-      "contact": "Contact"
+      "contact": "Contact",
+      "never_donated": "Never",
+      "distance_unknown": "—",
+      "empty": "No donor linked to your clinic yet.",
+      "load_error": "Couldn't load the donor directory — try again.",
+      "retry": "Retry"
     },
     "validations": {
       "title": "Donor Validations",
