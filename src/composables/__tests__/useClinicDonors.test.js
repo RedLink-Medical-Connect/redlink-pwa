@@ -146,8 +146,59 @@ describe('useClinicDonors.fetchDonors', () => {
 
     expect(donors.value).toHaveLength(2)
     expect(donors.value.map((d) => d.animalId).sort()).toEqual(['animal-1', 'animal-2'])
-    // Chaque ligne porte bien les infos de l'Owner partagé.
-    expect(donors.value.every((d) => d.ownerFirstname === 'Jean')).toBe(true)
+    // Chaque ligne porte bien TOUTES les infos de l'Owner partagé — pas seulement
+    // ownerFirstname (un bug de mapping qui laisserait passer un seul champ correctement
+    // rempli mais les autres undefined resterait invisible avec une seule assertion).
+    for (const row of donors.value) {
+      expect(row.ownerId).toBe('owner-1')
+      expect(row.ownerFirstname).toBe('Jean')
+      expect(row.ownerLastname).toBe('Dupont')
+      expect(row.ownerPhone).toBe('0600000000')
+      expect(row.ownerAddress).toBe('1 rue de la Paix')
+    }
+    // Et chaque ligne garde bien SES propres infos Animal (pas celles de l'autre ligne).
+    const rex = donors.value.find((d) => d.animalId === 'animal-1')
+    const milo = donors.value.find((d) => d.animalId === 'animal-2')
+    expect(rex.animalName).toBe('Rex')
+    expect(milo.animalName).toBe('Milo')
+  })
+
+  it('flattening sur un batch réaliste : 2 relations, un Owner avec 3 Animals (2 Validated Donor, 1 non), un Owner sans aucun Animal — exactement 2 lignes, du bon Owner, avec les bons Animals (vérification indépendante de la logique d’aplatissement, pas juste un cas trivial à 1 item)', async () => {
+    mockGraphql({
+      relations: [
+        {
+          ownerID: 'owner-A',
+          ownerProfile: buildOwner({
+            id: 'owner-A',
+            firstname: 'Owner',
+            lastname: 'A',
+            animals: {
+              items: [
+                buildAnimal({ id: 'a1', name: 'Un', isValidatedDonor: true }),
+                buildAnimal({ id: 'a2', name: 'Deux', isValidatedDonor: true }),
+                buildAnimal({ id: 'a3', name: 'Trois', isValidatedDonor: false, validationExpiresAt: null }),
+              ],
+            },
+          }),
+        },
+        {
+          ownerID: 'owner-B',
+          ownerProfile: buildOwner({
+            id: 'owner-B',
+            firstname: 'Owner',
+            lastname: 'B',
+            animals: { items: [] },
+          }),
+        },
+      ],
+    })
+
+    const { fetchDonors, donors } = useClinicDonors()
+    await fetchDonors()
+
+    expect(donors.value).toHaveLength(2)
+    expect(donors.value.every((d) => d.ownerId === 'owner-A')).toBe(true)
+    expect(donors.value.map((d) => d.animalId).sort()).toEqual(['a1', 'a2'])
   })
 
   it('mélange plusieurs Owners/Animals : ne garde que les lignes réellement Validated Donor', async () => {
@@ -222,6 +273,73 @@ describe('useClinicDonors.fetchDonors', () => {
     expect(donors.value[0].distanceKM).toBeLessThan(450)
   })
 
+  it("frontière stricte de la comparaison temporelle (même rigor que useAnimalValidation.js/useMissionClosure.js) : un Animal qui expire dans 1s reste Validated Donor, un Animal expiré depuis 1s ou exactement 'maintenant' est exclu — pas seulement testé avec des dates lointaines (2099/2020) qui masqueraient un off-by-one", async () => {
+    vi.useFakeTimers()
+    const now = new Date('2026-08-13T12:00:00.000Z')
+    vi.setSystemTime(now)
+
+    mockGraphql({
+      relations: [
+        {
+          ownerID: 'owner-1',
+          ownerProfile: buildOwner({
+            animals: {
+              items: [
+                buildAnimal({
+                  id: 'animal-boundary-still-valid',
+                  isValidatedDonor: true,
+                  validationExpiresAt: new Date(now.getTime() + 1000).toISOString(),
+                }),
+                buildAnimal({
+                  id: 'animal-boundary-just-expired',
+                  isValidatedDonor: true,
+                  validationExpiresAt: new Date(now.getTime() - 1000).toISOString(),
+                }),
+                // Expire exactement à l'instant présent : isValidatedDonor() compare avec `>`
+                // strict (eligibility-service.js), donc "expire maintenant" doit être traité
+                // comme expiré, pas comme encore valide.
+                buildAnimal({
+                  id: 'animal-boundary-exact-now',
+                  isValidatedDonor: true,
+                  validationExpiresAt: now.toISOString(),
+                }),
+              ],
+            },
+          }),
+        },
+      ],
+    })
+
+    const { fetchDonors, donors } = useClinicDonors()
+    await fetchDonors()
+
+    expect(donors.value.map((d) => d.animalId)).toEqual(['animal-boundary-still-valid'])
+  })
+
+  it("distanceKM est 0 (pas null) quand la clinique et l'Owner sont exactement aux mêmes coordonnées — distingue 'distance vraiment nulle' de 'distance non calculable' (coordonnées manquantes, testé séparément ci-dessous) : les deux ne doivent PAS être confondus dans le rendu (distance_unknown vs '0 km')", async () => {
+    const sharedCoords = { latitude: 45.75, longitude: 4.85 }
+
+    mockGraphql({
+      vetClinic: sharedCoords,
+      relations: [
+        {
+          ownerID: 'owner-1',
+          ownerProfile: buildOwner({
+            ...sharedCoords,
+            animals: { items: [buildAnimal()] },
+          }),
+        },
+      ],
+    })
+
+    const { fetchDonors, donors } = useClinicDonors()
+    await fetchDonors()
+
+    expect(donors.value).toHaveLength(1)
+    expect(donors.value[0].distanceKM).toBe(0)
+    expect(donors.value[0].distanceKM).not.toBeNull()
+  })
+
   it("distanceKM est null (pas 'Infinity') quand les coordonnées de l'Owner sont manquantes", async () => {
     mockGraphql({
       relations: [
@@ -250,6 +368,35 @@ describe('useClinicDonors.fetchDonors', () => {
     const { fetchDonors, donors } = useClinicDonors()
     await expect(fetchDonors()).resolves.toBeUndefined()
     expect(donors.value).toEqual([])
+  })
+
+  it('batch mélangé réaliste : une relation avec ownerProfile null au milieu de relations valides — les lignes des Owners valides sortent quand même, seule la relation orpheline est sautée (pas un cas trivial où TOUT est orphelin)', async () => {
+    mockGraphql({
+      relations: [
+        {
+          ownerID: 'owner-1',
+          ownerProfile: buildOwner({
+            id: 'owner-1',
+            animals: { items: [buildAnimal({ id: 'animal-1' })] },
+          }),
+        },
+        { ownerID: 'owner-orphan', ownerProfile: null },
+        {
+          ownerID: 'owner-2',
+          ownerProfile: buildOwner({
+            id: 'owner-2',
+            firstname: 'Alice',
+            animals: { items: [buildAnimal({ id: 'animal-2' })] },
+          }),
+        },
+      ],
+    })
+
+    const { fetchDonors, donors } = useClinicDonors()
+    await expect(fetchDonors()).resolves.toBeUndefined()
+
+    expect(donors.value.map((d) => d.animalId).sort()).toEqual(['animal-1', 'animal-2'])
+    expect(donors.value.map((d) => d.ownerId).sort()).toEqual(['owner-1', 'owner-2'])
   })
 
   it('Veterinarian sans clinicID/clinic résolue : donors vide, pas d’appel à ListClinicDonorsByClinicID, pas d’erreur', async () => {
