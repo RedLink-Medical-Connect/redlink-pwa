@@ -3,7 +3,7 @@ import { onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useToast } from 'primevue/usetoast'
 import DashboardSidebar from '@/components/dashboard/DashboardSidebar.vue'
-import { useAnimalValidation } from '@/composables/useAnimalValidation.js'
+import { useAnimalValidation, mapValidationErrorKey } from '@/composables/useAnimalValidation.js'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -22,18 +22,6 @@ onMounted(() => {
   fetchPendingValidations()
 })
 
-/**
- * Traduit le `.message` d'une erreur levée par `validateAnimal` en message utilisateur.
- * `BLOOD_GROUP_UNKNOWN` est le seul code connu à ce jour (cf. useAnimalValidation.js) ;
- * tout le reste (erreur réseau, @auth...) retombe sur un message générique.
- */
-const mapValidationError = (errorMessage) => {
-  if (errorMessage === 'BLOOD_GROUP_UNKNOWN') {
-    return t('dashboard.validations.toasts.blood_group_unknown')
-  }
-  return t('dashboard.validations.toasts.generic_error')
-}
-
 const handleValidate = async (animal) => {
   validatingAnimalId.value = animal.id
   try {
@@ -48,7 +36,7 @@ const handleValidate = async (animal) => {
     toast.add({
       severity: 'error',
       summary: t('common.error'),
-      detail: mapValidationError(e.message),
+      detail: t(mapValidationErrorKey(e.message)),
       life: 4000,
     })
   } finally {

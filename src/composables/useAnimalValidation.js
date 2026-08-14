@@ -8,6 +8,30 @@ import { isValidatedDonor } from '@/services/eligibility-service'
 // en consultation.
 const VALIDATION_DURATION_MS = 365 * 24 * 60 * 60 * 1000
 
+// Clé i18n spécifique par code d'erreur levé par `validateAnimal` (voir sa doc
+// ci-dessous). `BLOOD_GROUP_UNKNOWN` est le seul code connu à ce jour ; tout le reste
+// (erreur réseau, @auth...) retombe sur la clé générique.
+const VALIDATION_ERROR_KEYS = {
+  BLOOD_GROUP_UNKNOWN: 'dashboard.validations.toasts.blood_group_unknown',
+}
+
+/**
+ * Traduit le `.message` d'une erreur levée par `validateAnimal` en clé i18n à afficher à
+ * l'utilisateur (`dashboard.validations.toasts.*`, cf. src/locales/*.json) — pas en texte
+ * traduit directement : `useI18n()`/`t()` ne sont utilisables que dans un contexte de
+ * composant, donc cette fonction pure reste en dehors de ça et laisse l'appelant (la vue)
+ * faire `t(mapValidationErrorKey(e.message))`. Exportée séparément de tout composant Vue
+ * pour rester testable sans monter de composant (ce repo n'a aucun test de composant `.vue`
+ * à ce jour — même raisonnement que `mapAcceptMissionError` dans useOwnerMissions.js, extrait
+ * pendant la Lead Dev review de feat/wire-eligibility-engine).
+ *
+ * @param {string} errorMessage
+ * @returns {string} une clé i18n, à passer à `t()`
+ */
+export function mapValidationErrorKey(errorMessage) {
+  return VALIDATION_ERROR_KEYS[errorMessage] || 'dashboard.validations.toasts.generic_error'
+}
+
 /**
  * Phase 1.1 : composable Veterinarian-facing pour la liste des Animals en attente de
  * validation, et l'action de validation elle-même (ADR-0002).
