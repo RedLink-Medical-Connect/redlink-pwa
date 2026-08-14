@@ -530,14 +530,20 @@
         "quantity": "Quantity:",
         "donor_found": "Donor found!",
         "owner_contact": "Owner contact",
-        "waiting_donor": "Waiting for a donor..."
+        "waiting_donor": "Waiting for a donor...",
+        "complete_btn": "Completed",
+        "no_show_btn": "No-show"
       },
       "empty": "No ongoing requests.",
       "type_emergency_short": "Emergency",
       "type_appointment_short": "Appointment",
       "toasts": {
         "close_success": "Request successfully closed",
-        "close_failed": "Error while closing the request"
+        "close_failed": "Error while closing the request",
+        "mission_completed_success": "Mission closed: donation recorded",
+        "mission_no_show_success": "Mission closed: donor no-show",
+        "mission_closure_failed": "Error while closing the mission",
+        "mission_closed_request_still_open": "Mission closed, but the request couldn't be closed automatically — check its status."
       }
     },
     "donors": {
