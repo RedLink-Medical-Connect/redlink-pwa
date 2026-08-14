@@ -144,3 +144,38 @@ describe('schema.graphql — Animal.lastDonationDate (ADR-0003)', () => {
     )
   })
 })
+
+describe("schema.graphql — Mission.status @auth (re-clôture, Phase 2.1 / useMissionClosure.js)", () => {
+  const missionType = extractType('Mission')
+
+  it("Mission n'a aucun @auth au niveau champ — contrairement à Animal (lastDonationDate/isValidatedDonor/validationExpiresAt), les Veterinarians ne sont pas restreints champ par champ sur Mission", () => {
+    // On exclut le bloc @auth *au niveau type* (`type Mission @model @auth(rules: [...]) {`)
+    // lui-même — légitime, ce n'est pas le scoping champ-par-champ qu'on vérifie ici — même
+    // raisonnement que le test équivalent pour Animal juste au-dessus dans ce fichier.
+    const typeHeaderEnd = missionType.indexOf(']) {') + ']) {'.length
+    expect(typeHeaderEnd).toBeGreaterThan(-1)
+    const missionFieldsOnly = missionType.slice(typeHeaderEnd)
+    expect(missionFieldsOnly).not.toContain('@auth(')
+  })
+
+  it(
+    "la règle de type Veterinarians sur Mission n'a pas de clause 'operations:' (accès " +
+      'illimité create/read/update/delete) — pin test pour le raisonnement de ' +
+      "useMissionClosure.js : c'est ce qui rend une re-clôture (updateMission sur une Mission " +
+      'déjà COMPLETED/NO_SHOW) inoffensive côté serveur, sans ConditionExpression sur `status` ' +
+      "ni champ refusé par @auth. Si cette règle gagnait un jour une clause 'operations:' " +
+      'scopée (ex. retirer update), la garde réelle contre la re-clôture resterait portée par ' +
+      "l'UI (bouton visible seulement pour ACCEPTED/PENDING_ARRIVAL) sans que rien ici ne le " +
+      'signale — ce test casse plutôt que de laisser cette hypothèse dériver silencieusement.',
+    () => {
+      const typeAuthStart = schema.indexOf('type Mission @model @auth(')
+      const typeAuthEnd = schema.indexOf(']) {', typeAuthStart)
+      expect(typeAuthStart).toBeGreaterThan(-1)
+      expect(typeAuthEnd).toBeGreaterThan(typeAuthStart)
+      const typeAuthBlock = schema.slice(typeAuthStart, typeAuthEnd)
+
+      expect(typeAuthBlock).toContain('{ allow: groups, groups: ["Veterinarians"] }')
+      expect(typeAuthBlock).not.toMatch(/"Veterinarians"\][^}]*operations:/)
+    },
+  )
+})
