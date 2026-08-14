@@ -41,6 +41,11 @@ architecturales) et `.cursorrules` (conventions détaillées pour l'éditeur).
 
 ## MCP disponibles pour ce projet
 
+`context7`, `vitest`, `eslint`, `playwright` et `github` sont check-in dans
+`.mcp.json` (versionné, tout le monde les récupère au clone). `amplify-docs` reste
+configuré en dehors (global, par machine) — son binaire pointe vers un chemin
+local, pas encore packagé pour être partageable en l'état.
+
 - **amplify-docs** — à consulter avant tout code touchant Amplify (auth, API,
   schema, functions). Confirme systématiquement que la réponse concerne Gen1,
   pas Gen2.
@@ -50,10 +55,29 @@ architecturales) et `.cursorrules` (conventions détaillées pour l'éditeur).
 - **vitest** — lance les tests via ce MCP plutôt que `npm run test` en Bash brut.
 - **eslint** — vérifie les warnings avant de proposer un commit, en particulier
   les règles i18n. Une dette de warnings i18n est déjà trackée sur ce repo (voir
-  `DashboardView.vue`) — demande confirmation avant de la corriger en masse.
+  `DashboardView.vue`) — demande confirmation avant de la corriger en masse ;
+  voir le skill `/i18n-audit` pour un état des lieux sans correction automatique.
 - **playwright** — le seul test e2e tourne contre un vrai backend (Cognito/
   DynamoDB réels, pas mocké). Demande une confirmation explicite avant de le
   lancer : ça peut créer ou modifier des données réelles.
+- **github** — lecture/création de PR et statut CI directement, plutôt que `gh`
+  en Bash brut.
+
+## Garde-fous automatiques (`.claude/settings.json`)
+
+Deux `PreToolUse` hooks bloquent l'édition par l'agent de fichiers sensibles :
+les GraphQL auto-générés (`src/graphql/{queries,mutations,subscriptions}.js` —
+un vrai bug de ce repo vient de là) et tout fichier `.env*` (historique de
+secrets committés par erreur). Voir `.claude/hooks/`.
+
+## Subagents disponibles
+
+En plus du pipeline roadmap (`senior-dev` → `qa-test-engineer` →
+`lead-dev-reviewer` → `devsecops-aws`, invoqué selectivement) : `graphql-schema-
+reviewer` (revue ciblée de tout diff sur `schema.graphql`, en complément de
+`lead-dev-reviewer` — voir le bug réel du commit `d27f204` qui motive son
+existence) et `a11y-reviewer` (passe accessibilité légère sur les `.vue`
+touchés, en parallèle du reviewer principal).
 
 ## Conventions du projet
 
