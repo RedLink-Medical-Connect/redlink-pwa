@@ -21,6 +21,12 @@ export const getVetWithClinic = /* GraphQL */ `
   }
 `
 
+// Phase 3.1 : `clinicID` (sur Request) et `mission.animal.ownerID` sont sélectionnés en plus
+// depuis cette sous-tâche — RequestsView.vue (seul appelant de cette query, via
+// useClinicRequest.js) en a besoin pour passer clinicID/ownerID à closeMission() sans aller
+// les re-chercher par un aller-retour GraphQL dédié : cette query tourne déjà à chaque
+// affichage de la liste, les deux champs n'existaient simplement pas encore dans la
+// sélection.
 export const listRequestsByClinic = /* GraphQL */ `
   query ListRequestsByClinic($filter: ModelRequestFilterInput) {
     listRequests(filter: $filter) {
@@ -33,6 +39,7 @@ export const listRequestsByClinic = /* GraphQL */ `
         status
         createdAt
         updatedAt
+        clinicID
         mission {
           id
           status
@@ -41,6 +48,7 @@ export const listRequestsByClinic = /* GraphQL */ `
             name
             breed
             weight
+            ownerID
             ownerProfile {
               phone
               firstname

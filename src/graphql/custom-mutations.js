@@ -173,3 +173,23 @@ export const updateAnimalLastDonationDateSimple = /* GraphQL */ `
     }
   }
 `
+
+// Phase 3.1 : liaison Clinic <-> Owner (`ClinicOwnerRelation`) créée par useMissionClosure.js
+// quand une Mission passe COMPLETED (voir roadmap Phase 3, sous-tâche ajoutée le 2026-08-14).
+// `ClinicOwnerRelation` n'a pas de @auth au niveau champ (le groupe Veterinarians a un accès
+// en écriture illimité sur ce type — voir schema.graphql), donc la mutation générée
+// `createClinicOwnerRelation` aurait été correcte question @auth. On garde malgré tout une
+// mutation *Simple dédiée (même convention que createMissionSimple/closeMissionSimple
+// ci-dessus) : la mutation générée redemande tout le graphe `clinic`/`ownerProfile` imbriqué
+// (voir mutations.js) alors que useMissionClosure.js n'a besoin que de id + clinicID + ownerID
+// + isPrimaryClinic en retour.
+export const createClinicOwnerRelationSimple = /* GraphQL */ `
+  mutation CreateClinicOwnerRelation($input: CreateClinicOwnerRelationInput!) {
+    createClinicOwnerRelation(input: $input) {
+      id
+      clinicID
+      ownerID
+      isPrimaryClinic
+    }
+  }
+`

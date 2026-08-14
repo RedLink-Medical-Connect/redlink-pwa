@@ -89,6 +89,13 @@ architecturales) et `.cursorrules` (conventions détaillées pour l'éditeur).
   Lambda) apparié à une mutation `*Simple` n'envoyant que les champs
   autorisés. Référence pour tout futur champ écrit par les Veterinarians
   seuls.
+- **Écriture secondaire best-effort** : une écriture non critique qui suit une
+  écriture critique déjà réussie (nettoyage de Mission orpheline dans
+  `useOwnerMissions.js`, upsert `ClinicOwnerRelation` dans
+  `useMissionClosure.js`) avale son erreur (log, jamais rethrow) — sinon
+  l'utilisateur verrait un échec trompeur alors que l'essentiel a réussi. Zéro
+  outil de suivi d'erreurs ici : un échec répété reste invisible (trou
+  d'observabilité connu, roadmap Phase 5, pas résolu).
 
 ## Tenir ce fichier à jour
 

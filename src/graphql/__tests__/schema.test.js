@@ -179,3 +179,39 @@ describe("schema.graphql — Mission.status @auth (re-clôture, Phase 2.1 / useM
     },
   )
 })
+
+describe(
+  'schema.graphql — ClinicOwnerRelation @auth (Phase 3.1, useMissionClosure.js upsert)',
+  () => {
+    // Pin test pour la justification donnée dans custom-mutations.js
+    // (createClinicOwnerRelationSimple) : "ClinicOwnerRelation n'a pas de @auth au niveau
+    // champ (le groupe Veterinarians a un accès en écriture illimité sur ce type ...) donc
+    // la mutation générée createClinicOwnerRelation aurait été correcte question @auth". Si
+    // cette hypothèse cesse d'être vraie (ex. la règle Veterinarians gagne une clause
+    // 'operations:' scopée en lecture seule, ou un @auth champ-par-champ apparaît comme sur
+    // Animal/ADR-0002), l'upsert best-effort de useMissionClosure.js échouerait *toujours*
+    // en silence (avalé par le try/catch, voir upsertClinicOwnerRelation) — un scénario que
+    // rien côté composable ne peut détecter puisque l'échec y est volontairement non
+    // bloquant. Ce test fait sonner l'alarme côté schéma plutôt que de laisser
+    // ClinicOwnerRelation se vider silencieusement en conditions réelles.
+
+    it("la règle de type Veterinarians sur ClinicOwnerRelation n'a pas de clause 'operations:' (accès create/read/update/delete illimité)", () => {
+      const typeAuthStart = schema.indexOf('type ClinicOwnerRelation @model @auth(')
+      const typeAuthEnd = schema.indexOf(']) {', typeAuthStart)
+      expect(typeAuthStart).toBeGreaterThan(-1)
+      expect(typeAuthEnd).toBeGreaterThan(typeAuthStart)
+      const typeAuthBlock = schema.slice(typeAuthStart, typeAuthEnd)
+
+      expect(typeAuthBlock).toContain('{ allow: groups, groups: ["Veterinarians"] }')
+      expect(typeAuthBlock).not.toMatch(/"Veterinarians"\][^}]*operations:/)
+    })
+
+    it("ClinicOwnerRelation n'a aucun @auth au niveau champ (contrairement à Animal, ADR-0002/0003) — clinicID/ownerID/isPrimaryClinic sont tous écrits sans scoping champ-par-champ", () => {
+      const relationType = extractType('ClinicOwnerRelation')
+      const typeHeaderEnd = relationType.indexOf(']) {') + ']) {'.length
+      expect(typeHeaderEnd).toBeGreaterThan(-1)
+      const relationFieldsOnly = relationType.slice(typeHeaderEnd)
+      expect(relationFieldsOnly).not.toContain('@auth(')
+    })
+  },
+)
