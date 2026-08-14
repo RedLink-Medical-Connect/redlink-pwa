@@ -116,6 +116,12 @@ conventions above into a repeatable checklist — use them together, not instead
    exercised, or just the happy path? A `try/catch` around a GraphQL call with no test
    asserting the *successful* path actually returns the expected shape is a gap, even
    if the suite is green.
+6. **Docs kept in sync** — if the diff establishes a new pattern worth reusing (a new
+   composable/service shape, a new GraphQL convention, a decision that changes
+   something `CLAUDE.md` already claims) and neither `CLAUDE.md` nor `.cursorrules` was
+   updated to reflect it, note that as a finding — non-blocking by default, but say so
+   explicitly rather than letting it drift silently (see `CLAUDE.md`'s own "Tenir ce
+   fichier à jour" section for why this matters here specifically).
 
 ## Report
 
