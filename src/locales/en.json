@@ -586,10 +586,16 @@
     },
     "history": {
       "title": "Activity History",
-      "request_closed": "Request #{id} closed successfully",
-      "donor_added": "New donor added: {name}",
-      "time_ago": "{time} ago",
-      "yesterday_at": "Yesterday at {time}"
+      "events": {
+        "request_created": "New request created: {species} {bloodGroup}",
+        "mission_accepted": "Donor found: {name}",
+        "mission_completed": "Donation completed with {name}",
+        "mission_no_show": "Donor no-show: {name}",
+        "request_closed": "Request closed without a donor"
+      },
+      "empty": "No activity yet.",
+      "load_error": "Unable to load the activity history — please retry.",
+      "retry": "Retry"
     }
   },
   "menu": {
