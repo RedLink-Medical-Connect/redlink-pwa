@@ -208,6 +208,31 @@ describe('useAnimalValidation.fetchPendingValidations', () => {
 
     consoleErrorSpy.mockRestore()
   })
+
+  it("loadError distingue un échec de chargement d'une file d'attente réellement vide (relevé en Lead Dev review : sans ça, un vétérinaire ne peut pas faire la différence)", async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    graphqlMock.mockImplementation(async () => {
+      throw new Error('network down')
+    })
+
+    const { fetchPendingValidations, loadError, pendingAnimals } = useAnimalValidation()
+    expect(loadError.value).toBe(false)
+
+    await fetchPendingValidations()
+
+    expect(loadError.value).toBe(true)
+    expect(pendingAnimals.value).toEqual([])
+
+    // Un rechargement réussi (ex. après un clic sur "Réessayer") efface l'état d'erreur —
+    // loadError ne doit pas rester bloqué à true indéfiniment.
+    graphqlMock.mockImplementation(async () => ({ data: { listAnimals: { items: [] } } }))
+    await fetchPendingValidations()
+
+    expect(loadError.value).toBe(false)
+
+    consoleErrorSpy.mockRestore()
+  })
 })
 
 describe('useAnimalValidation.validateAnimal', () => {

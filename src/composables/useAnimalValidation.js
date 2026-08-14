@@ -70,6 +70,13 @@ export function useAnimalValidation() {
   const pendingAnimals = ref([])
   const isLoading = ref(false)
   const isValidating = ref(false)
+  // Distingue "chargement en erreur" de "file d'attente réellement vide" — sans ce ref,
+  // un échec réseau/@auth silencieux (attrapé ci-dessous, jamais rethrow, voir le test
+  // dédié plus bas) rendait exactement le même état que 0 animal en attente : un
+  // vétérinaire pouvait repartir en pensant qu'il n'y a rien à valider (relevé en Lead
+  // Dev review de feat/animal-validation-ui, premier écran où ce swallow devenait
+  // visible côté humain).
+  const loadError = ref(false)
 
   /**
    * Charge tous les Animals (liste globale, voir doc du composable) puis filtre côté
@@ -77,6 +84,7 @@ export function useAnimalValidation() {
    */
   const fetchPendingValidations = async () => {
     isLoading.value = true
+    loadError.value = false
     try {
       const { data } = await client.graphql({
         query: listAnimalsForValidation,
@@ -87,6 +95,7 @@ export function useAnimalValidation() {
       pendingAnimals.value = animals.filter((animal) => !isValidatedDonor(animal))
     } catch (e) {
       console.error('Erreur chargement des animaux en attente de validation:', e)
+      loadError.value = true
     } finally {
       isLoading.value = false
     }
@@ -141,6 +150,7 @@ export function useAnimalValidation() {
     pendingAnimals,
     isLoading,
     isValidating,
+    loadError,
     fetchPendingValidations,
     validateAnimal,
   }

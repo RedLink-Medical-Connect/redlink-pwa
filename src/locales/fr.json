@@ -563,6 +563,8 @@
       },
       "validate_btn": "Valider",
       "empty": "Aucun animal en attente de validation.",
+      "load_error": "Impossible de charger la liste — réessayez.",
+      "retry": "Réessayer",
       "toasts": {
         "success": "{name} est maintenant un donneur validé.",
         "blood_group_unknown": "Groupe sanguin inconnu — ne peut pas être validé.",

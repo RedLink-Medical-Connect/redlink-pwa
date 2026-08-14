@@ -4,12 +4,19 @@ import { useI18n } from 'vue-i18n'
 import { useToast } from 'primevue/usetoast'
 import DashboardSidebar from '@/components/dashboard/DashboardSidebar.vue'
 import { useAnimalValidation, mapValidationErrorKey } from '@/composables/useAnimalValidation.js'
+import { Species } from '@/constants/enums'
 
 const { t } = useI18n()
 const toast = useToast()
 
-const { pendingAnimals, isLoading, isValidating, fetchPendingValidations, validateAnimal } =
-  useAnimalValidation()
+const {
+  pendingAnimals,
+  isLoading,
+  isValidating,
+  loadError,
+  fetchPendingValidations,
+  validateAnimal,
+} = useAnimalValidation()
 
 // `isValidating` (composable) est un booléen GLOBAL partagé par tout appel à
 // validateAnimal(), pas un état par ligne (voir useAnimalValidation.js). On garde ici
@@ -72,7 +79,22 @@ const handleValidate = async (animal) => {
           </div>
 
           <div
-            v-if="!isLoading && pendingAnimals.length === 0"
+            v-if="!isLoading && loadError"
+            class="flex flex-col items-center justify-center h-64 text-zinc-400"
+          >
+            <i class="pi pi-exclamation-triangle text-5xl mb-4 text-amber-500 opacity-60"></i>
+            <p>{{ $t('dashboard.validations.load_error') }}</p>
+            <Button
+              :label="$t('dashboard.validations.retry')"
+              icon="pi pi-refresh"
+              text
+              class="mt-2"
+              @click="fetchPendingValidations"
+            />
+          </div>
+
+          <div
+            v-else-if="!isLoading && pendingAnimals.length === 0"
             class="flex flex-col items-center justify-center h-64 text-zinc-400"
           >
             <i class="pi pi-verified text-5xl mb-4 opacity-20"></i>
@@ -97,7 +119,7 @@ const handleValidate = async (animal) => {
               <template #body="slotProps">
                 <span class="text-zinc-600 dark:text-zinc-300">
                   {{
-                    slotProps.data.species === 'DOG'
+                    slotProps.data.species === Species.DOG
                       ? $t('request.species.dog')
                       : $t('request.species.cat')
                   }}

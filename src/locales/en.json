@@ -569,6 +569,8 @@
       },
       "validate_btn": "Validate",
       "empty": "No animal is pending validation.",
+      "load_error": "Couldn't load the list — try again.",
+      "retry": "Retry",
       "toasts": {
         "success": "{name} is now a validated donor.",
         "blood_group_unknown": "Unknown blood group — cannot be validated.",

@@ -59,7 +59,15 @@ architecturales) et `.cursorrules` (conventions détaillées pour l'éditeur).
 
 - **Composables** : `src/composables/useXxx.js`, exportent une fonction
   `useXxx()` qui retourne des refs/computed + méthodes. Logique métier et appels
-  GraphQL dedans, jamais dans les composants.
+  GraphQL dedans, jamais dans les composants. Erreur → message utilisateur : une
+  fonction pure exportée à côté (ex. `mapAcceptMissionError`,
+  `mapValidationErrorKey`), pas un objet inline dans le composant — seul endroit
+  testable sans monter de composant `.vue` (aucun test de ce type dans ce repo).
+  Elle ne peut pas appeler `useI18n()`/`t()` : renvoie une **clé** i18n, le
+  composant fait `t(laFonction(...))`. Un chargement dont l'échec doit être
+  visible à l'écran (pas juste une action en arrière-plan) a besoin d'un ref
+  d'erreur dédié (ex. `loadError`) — sinon "en erreur" et "vraiment vide" sont
+  indistinguables pour l'utilisateur.
 - **Services (deep modules)** : `src/services/xxx-service.js` — fonctions pures
   exportées, aucune réactivité Vue, aucun appel GraphQL, aucun accès DOM (voir
   `eligibility-service.js`).
