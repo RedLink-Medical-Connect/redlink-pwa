@@ -19,6 +19,12 @@ export function useClinicRequests() {
   const isLoading = ref(false)
   const isCreating = ref(false)
   const clinicId = ref(null)
+  // Distingue "chargement en erreur" d'une liste réellement vide — même convention que
+  // `loadError` dans useClinicDonors.js/useAnimalValidation.js (CLAUDE.md). Ajouté en
+  // Phase 3.3 pour useClinicHistory.js, qui réutilise fetchRequests() et a besoin de
+  // distinguer un échec réseau d'un historique réellement vide ; purement additif, ne
+  // change pas le comportement observable de RequestsView.vue (qui ne le consomme pas).
+  const loadError = ref(false)
 
   // Récupère l'ID de la clinique
   const fetchClinicId = async () => {
@@ -47,6 +53,7 @@ export function useClinicRequests() {
 
   const fetchRequests = async () => {
     isLoading.value = true
+    loadError.value = false
     try {
       const cId = await fetchClinicId()
       if (!cId) {
@@ -65,6 +72,7 @@ export function useClinicRequests() {
       )
     } catch (e) {
       console.error('Erreur chargement demandes:', e)
+      loadError.value = true
     } finally {
       isLoading.value = false
     }
@@ -151,6 +159,7 @@ export function useClinicRequests() {
     requests,
     isLoading,
     isCreating,
+    loadError,
     fetchRequests,
     createNewRequest,
     closeRequest,

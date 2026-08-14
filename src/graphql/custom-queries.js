@@ -27,6 +27,11 @@ export const getVetWithClinic = /* GraphQL */ `
 // les re-chercher par un aller-retour GraphQL dédié : cette query tourne déjà à chaque
 // affichage de la liste, les deux champs n'existaient simplement pas encore dans la
 // sélection.
+// Phase 3.3 : `mission.createdAt`/`mission.updatedAt` sélectionnés en plus pour
+// HistoryView.vue (via useClinicHistory.js, qui réutilise useClinicRequest.js plutôt que
+// d'écrire une seconde query scopée clinique) — nécessaires pour dater les événements
+// MISSION_ACCEPTED (mission.createdAt) et MISSION_COMPLETED/MISSION_NO_SHOW
+// (mission.updatedAt, cf. useClinicHistory.js pour l'hypothèse documentée derrière ce choix).
 export const listRequestsByClinic = /* GraphQL */ `
   query ListRequestsByClinic($filter: ModelRequestFilterInput) {
     listRequests(filter: $filter) {
@@ -44,6 +49,8 @@ export const listRequestsByClinic = /* GraphQL */ `
           id
           status
           animalID
+          createdAt
+          updatedAt
           animal {
             name
             breed

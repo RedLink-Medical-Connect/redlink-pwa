@@ -586,10 +586,16 @@
     },
     "history": {
       "title": "Historique d'activité",
-      "request_closed": "Demande n°{id} clôturée avec succès",
-      "donor_added": "Nouveau donneur ajouté : {name}",
-      "time_ago": "il y a {time}",
-      "yesterday_at": "Hier à {time}"
+      "events": {
+        "request_created": "Nouvelle demande créée : {species} {bloodGroup}",
+        "mission_accepted": "Donneur trouvé : {name}",
+        "mission_completed": "Don réalisé avec {name}",
+        "mission_no_show": "Donneur absent : {name}",
+        "request_closed": "Demande clôturée sans donneur"
+      },
+      "empty": "Aucun événement pour le moment.",
+      "load_error": "Impossible de charger l'historique — réessayez.",
+      "retry": "Réessayer"
     }
   },
   "menu": {

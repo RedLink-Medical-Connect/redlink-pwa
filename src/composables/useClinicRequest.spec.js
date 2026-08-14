@@ -86,3 +86,50 @@ describe('useClinicRequests > createNewRequest species mapping', () => {
     expect(createCall[0].variables.input.requiredSpecies).toBe(expected)
   })
 })
+
+// Phase 3.3: `loadError` added to `fetchRequests()` — same convention documented in
+// CLAUDE.md and already covered for useClinicDonors.js/useAnimalValidation.js. Consumed
+// by useClinicHistory.js (HistoryView.vue), purely additive to RequestsView.vue (which
+// doesn't destructure it, see git diff for this branch).
+describe('useClinicRequests > fetchRequests loadError', () => {
+  let mockGraphql
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockGraphql = vi.fn()
+    generateClient.mockReturnValue({ graphql: mockGraphql })
+    getCurrentUser.mockResolvedValue({ userId: 'vet-cognito-id' })
+  })
+
+  it('sets loadError to true when the listRequestsByClinic call fails after resolving clinicId', async () => {
+    mockGraphql.mockResolvedValueOnce({
+      data: { getVeterinarian: { clinicID: 'clinic-1' } },
+    })
+    mockGraphql.mockRejectedValueOnce(new Error('network down'))
+
+    const { fetchRequests, loadError } = useClinicRequests()
+    expect(loadError.value).toBe(false)
+
+    await fetchRequests()
+
+    expect(loadError.value).toBe(true)
+  })
+
+  it('resets loadError to false at the start of the next successful fetch', async () => {
+    mockGraphql.mockResolvedValueOnce({
+      data: { getVeterinarian: { clinicID: 'clinic-1' } },
+    })
+    mockGraphql.mockRejectedValueOnce(new Error('network down'))
+
+    const { fetchRequests, loadError } = useClinicRequests()
+    await fetchRequests()
+    expect(loadError.value).toBe(true)
+
+    // clinicId is memoized on the composable instance (fetchClinicId()), so the retry only
+    // issues the listRequestsByClinic call, not a second getVeterinarian lookup.
+    mockGraphql.mockResolvedValueOnce({ data: { listRequests: { items: [] } } })
+    await fetchRequests()
+
+    expect(loadError.value).toBe(false)
+  })
+})
