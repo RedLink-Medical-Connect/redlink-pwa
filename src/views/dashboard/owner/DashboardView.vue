@@ -66,7 +66,7 @@ const handleAccept = async (request) => {
 
       <div class="grow">
         <h1 class="text-2xl font-bold text-zinc-900 dark:text-white border-l-4 border-[#ff3b4e] pl-4 mb-2">
-          {{ $t('dashboard.owner.overview.title') || 'Tableau de bord' }}
+          {{ $t('dashboard.owner.overview.title') }}
         </h1>
         <p class="text-zinc-500 dark:text-zinc-400 text-sm mb-8 ml-5">
           Bienvenue sur Redlink. Voici les urgences autour de vous.
