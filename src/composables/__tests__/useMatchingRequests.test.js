@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
+import { getCurrentUser } from 'aws-amplify/auth'
 import { listOpenRequestsWithClinic } from '@/graphql/custom-queries'
 
 // Regression / integration coverage for the "matching engine silently finds
@@ -130,14 +131,21 @@ const buildRequest = (overrides = {}) => ({
  * operation name embedded in the query string, mirroring what
  * useOwnerProfile.fetchProfile / useAnimals.fetchAnimals / useMatchingRequests
  * actually call.
+ *
+ * `clinicRelations` defaults to `[]` — most tests don't care about Clinic
+ * Priority (critère 5) and must keep behaving exactly as before this was
+ * wired in (regression coverage, see the dedicated `describe` block below).
  */
-function mockGraphqlResponses({ profile, animals, requests }) {
+function mockGraphqlResponses({ profile, animals, requests, clinicRelations = [] }) {
   graphqlMock.mockImplementation(async ({ query }) => {
     if (query.includes('GetOwner')) {
       return { data: { getOwner: profile } }
     }
     if (query.includes('ListMyAnimalsByOwnerId')) {
       return { data: { listAnimals: { items: animals } } }
+    }
+    if (query.includes('MyClinicRelationsByOwnerID')) {
+      return { data: { clinicOwnerRelationsByOwnerID: { items: clinicRelations } } }
     }
     if (query.includes('ListOpenRequestsWithClinic')) {
       return { data: { listRequests: { items: requests } } }
@@ -150,6 +158,12 @@ describe('useMatchingRequests', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     graphqlMock.mockReset()
+    // Réinitialise explicitement à chaque test la valeur par défaut ('owner-1',
+    // celle utilisée par toutes les fixtures ci-dessus) : ce module mock n'a pas
+    // `restoreMocks`/`clearMocks` activé dans vitest.config.js, et un test qui
+    // reconfigure getCurrentUser() (voir describe Clinic Priority ci-dessous) ne
+    // doit pas laisser fuiter cette valeur vers les tests suivants.
+    vi.mocked(getCurrentUser).mockResolvedValue({ userId: 'owner-1' })
   })
 
   // Pin la définition réelle de la query (pas le mock) : si `clinic { ... }`
@@ -364,5 +378,275 @@ describe('useMatchingRequests', () => {
     await searchMatches()
 
     expect(matches.value.map((m) => m.id)).toEqual(['request-near', 'request-far'])
+  })
+
+  // Critère 5 de l'Eligibility (Clinic Priority, CONTEXT.md) : jusqu'à ce fix,
+  // searchMatches() appelait toujours checkEligibility() avec ownerClinicIds
+  // resté à sa valeur par défaut ([]) -> hasClinicPriority était toujours
+  // false et ce critère n'affectait jamais rien de visible pour l'Owner.
+  describe('Clinic Priority (critère 5)', () => {
+    it("interroge myClinicRelationsByOwnerID avec l'ownerID de getCurrentUser(), pas une valeur en dur", async () => {
+      mockGraphqlResponses({
+        profile: buildOwnerProfile(),
+        animals: [buildAnimal()],
+        requests: [buildRequest()],
+        clinicRelations: [],
+      })
+
+      const { searchMatches } = useMatchingRequests()
+
+      await searchMatches()
+
+      expect(graphqlMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          query: expect.stringContaining('MyClinicRelationsByOwnerID'),
+          variables: { ownerID: 'owner-1' },
+        }),
+      )
+    })
+
+    // Renforce le test précédent : toutes les fixtures de ce fichier utilisent
+    // 'owner-1' aussi bien comme userId (mock getCurrentUser) que comme id de
+    // profil (buildOwnerProfile), donc un code qui écrirait `ownerID: 'owner-1'`
+    // en dur au lieu de lire `userId` depuis getCurrentUser() passerait quand
+    // même le test ci-dessus par coïncidence. Ici, getCurrentUser() renvoie
+    // délibérément un userId QUI NE CORRESPOND À AUCUNE fixture ('owner-42') :
+    // seule une vraie lecture de getCurrentUser().userId peut faire matcher
+    // cette assertion.
+    it("propage le userId réel de getCurrentUser(), pas la valeur 'owner-1' qui apparaît par ailleurs dans les fixtures", async () => {
+      vi.mocked(getCurrentUser).mockResolvedValue({ userId: 'owner-42' })
+
+      mockGraphqlResponses({
+        profile: buildOwnerProfile(),
+        animals: [buildAnimal()],
+        requests: [buildRequest()],
+        clinicRelations: [],
+      })
+
+      const { searchMatches } = useMatchingRequests()
+
+      await searchMatches()
+
+      expect(graphqlMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          query: expect.stringContaining('MyClinicRelationsByOwnerID'),
+          variables: { ownerID: 'owner-42' },
+        }),
+      )
+    })
+
+    // Relevé en Lead Dev review : Clinic Priority est un critère explicitement
+    // non-exclusif ("favorise, sans exclure", CONTEXT.md). Un échec transitoire de CET
+    // appel précis (throttling, hoquet @auth...) ne doit dégrader QUE le tri (repli sur
+    // "aucune priorité connue"), jamais vider matches.value en entier — sinon un critère
+    // purement consultatif finirait par exclure accidentellement TOUTES les Requests.
+    it("un échec de MyClinicRelationsByOwnerID ne vide pas matches.value — dégrade juste Clinic Priority à false pour tout le monde", async () => {
+      const requestNear = buildRequest({ id: 'request-near', clinic: { latitude: 48.8567, longitude: 2.3522 } })
+
+      graphqlMock.mockImplementation(async ({ query }) => {
+        if (query.includes('GetOwner')) {
+          return { data: { getOwner: buildOwnerProfile() } }
+        }
+        if (query.includes('ListMyAnimalsByOwnerId')) {
+          return { data: { listAnimals: { items: [buildAnimal()] } } }
+        }
+        if (query.includes('MyClinicRelationsByOwnerID')) {
+          throw new Error('réseau : timeout')
+        }
+        if (query.includes('ListOpenRequestsWithClinic')) {
+          return { data: { listRequests: { items: [requestNear] } } }
+        }
+        throw new Error(`Unexpected graphql call in test: ${query.slice(0, 60)}`)
+      })
+
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+      const { searchMatches, matches } = useMatchingRequests()
+      await searchMatches()
+
+      expect(matches.value).toHaveLength(1)
+      expect(matches.value[0].id).toBe('request-near')
+      expect(matches.value[0].hasClinicPriority).toBe(false)
+      expect(consoleErrorSpy).toHaveBeenCalled()
+
+      consoleErrorSpy.mockRestore()
+    })
+
+    // Décision produit actée avec le repo owner (voir le commentaire au-dessus du
+    // comparateur dans useMatchingRequests.searchMatches) : le groupement inconditionnel
+    // qu'on testait ici auparavant (une Request de Clinic Priority arbitrairement lointaine
+    // devant une Request très proche d'une clinique inconnue) est explicitement rejeté pour
+    // une app d'urgence sanguine. Ce test vérifie maintenant l'ABSENCE de ce comportement :
+    // une Request liée à une Clinic déjà connue mais hors du rayon de boost
+    // (CLINIC_PRIORITY_BOOST_RADIUS_KM = 15km) ne doit PAS passer devant une Request bien
+    // plus proche, même sans relation existante -- le tri retombe sur la distance pure.
+    it("ne fait PAS remonter en tête une Request liée à une Clinic connue si elle dépasse le rayon de boost, même si l'autre Request compatible n'a pas de relation existante", async () => {
+      mockGraphqlResponses({
+        profile: buildOwnerProfile({ maxTravelDistance: 500 }),
+        animals: [buildAnimal()],
+        requests: [
+          buildRequest({
+            id: 'request-near-unknown-clinic',
+            clinic: { id: 'clinic-unknown', name: 'Inconnue', latitude: CLINIC_LAT, longitude: CLINIC_LON }, // Paris, très proche (~2km)
+          }),
+          buildRequest({
+            id: 'request-far-known-clinic',
+            clinic: { id: 'clinic-known', name: 'Connue', latitude: 45.764, longitude: 4.8357 }, // Lyon, ~390km -- très au-delà du rayon de boost
+          }),
+        ],
+        clinicRelations: [{ clinicID: 'clinic-known' }],
+      })
+
+      const { matches, searchMatches } = useMatchingRequests()
+
+      await searchMatches()
+
+      // Tri par distance pure : la Request lointaine (même Clinic Priority) ne passe pas
+      // devant la Request proche.
+      expect(matches.value.map((m) => m.id)).toEqual([
+        'request-near-unknown-clinic',
+        'request-far-known-clinic',
+      ])
+      // `hasClinicPriority` (le booléen brut affiché en badge dans DashboardView.vue) reste
+      // inchangé par le plafond de distance : seul le comparateur de tri est affecté.
+      expect(matches.value.find((m) => m.id === 'request-far-known-clinic').hasClinicPriority).toBe(true)
+      expect(matches.value.find((m) => m.id === 'request-near-unknown-clinic').hasClinicPriority).toBe(false)
+    })
+
+    // Cas réaliste avec PLUSIEURS Requests de chaque côté (2 avec Clinic Priority, 2 sans),
+    // à distances volontairement entremêlées -- pas seulement 2 Requests comme le test
+    // ci-dessus. C'est le cas le plus susceptible de démasquer un comparateur bugué qui ne
+    // gérerait correctement qu'une comparaison à 2 éléments (ex. un simple `if (a.has) return
+    // -1` sans gérer le groupe symétrique, ou un comparateur non transitif) mais casserait
+    // sous le tri multi-éléments réel d'Array.prototype.sort.
+    //
+    // Avec le plafond de distance (CLINIC_PRIORITY_BOOST_RADIUS_KM = 15km), seule
+    // 'request-priority-close' (~2km, sous le plafond) est réellement boostée. 'request-
+    // priority-far' (~390km, Clinic Priority mais largement hors plafond) n'est PAS boostée
+    // et retombe dans le tri par distance pure avec les Requests non-priority -- où elle finit
+    // après 'request-nonpriority-veryclose' (~0km) mais avant 'request-nonpriority-farthest'
+    // (~660km). `hasClinicPriority` (badge brut) reste `true` sur ces deux Requests malgré
+    // tout : seul l'ORDRE change, jamais l'indicateur affiché.
+    it('avec plusieurs Requests des deux côtés, seules les Requests Clinic Priority sous le rayon de boost sortent en tête ; au-delà, le tri redevient une pure distance croissante', async () => {
+      mockGraphqlResponses({
+        profile: buildOwnerProfile({ maxTravelDistance: 1000 }),
+        animals: [buildAnimal()],
+        requests: [
+          // Volontairement pas déjà triées par distance dans le tableau d'entrée : le tri
+          // doit reposer sur le comparateur, pas sur un ordre d'entrée qui masquerait un bug.
+          buildRequest({
+            id: 'request-nonpriority-farthest',
+            clinic: { id: 'clinic-marseille', name: 'Marseille', latitude: 43.2965, longitude: 5.3698 }, // ~660km
+          }),
+          buildRequest({
+            id: 'request-priority-close',
+            clinic: { id: 'clinic-known-close', name: 'Paris (connue)', latitude: CLINIC_LAT, longitude: CLINIC_LON }, // ~2km, sous le plafond
+          }),
+          buildRequest({
+            id: 'request-nonpriority-veryclose',
+            clinic: { id: 'clinic-unknown-veryclose', name: 'Inconnue (très proche)', latitude: OWNER_LAT, longitude: OWNER_LON }, // ~0km
+          }),
+          buildRequest({
+            id: 'request-priority-far',
+            clinic: { id: 'clinic-known-far', name: 'Lyon (connue)', latitude: 45.764, longitude: 4.8357 }, // ~390km, Clinic Priority mais hors plafond
+          }),
+        ],
+        clinicRelations: [{ clinicID: 'clinic-known-close' }, { clinicID: 'clinic-known-far' }],
+      })
+
+      const { matches, searchMatches } = useMatchingRequests()
+
+      await searchMatches()
+
+      // Seule 'request-priority-close' (boostée) sort en tête. Le reste est trié par
+      // distance pure, sans notion de groupe : 'request-priority-far' (~390km) ne repasse
+      // pas devant 'request-nonpriority-veryclose' (~0km) malgré son statut Clinic Priority.
+      expect(matches.value.map((m) => m.id)).toEqual([
+        'request-priority-close',
+        'request-nonpriority-veryclose',
+        'request-priority-far',
+        'request-nonpriority-farthest',
+      ])
+      // `hasClinicPriority` (badge brut, indépendant de la distance) reste correct pour
+      // chaque Request malgré leur ordre entremêlé.
+      expect(matches.value.find((m) => m.id === 'request-priority-close').hasClinicPriority).toBe(true)
+      expect(matches.value.find((m) => m.id === 'request-priority-far').hasClinicPriority).toBe(true)
+      expect(matches.value.find((m) => m.id === 'request-nonpriority-veryclose').hasClinicPriority).toBe(false)
+      expect(matches.value.find((m) => m.id === 'request-nonpriority-farthest').hasClinicPriority).toBe(false)
+    })
+
+    // Limite exacte du plafond (CLINIC_PRIORITY_BOOST_RADIUS_KM = 15km) : une Request Clinic
+    // Priority à distance <= 15km doit être boostée (comparaison inclusive, `<=` dans le
+    // comparateur), une à distance > 15km ne doit pas l'être. Une Request non-priority à 10km
+    // sert de témoin : plus proche que les deux Requests priority, mais pas boostée -- si le
+    // plafond avait une erreur d'inégalité stricte/large ou une confusion de signe, ce témoin
+    // la révélerait en se retrouvant du mauvais côté du tri.
+    it('applique le plafond de distance de façon inclusive à la limite exacte (15km boostée, 15.1km non boostée)', async () => {
+      mockGraphqlResponses({
+        profile: buildOwnerProfile({ maxTravelDistance: 1000 }),
+        animals: [buildAnimal()],
+        requests: [
+          buildRequest({
+            id: 'request-priority-above-limit',
+            // ~15.1km de l'Owner (arrondi) -- juste au-dessus du plafond, Clinic Priority mais
+            // pas boostée.
+            clinic: { id: 'clinic-above-limit', name: 'Au-delà du plafond', latitude: 49.005645, longitude: OWNER_LON },
+          }),
+          buildRequest({
+            id: 'request-nonpriority-control',
+            // ~10km de l'Owner, sans Clinic Priority : plus proche que les deux Requests
+            // priority ci-dessus/dessous, mais jamais boostée -- sert de témoin.
+            clinic: { id: 'clinic-control', name: 'Témoin, sans relation', latitude: 48.959831, longitude: OWNER_LON },
+          }),
+          buildRequest({
+            id: 'request-priority-at-limit',
+            // ~15.0km de l'Owner (arrondi) -- exactement au plafond, doit être boostée
+            // (comparaison `<=`, pas `<`).
+            clinic: { id: 'clinic-at-limit', name: 'Exactement au plafond', latitude: 49.004747, longitude: OWNER_LON },
+          }),
+        ],
+        clinicRelations: [{ clinicID: 'clinic-above-limit' }, { clinicID: 'clinic-at-limit' }],
+      })
+
+      const { matches, searchMatches } = useMatchingRequests()
+
+      await searchMatches()
+
+      expect(matches.value.map((m) => m.distanceKM)).toEqual([15, 10, 15.1])
+      expect(matches.value.map((m) => m.id)).toEqual([
+        'request-priority-at-limit',
+        'request-nonpriority-control',
+        'request-priority-above-limit',
+      ])
+    })
+
+    // Régression : sans aucune ClinicOwnerRelation existante pour cet Owner (cas normal
+    // pour un nouvel Owner), le tri doit rester purement par distance -- comme avant ce
+    // fix, et comme le garantit déjà 'trie les Matches par distance croissante' ci-dessus
+    // (clinicRelations: [] par défaut). Ce test le rend explicite pour Clinic Priority.
+    it('sans aucune ClinicOwnerRelation, trie toujours par distance seule', async () => {
+      mockGraphqlResponses({
+        profile: buildOwnerProfile({ maxTravelDistance: 500 }),
+        animals: [buildAnimal()],
+        requests: [
+          buildRequest({
+            id: 'request-far',
+            clinic: { id: 'clinic-b', name: 'B', latitude: 45.764, longitude: 4.8357 }, // Lyon
+          }),
+          buildRequest({
+            id: 'request-near',
+            clinic: { id: 'clinic-a', name: 'A', latitude: CLINIC_LAT, longitude: CLINIC_LON }, // Paris, proche
+          }),
+        ],
+        clinicRelations: [],
+      })
+
+      const { matches, searchMatches } = useMatchingRequests()
+
+      await searchMatches()
+
+      expect(matches.value.map((m) => m.id)).toEqual(['request-near', 'request-far'])
+      expect(matches.value.every((m) => m.hasClinicPriority === false)).toBe(true)
+    })
   })
 })
