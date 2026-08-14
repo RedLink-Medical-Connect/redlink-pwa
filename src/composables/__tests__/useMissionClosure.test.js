@@ -368,6 +368,45 @@ describe('useMissionClosure — upsert ClinicOwnerRelation (Phase 3.1, COMPLETED
     consoleErrorSpy.mockRestore()
   })
 
+  it("l'échec de CreateClinicOwnerRelation lui-même (pas seulement de la query précédente) ne fait PAS échouer closeMission (best-effort) — chemin de code distinct du test 'ClinicOwnerRelationsByOwnerID throttled' ci-dessus, qui ne couvrait que l'échec de la QUERY", async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    graphqlMock.mockImplementation(async ({ query, variables }) => {
+      if (query.includes('CloseMission')) {
+        return { data: { updateMission: { id: variables.input.id, status: variables.input.status } } }
+      }
+      if (query.includes('UpdateAnimalLastDonationDate')) {
+        return {
+          data: {
+            updateAnimal: { id: variables.input.id, lastDonationDate: variables.input.lastDonationDate },
+          },
+        }
+      }
+      if (query.includes('ClinicOwnerRelationsByOwnerID')) {
+        // Owner sans relation existante : force le passage par CreateClinicOwnerRelation
+        // plutôt que le no-op, pour bien exercer l'échec de LA MUTATION elle-même.
+        return { data: { clinicOwnerRelationsByOwnerID: { items: [] } } }
+      }
+      if (query.includes('CreateClinicOwnerRelation')) {
+        throw new Error('ConditionalCheckFailedException')
+      }
+      throw new Error(`Unexpected graphql call in test: ${query.slice(0, 60)}`)
+    })
+
+    const { closeMission, isClosing } = useMissionClosure()
+
+    await expect(
+      closeMission('mission-1', 'animal-1', MissionStatus.COMPLETED, 'clinic-1', 'owner-1'),
+    ).resolves.toBeUndefined()
+
+    expect(isClosing.value).toBe(false)
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('ClinicOwnerRelation'),
+      expect.any(Error),
+    )
+
+    consoleErrorSpy.mockRestore()
+  })
+
   it('clinicID/ownerID manquants (appelant non migré vers le nouveau contrat) : no-op silencieux, ne bloque pas closeMission, log une erreur contextuelle', async () => {
     const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     graphqlMock.mockImplementation(async ({ query, variables }) => {
@@ -420,5 +459,27 @@ describe('resolveClinicOwnerRelationUpsert (fonction pure, testable sans mock Gr
       'clinic-1',
     )
     expect(result).toEqual({ clinicID: 'clinic-1', isPrimaryClinic: false })
+  })
+
+  it("retourne null même quand l'Owner a une relation à CETTE clinique MÉLANGÉE avec des relations à d'autres cliniques (le check du clinicID exact doit court-circuiter, peu importe le reste du tableau, quelle que soit sa position — ici testé en 1ère ET en dernière position)", () => {
+    const clinicFirst = resolveClinicOwnerRelationUpsert(
+      [
+        { clinicID: 'clinic-1', isPrimaryClinic: true },
+        { clinicID: 'clinic-OTHER-A', isPrimaryClinic: false },
+        { clinicID: 'clinic-OTHER-B', isPrimaryClinic: false },
+      ],
+      'clinic-1',
+    )
+    expect(clinicFirst).toBeNull()
+
+    const clinicLast = resolveClinicOwnerRelationUpsert(
+      [
+        { clinicID: 'clinic-OTHER-A', isPrimaryClinic: true },
+        { clinicID: 'clinic-OTHER-B', isPrimaryClinic: false },
+        { clinicID: 'clinic-1', isPrimaryClinic: false },
+      ],
+      'clinic-1',
+    )
+    expect(clinicLast).toBeNull()
   })
 })
