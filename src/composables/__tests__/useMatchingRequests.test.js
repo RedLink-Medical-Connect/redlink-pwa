@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
+import { getCurrentUser } from 'aws-amplify/auth'
 import { listOpenRequestsWithClinic } from '@/graphql/custom-queries'
 
 // Regression / integration coverage for the "matching engine silently finds
@@ -157,6 +158,12 @@ describe('useMatchingRequests', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     graphqlMock.mockReset()
+    // Réinitialise explicitement à chaque test la valeur par défaut ('owner-1',
+    // celle utilisée par toutes les fixtures ci-dessus) : ce module mock n'a pas
+    // `restoreMocks`/`clearMocks` activé dans vitest.config.js, et un test qui
+    // reconfigure getCurrentUser() (voir describe Clinic Priority ci-dessous) ne
+    // doit pas laisser fuiter cette valeur vers les tests suivants.
+    vi.mocked(getCurrentUser).mockResolvedValue({ userId: 'owner-1' })
   })
 
   // Pin la définition réelle de la query (pas le mock) : si `clinic { ... }`
@@ -398,6 +405,36 @@ describe('useMatchingRequests', () => {
       )
     })
 
+    // Renforce le test précédent : toutes les fixtures de ce fichier utilisent
+    // 'owner-1' aussi bien comme userId (mock getCurrentUser) que comme id de
+    // profil (buildOwnerProfile), donc un code qui écrirait `ownerID: 'owner-1'`
+    // en dur au lieu de lire `userId` depuis getCurrentUser() passerait quand
+    // même le test ci-dessus par coïncidence. Ici, getCurrentUser() renvoie
+    // délibérément un userId QUI NE CORRESPOND À AUCUNE fixture ('owner-42') :
+    // seule une vraie lecture de getCurrentUser().userId peut faire matcher
+    // cette assertion.
+    it("propage le userId réel de getCurrentUser(), pas la valeur 'owner-1' qui apparaît par ailleurs dans les fixtures", async () => {
+      vi.mocked(getCurrentUser).mockResolvedValue({ userId: 'owner-42' })
+
+      mockGraphqlResponses({
+        profile: buildOwnerProfile(),
+        animals: [buildAnimal()],
+        requests: [buildRequest()],
+        clinicRelations: [],
+      })
+
+      const { searchMatches } = useMatchingRequests()
+
+      await searchMatches()
+
+      expect(graphqlMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          query: expect.stringContaining('MyClinicRelationsByOwnerID'),
+          variables: { ownerID: 'owner-42' },
+        }),
+      )
+    })
+
     // La preuve du GROUPEMENT (lecture (1) retenue, voir le commentaire dans
     // useMatchingRequests.searchMatches) : une Request plus ÉLOIGNÉE mais liée à une
     // Clinic déjà connue de l'Owner doit malgré tout sortir AVANT une Request plus proche
@@ -430,6 +467,58 @@ describe('useMatchingRequests', () => {
       ])
       expect(matches.value[0].hasClinicPriority).toBe(true)
       expect(matches.value[1].hasClinicPriority).toBe(false)
+    })
+
+    // Cas réaliste avec PLUSIEURS Requests de chaque côté (2 avec Clinic Priority, 2 sans),
+    // à distances volontairement entremêlées -- pas seulement 2 Requests comme le test
+    // ci-dessus. C'est le cas le plus susceptible de démasquer un comparateur bugué qui ne
+    // gérerait correctement qu'une comparaison à 2 éléments (ex. un simple `if (a.has) return
+    // -1` sans gérer le groupe symétrique, ou un comparateur non transitif) mais casserait
+    // sous le tri multi-éléments réel d'Array.prototype.sort : ici, une Request non-priority
+    // TRÈS proche (0km, plus proche que tout le reste) doit malgré tout finir APRÈS les deux
+    // Requests priority, y compris la plus lointaine d'entre elles (~390km).
+    it('avec plusieurs Requests des deux côtés, TOUTES les Requests Clinic Priority sortent avant TOUTES les autres, quelle que soit leur distance individuelle', async () => {
+      mockGraphqlResponses({
+        profile: buildOwnerProfile({ maxTravelDistance: 1000 }),
+        animals: [buildAnimal()],
+        requests: [
+          // Volontairement pas déjà triées par distance dans le tableau d'entrée : le tri
+          // doit reposer sur le comparateur, pas sur un ordre d'entrée qui masquerait un bug.
+          buildRequest({
+            id: 'request-nonpriority-farthest',
+            clinic: { id: 'clinic-marseille', name: 'Marseille', latitude: 43.2965, longitude: 5.3698 }, // ~660km
+          }),
+          buildRequest({
+            id: 'request-priority-close',
+            clinic: { id: 'clinic-known-close', name: 'Paris (connue)', latitude: CLINIC_LAT, longitude: CLINIC_LON }, // ~2km
+          }),
+          buildRequest({
+            id: 'request-nonpriority-veryclose',
+            clinic: { id: 'clinic-unknown-veryclose', name: 'Inconnue (très proche)', latitude: OWNER_LAT, longitude: OWNER_LON }, // ~0km
+          }),
+          buildRequest({
+            id: 'request-priority-far',
+            clinic: { id: 'clinic-known-far', name: 'Lyon (connue)', latitude: 45.764, longitude: 4.8357 }, // ~390km
+          }),
+        ],
+        clinicRelations: [{ clinicID: 'clinic-known-close' }, { clinicID: 'clinic-known-far' }],
+      })
+
+      const { matches, searchMatches } = useMatchingRequests()
+
+      await searchMatches()
+
+      // Groupement primaire (priority d'abord, en bloc), distance croissante au sein de
+      // chaque groupe -- 'request-nonpriority-veryclose' (0km, la plus proche de TOUTES)
+      // finit malgré tout après 'request-priority-far' (~390km).
+      expect(matches.value.map((m) => m.id)).toEqual([
+        'request-priority-close',
+        'request-priority-far',
+        'request-nonpriority-veryclose',
+        'request-nonpriority-farthest',
+      ])
+      expect(matches.value.slice(0, 2).every((m) => m.hasClinicPriority === true)).toBe(true)
+      expect(matches.value.slice(2).every((m) => m.hasClinicPriority === false)).toBe(true)
     })
 
     // Régression : sans aucune ClinicOwnerRelation existante pour cet Owner (cas normal
