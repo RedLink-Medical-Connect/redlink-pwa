@@ -103,6 +103,11 @@ const handleAccept = async (request) => {
                 <div class="flex-grow">
                   <div class="flex items-center gap-2 mb-2">
                     <Tag severity="danger" value="URGENCE" rounded class="font-bold" />
+                    <!-- Critère 5 de l'Eligibility (Clinic Priority, CONTEXT.md) : simple
+                    indicateur visuel, ne change rien à l'éligibilité elle-même — le tri
+                    (useMatchingRequests.searchMatches) fait déjà remonter ces cartes en
+                    premier. -->
+                    <Tag v-if="req.hasClinicPriority" severity="info" value="Clinique connue" rounded />
                     <span class="text-xs text-zinc-500 font-mono bg-zinc-100 px-2 py-1 rounded">
                       à {{ req.distanceKM }} km
                     </span>

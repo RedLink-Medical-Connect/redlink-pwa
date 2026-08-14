@@ -130,14 +130,21 @@ const buildRequest = (overrides = {}) => ({
  * operation name embedded in the query string, mirroring what
  * useOwnerProfile.fetchProfile / useAnimals.fetchAnimals / useMatchingRequests
  * actually call.
+ *
+ * `clinicRelations` defaults to `[]` — most tests don't care about Clinic
+ * Priority (critère 5) and must keep behaving exactly as before this was
+ * wired in (regression coverage, see the dedicated `describe` block below).
  */
-function mockGraphqlResponses({ profile, animals, requests }) {
+function mockGraphqlResponses({ profile, animals, requests, clinicRelations = [] }) {
   graphqlMock.mockImplementation(async ({ query }) => {
     if (query.includes('GetOwner')) {
       return { data: { getOwner: profile } }
     }
     if (query.includes('ListMyAnimalsByOwnerId')) {
       return { data: { listAnimals: { items: animals } } }
+    }
+    if (query.includes('MyClinicRelationsByOwnerID')) {
+      return { data: { clinicOwnerRelationsByOwnerID: { items: clinicRelations } } }
     }
     if (query.includes('ListOpenRequestsWithClinic')) {
       return { data: { listRequests: { items: requests } } }
@@ -364,5 +371,94 @@ describe('useMatchingRequests', () => {
     await searchMatches()
 
     expect(matches.value.map((m) => m.id)).toEqual(['request-near', 'request-far'])
+  })
+
+  // Critère 5 de l'Eligibility (Clinic Priority, CONTEXT.md) : jusqu'à ce fix,
+  // searchMatches() appelait toujours checkEligibility() avec ownerClinicIds
+  // resté à sa valeur par défaut ([]) -> hasClinicPriority était toujours
+  // false et ce critère n'affectait jamais rien de visible pour l'Owner.
+  describe('Clinic Priority (critère 5)', () => {
+    it("interroge myClinicRelationsByOwnerID avec l'ownerID de getCurrentUser(), pas une valeur en dur", async () => {
+      mockGraphqlResponses({
+        profile: buildOwnerProfile(),
+        animals: [buildAnimal()],
+        requests: [buildRequest()],
+        clinicRelations: [],
+      })
+
+      const { searchMatches } = useMatchingRequests()
+
+      await searchMatches()
+
+      expect(graphqlMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          query: expect.stringContaining('MyClinicRelationsByOwnerID'),
+          variables: { ownerID: 'owner-1' },
+        }),
+      )
+    })
+
+    // La preuve du GROUPEMENT (lecture (1) retenue, voir le commentaire dans
+    // useMatchingRequests.searchMatches) : une Request plus ÉLOIGNÉE mais liée à une
+    // Clinic déjà connue de l'Owner doit malgré tout sortir AVANT une Request plus proche
+    // mais sans relation existante -- pas seulement à égalité de distance (lecture (2),
+    // rejetée).
+    it("fait remonter en tête une Request liée à une Clinic déjà connue de l'Owner, même si elle est plus loin qu'une autre Request compatible", async () => {
+      mockGraphqlResponses({
+        profile: buildOwnerProfile({ maxTravelDistance: 500 }),
+        animals: [buildAnimal()],
+        requests: [
+          buildRequest({
+            id: 'request-near-unknown-clinic',
+            clinic: { id: 'clinic-unknown', name: 'Inconnue', latitude: CLINIC_LAT, longitude: CLINIC_LON }, // Paris, très proche
+          }),
+          buildRequest({
+            id: 'request-far-known-clinic',
+            clinic: { id: 'clinic-known', name: 'Connue', latitude: 45.764, longitude: 4.8357 }, // Lyon, loin
+          }),
+        ],
+        clinicRelations: [{ clinicID: 'clinic-known' }],
+      })
+
+      const { matches, searchMatches } = useMatchingRequests()
+
+      await searchMatches()
+
+      expect(matches.value.map((m) => m.id)).toEqual([
+        'request-far-known-clinic',
+        'request-near-unknown-clinic',
+      ])
+      expect(matches.value[0].hasClinicPriority).toBe(true)
+      expect(matches.value[1].hasClinicPriority).toBe(false)
+    })
+
+    // Régression : sans aucune ClinicOwnerRelation existante pour cet Owner (cas normal
+    // pour un nouvel Owner), le tri doit rester purement par distance -- comme avant ce
+    // fix, et comme le garantit déjà 'trie les Matches par distance croissante' ci-dessus
+    // (clinicRelations: [] par défaut). Ce test le rend explicite pour Clinic Priority.
+    it('sans aucune ClinicOwnerRelation, trie toujours par distance seule', async () => {
+      mockGraphqlResponses({
+        profile: buildOwnerProfile({ maxTravelDistance: 500 }),
+        animals: [buildAnimal()],
+        requests: [
+          buildRequest({
+            id: 'request-far',
+            clinic: { id: 'clinic-b', name: 'B', latitude: 45.764, longitude: 4.8357 }, // Lyon
+          }),
+          buildRequest({
+            id: 'request-near',
+            clinic: { id: 'clinic-a', name: 'A', latitude: CLINIC_LAT, longitude: CLINIC_LON }, // Paris, proche
+          }),
+        ],
+        clinicRelations: [],
+      })
+
+      const { matches, searchMatches } = useMatchingRequests()
+
+      await searchMatches()
+
+      expect(matches.value.map((m) => m.id)).toEqual(['request-near', 'request-far'])
+      expect(matches.value.every((m) => m.hasClinicPriority === false)).toBe(true)
+    })
   })
 })

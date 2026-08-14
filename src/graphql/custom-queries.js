@@ -236,6 +236,25 @@ export const listClinicDonorsByClinicID = /* GraphQL */ `
   }
 `
 
+// Sous-tâche "wire Clinic Priority (critère 5) dans searchMatches" (roadmap, suite de la
+// Phase 3.1/3.2) : useMatchingRequests.js a besoin de la liste des `clinicID` déjà liés à
+// l'Owner courant (via `ClinicOwnerRelation`) pour passer `ownerClinicIds` à
+// checkEligibility() (eligibility-service.js). La query générée
+// `clinicOwnerRelationsByOwnerID` (queries.js) renvoie tout le graphe d'une relation
+// (id, ownerID, isPrimaryClinic, createdAt, updatedAt, owner, __typename) alors qu'on n'a
+// besoin que de `clinicID` ici — même raisonnement que closeMissionSimple/
+// createClinicOwnerRelationSimple dans custom-mutations.js : éviter de sur-fetcher un champ
+// scalaire unique.
+export const myClinicRelationsByOwnerID = /* GraphQL */ `
+  query MyClinicRelationsByOwnerID($ownerID: ID!) {
+    clinicOwnerRelationsByOwnerID(ownerID: $ownerID) {
+      items {
+        clinicID
+      }
+    }
+  }
+`
+
 export const listMyAnimalsByOwnerId = /* GraphQL */ `
   query ListMyAnimalsByOwnerId($ownerID: ID!) {
     listAnimals(filter: { ownerID: { eq: $ownerID } }) {
