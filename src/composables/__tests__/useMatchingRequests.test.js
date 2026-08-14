@@ -472,23 +472,26 @@ describe('useMatchingRequests', () => {
       consoleErrorSpy.mockRestore()
     })
 
-    // La preuve du GROUPEMENT (lecture (1) retenue, voir le commentaire dans
-    // useMatchingRequests.searchMatches) : une Request plus ÉLOIGNÉE mais liée à une
-    // Clinic déjà connue de l'Owner doit malgré tout sortir AVANT une Request plus proche
-    // mais sans relation existante -- pas seulement à égalité de distance (lecture (2),
-    // rejetée).
-    it("fait remonter en tête une Request liée à une Clinic déjà connue de l'Owner, même si elle est plus loin qu'une autre Request compatible", async () => {
+    // Décision produit actée avec le repo owner (voir le commentaire au-dessus du
+    // comparateur dans useMatchingRequests.searchMatches) : le groupement inconditionnel
+    // qu'on testait ici auparavant (une Request de Clinic Priority arbitrairement lointaine
+    // devant une Request très proche d'une clinique inconnue) est explicitement rejeté pour
+    // une app d'urgence sanguine. Ce test vérifie maintenant l'ABSENCE de ce comportement :
+    // une Request liée à une Clinic déjà connue mais hors du rayon de boost
+    // (CLINIC_PRIORITY_BOOST_RADIUS_KM = 15km) ne doit PAS passer devant une Request bien
+    // plus proche, même sans relation existante -- le tri retombe sur la distance pure.
+    it("ne fait PAS remonter en tête une Request liée à une Clinic connue si elle dépasse le rayon de boost, même si l'autre Request compatible n'a pas de relation existante", async () => {
       mockGraphqlResponses({
         profile: buildOwnerProfile({ maxTravelDistance: 500 }),
         animals: [buildAnimal()],
         requests: [
           buildRequest({
             id: 'request-near-unknown-clinic',
-            clinic: { id: 'clinic-unknown', name: 'Inconnue', latitude: CLINIC_LAT, longitude: CLINIC_LON }, // Paris, très proche
+            clinic: { id: 'clinic-unknown', name: 'Inconnue', latitude: CLINIC_LAT, longitude: CLINIC_LON }, // Paris, très proche (~2km)
           }),
           buildRequest({
             id: 'request-far-known-clinic',
-            clinic: { id: 'clinic-known', name: 'Connue', latitude: 45.764, longitude: 4.8357 }, // Lyon, loin
+            clinic: { id: 'clinic-known', name: 'Connue', latitude: 45.764, longitude: 4.8357 }, // Lyon, ~390km -- très au-delà du rayon de boost
           }),
         ],
         clinicRelations: [{ clinicID: 'clinic-known' }],
@@ -498,12 +501,16 @@ describe('useMatchingRequests', () => {
 
       await searchMatches()
 
+      // Tri par distance pure : la Request lointaine (même Clinic Priority) ne passe pas
+      // devant la Request proche.
       expect(matches.value.map((m) => m.id)).toEqual([
-        'request-far-known-clinic',
         'request-near-unknown-clinic',
+        'request-far-known-clinic',
       ])
-      expect(matches.value[0].hasClinicPriority).toBe(true)
-      expect(matches.value[1].hasClinicPriority).toBe(false)
+      // `hasClinicPriority` (le booléen brut affiché en badge dans DashboardView.vue) reste
+      // inchangé par le plafond de distance : seul le comparateur de tri est affecté.
+      expect(matches.value.find((m) => m.id === 'request-far-known-clinic').hasClinicPriority).toBe(true)
+      expect(matches.value.find((m) => m.id === 'request-near-unknown-clinic').hasClinicPriority).toBe(false)
     })
 
     // Cas réaliste avec PLUSIEURS Requests de chaque côté (2 avec Clinic Priority, 2 sans),
@@ -511,10 +518,16 @@ describe('useMatchingRequests', () => {
     // ci-dessus. C'est le cas le plus susceptible de démasquer un comparateur bugué qui ne
     // gérerait correctement qu'une comparaison à 2 éléments (ex. un simple `if (a.has) return
     // -1` sans gérer le groupe symétrique, ou un comparateur non transitif) mais casserait
-    // sous le tri multi-éléments réel d'Array.prototype.sort : ici, une Request non-priority
-    // TRÈS proche (0km, plus proche que tout le reste) doit malgré tout finir APRÈS les deux
-    // Requests priority, y compris la plus lointaine d'entre elles (~390km).
-    it('avec plusieurs Requests des deux côtés, TOUTES les Requests Clinic Priority sortent avant TOUTES les autres, quelle que soit leur distance individuelle', async () => {
+    // sous le tri multi-éléments réel d'Array.prototype.sort.
+    //
+    // Avec le plafond de distance (CLINIC_PRIORITY_BOOST_RADIUS_KM = 15km), seule
+    // 'request-priority-close' (~2km, sous le plafond) est réellement boostée. 'request-
+    // priority-far' (~390km, Clinic Priority mais largement hors plafond) n'est PAS boostée
+    // et retombe dans le tri par distance pure avec les Requests non-priority -- où elle finit
+    // après 'request-nonpriority-veryclose' (~0km) mais avant 'request-nonpriority-farthest'
+    // (~660km). `hasClinicPriority` (badge brut) reste `true` sur ces deux Requests malgré
+    // tout : seul l'ORDRE change, jamais l'indicateur affiché.
+    it('avec plusieurs Requests des deux côtés, seules les Requests Clinic Priority sous le rayon de boost sortent en tête ; au-delà, le tri redevient une pure distance croissante', async () => {
       mockGraphqlResponses({
         profile: buildOwnerProfile({ maxTravelDistance: 1000 }),
         animals: [buildAnimal()],
@@ -527,7 +540,7 @@ describe('useMatchingRequests', () => {
           }),
           buildRequest({
             id: 'request-priority-close',
-            clinic: { id: 'clinic-known-close', name: 'Paris (connue)', latitude: CLINIC_LAT, longitude: CLINIC_LON }, // ~2km
+            clinic: { id: 'clinic-known-close', name: 'Paris (connue)', latitude: CLINIC_LAT, longitude: CLINIC_LON }, // ~2km, sous le plafond
           }),
           buildRequest({
             id: 'request-nonpriority-veryclose',
@@ -535,7 +548,7 @@ describe('useMatchingRequests', () => {
           }),
           buildRequest({
             id: 'request-priority-far',
-            clinic: { id: 'clinic-known-far', name: 'Lyon (connue)', latitude: 45.764, longitude: 4.8357 }, // ~390km
+            clinic: { id: 'clinic-known-far', name: 'Lyon (connue)', latitude: 45.764, longitude: 4.8357 }, // ~390km, Clinic Priority mais hors plafond
           }),
         ],
         clinicRelations: [{ clinicID: 'clinic-known-close' }, { clinicID: 'clinic-known-far' }],
@@ -545,17 +558,66 @@ describe('useMatchingRequests', () => {
 
       await searchMatches()
 
-      // Groupement primaire (priority d'abord, en bloc), distance croissante au sein de
-      // chaque groupe -- 'request-nonpriority-veryclose' (0km, la plus proche de TOUTES)
-      // finit malgré tout après 'request-priority-far' (~390km).
+      // Seule 'request-priority-close' (boostée) sort en tête. Le reste est trié par
+      // distance pure, sans notion de groupe : 'request-priority-far' (~390km) ne repasse
+      // pas devant 'request-nonpriority-veryclose' (~0km) malgré son statut Clinic Priority.
       expect(matches.value.map((m) => m.id)).toEqual([
         'request-priority-close',
-        'request-priority-far',
         'request-nonpriority-veryclose',
+        'request-priority-far',
         'request-nonpriority-farthest',
       ])
-      expect(matches.value.slice(0, 2).every((m) => m.hasClinicPriority === true)).toBe(true)
-      expect(matches.value.slice(2).every((m) => m.hasClinicPriority === false)).toBe(true)
+      // `hasClinicPriority` (badge brut, indépendant de la distance) reste correct pour
+      // chaque Request malgré leur ordre entremêlé.
+      expect(matches.value.find((m) => m.id === 'request-priority-close').hasClinicPriority).toBe(true)
+      expect(matches.value.find((m) => m.id === 'request-priority-far').hasClinicPriority).toBe(true)
+      expect(matches.value.find((m) => m.id === 'request-nonpriority-veryclose').hasClinicPriority).toBe(false)
+      expect(matches.value.find((m) => m.id === 'request-nonpriority-farthest').hasClinicPriority).toBe(false)
+    })
+
+    // Limite exacte du plafond (CLINIC_PRIORITY_BOOST_RADIUS_KM = 15km) : une Request Clinic
+    // Priority à distance <= 15km doit être boostée (comparaison inclusive, `<=` dans le
+    // comparateur), une à distance > 15km ne doit pas l'être. Une Request non-priority à 10km
+    // sert de témoin : plus proche que les deux Requests priority, mais pas boostée -- si le
+    // plafond avait une erreur d'inégalité stricte/large ou une confusion de signe, ce témoin
+    // la révélerait en se retrouvant du mauvais côté du tri.
+    it('applique le plafond de distance de façon inclusive à la limite exacte (15km boostée, 15.1km non boostée)', async () => {
+      mockGraphqlResponses({
+        profile: buildOwnerProfile({ maxTravelDistance: 1000 }),
+        animals: [buildAnimal()],
+        requests: [
+          buildRequest({
+            id: 'request-priority-above-limit',
+            // ~15.1km de l'Owner (arrondi) -- juste au-dessus du plafond, Clinic Priority mais
+            // pas boostée.
+            clinic: { id: 'clinic-above-limit', name: 'Au-delà du plafond', latitude: 49.005645, longitude: OWNER_LON },
+          }),
+          buildRequest({
+            id: 'request-nonpriority-control',
+            // ~10km de l'Owner, sans Clinic Priority : plus proche que les deux Requests
+            // priority ci-dessus/dessous, mais jamais boostée -- sert de témoin.
+            clinic: { id: 'clinic-control', name: 'Témoin, sans relation', latitude: 48.959831, longitude: OWNER_LON },
+          }),
+          buildRequest({
+            id: 'request-priority-at-limit',
+            // ~15.0km de l'Owner (arrondi) -- exactement au plafond, doit être boostée
+            // (comparaison `<=`, pas `<`).
+            clinic: { id: 'clinic-at-limit', name: 'Exactement au plafond', latitude: 49.004747, longitude: OWNER_LON },
+          }),
+        ],
+        clinicRelations: [{ clinicID: 'clinic-above-limit' }, { clinicID: 'clinic-at-limit' }],
+      })
+
+      const { matches, searchMatches } = useMatchingRequests()
+
+      await searchMatches()
+
+      expect(matches.value.map((m) => m.distanceKM)).toEqual([15, 10, 15.1])
+      expect(matches.value.map((m) => m.id)).toEqual([
+        'request-priority-at-limit',
+        'request-nonpriority-control',
+        'request-priority-above-limit',
+      ])
     })
 
     // Régression : sans aucune ClinicOwnerRelation existante pour cet Owner (cas normal
