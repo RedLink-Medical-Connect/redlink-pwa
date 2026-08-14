@@ -79,6 +79,11 @@ const router = createRouter({
       meta: { requiresAuth: true, role: 'vet' },
     },
     {
+      path: '/dashboard/validations',
+      component: () => import('@/views/dashboard/clinic/ValidationsView.vue'),
+      meta: { requiresAuth: true, role: 'vet' },
+    },
+    {
       path: '/dashboard/history',
       component: () => import('@/views/dashboard/HistoryView.vue'),
       meta: { requiresAuth: true, role: 'vet' },

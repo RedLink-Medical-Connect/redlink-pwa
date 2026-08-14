@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 
 // Phase 1.1 (ADR-0002) : useAnimalValidation() expose la liste (globale, voir doc du
 // composable) des Animals en attente de validation vétérinaire, et l'action de
@@ -11,7 +13,7 @@ vi.mock('aws-amplify/api', () => ({
   generateClient: () => ({ graphql: graphqlMock }),
 }))
 
-import { useAnimalValidation } from '@/composables/useAnimalValidation'
+import { useAnimalValidation, mapValidationErrorKey } from '@/composables/useAnimalValidation'
 import { listAnimalsForValidation } from '@/graphql/custom-queries'
 
 const buildAnimal = (overrides = {}) => ({
@@ -206,6 +208,31 @@ describe('useAnimalValidation.fetchPendingValidations', () => {
 
     consoleErrorSpy.mockRestore()
   })
+
+  it("loadError distingue un échec de chargement d'une file d'attente réellement vide (relevé en Lead Dev review : sans ça, un vétérinaire ne peut pas faire la différence)", async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    graphqlMock.mockImplementation(async () => {
+      throw new Error('network down')
+    })
+
+    const { fetchPendingValidations, loadError, pendingAnimals } = useAnimalValidation()
+    expect(loadError.value).toBe(false)
+
+    await fetchPendingValidations()
+
+    expect(loadError.value).toBe(true)
+    expect(pendingAnimals.value).toEqual([])
+
+    // Un rechargement réussi (ex. après un clic sur "Réessayer") efface l'état d'erreur —
+    // loadError ne doit pas rester bloqué à true indéfiniment.
+    graphqlMock.mockImplementation(async () => ({ data: { listAnimals: { items: [] } } }))
+    await fetchPendingValidations()
+
+    expect(loadError.value).toBe(false)
+
+    consoleErrorSpy.mockRestore()
+  })
 })
 
 describe('useAnimalValidation.validateAnimal', () => {
@@ -357,5 +384,43 @@ describe('useAnimalValidation.validateAnimal', () => {
 
     expect(capturedInput.id).toBe('animal-absent-ailleurs')
     expect(pendingAnimals.value.map((a) => a.id).sort()).toEqual(['animal-2', 'animal-3'])
+  })
+})
+
+// Extraite de ValidationsView.vue pendant la QA pass de feat/animal-validation-ui : ce repo
+// n'a aucun précédent de test de composant `.vue` (voir la Lead Dev review de
+// feat/wire-eligibility-engine), donc le mapping code-d'erreur -> clé i18n vit ici comme
+// fonction pure, testable sans monter de composant — même raisonnement que
+// mapAcceptMissionError dans useOwnerMissions.js/useOwnerMissions.spec.js. Retourne une CLÉ
+// i18n (pas le texte traduit) : contrairement à mapAcceptMissionError (qui retourne du
+// français en dur, dette connue trackée sur DashboardView.vue dans CLAUDE.md),
+// ValidationsView.vue passe déjà correctement par vue-i18n ailleurs — cette fonction reste
+// hors contexte de composant donc ne peut pas appeler `t()` elle-même, mais ne réintroduit
+// pas la dette pour autant : l'appelant fait `t(mapValidationErrorKey(e.message))`.
+describe('mapValidationErrorKey', () => {
+  it('mappe BLOOD_GROUP_UNKNOWN vers sa clé i18n spécifique', () => {
+    expect(mapValidationErrorKey('BLOOD_GROUP_UNKNOWN')).toBe(
+      'dashboard.validations.toasts.blood_group_unknown',
+    )
+  })
+
+  it('retombe sur la clé générique pour un code non reconnu (erreur réseau, @auth...)', () => {
+    expect(mapValidationErrorKey('Network request failed')).toBe(
+      'dashboard.validations.toasts.generic_error',
+    )
+    expect(mapValidationErrorKey(undefined)).toBe('dashboard.validations.toasts.generic_error')
+  })
+
+  it('les deux clés retournées existent réellement dans fr.json et en.json (pas une clé qui déclencherait le warning ESLint @intlify/vue-i18n/no-missing-keys)', () => {
+    const fr = JSON.parse(readFileSync(resolve(process.cwd(), 'src/locales/fr.json'), 'utf-8'))
+    const en = JSON.parse(readFileSync(resolve(process.cwd(), 'src/locales/en.json'), 'utf-8'))
+
+    const resolveKey = (obj, key) => key.split('.').reduce((acc, part) => acc?.[part], obj)
+
+    for (const code of ['BLOOD_GROUP_UNKNOWN', 'SOME_UNKNOWN_CODE']) {
+      const key = mapValidationErrorKey(code)
+      expect(resolveKey(fr, key)).toBeTypeOf('string')
+      expect(resolveKey(en, key)).toBeTypeOf('string')
+    }
   })
 })
