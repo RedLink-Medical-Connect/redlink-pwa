@@ -96,7 +96,19 @@ type Animal @model @auth(rules: [
   bloodGroup: String!
   isVaccinated: Boolean!
   isSterilized: Boolean
+
+  # @auth au niveau champ (remplace, pour ce champ, les règles de type ci-dessus —
+  # Transformer v1 ne les fusionne pas) : Owner en lecture seule, écriture réservée aux
+  # Veterinarians. Même mécanisme qu'isValidatedDonor/validationExpiresAt juste en-dessous
+  # (ADR-0002) : la clôture d'une Mission en COMPLETED (Phase 2.1) doit pouvoir écrire cette
+  # date sans ouvrir un accès en écriture général sur Animal aux Veterinarians (ce qui leur
+  # permettrait de modifier des champs saisis par l'Owner — nom, race, poids...). Voir
+  # docs/adr/0003.
   lastDonationDate: AWSDate
+    @auth(rules: [
+      { allow: owner, operations: [read] },
+      { allow: groups, groups: ["Veterinarians"], operations: [read, update] }
+    ])
   donationFrequency: DonationFrequency
 
   # @auth au niveau champ (remplace, pour ces deux champs uniquement, les règles de

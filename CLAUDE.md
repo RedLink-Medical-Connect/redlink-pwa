@@ -84,15 +84,17 @@ architecturales) et `.cursorrules` (conventions détaillées pour l'éditeur).
 - **Enums** : les valeurs de statut/type viennent de `src/constants/enums.js`,
   jamais de littéraux en dur — partiellement suivi seulement, dette existante
   par endroits (ex. `MissionStatus` n'a pas d'entrée `CANCELLED`).
+- **Écriture Veterinarian scopée sur `Animal`** : pattern utilisé deux fois
+  (ADR-0002, ADR-0003) — `@auth` au niveau champ (pas de mutation dédiée/
+  Lambda) apparié à une mutation `*Simple` n'envoyant que les champs
+  autorisés. Référence pour tout futur champ écrit par les Veterinarians
+  seuls.
 
 ## Tenir ce fichier à jour
 
-Ce fichier vit avec le projet, il ne se fige pas au premier commit. Quand une
-sous-tâche introduit un nouveau composable/service/pattern GraphQL réellement
-suivi (pas une supposition — un usage observé dans le code), ou qu'une décision
-change quelque chose listé plus haut, la mettre à jour dans la même PR plutôt
-que de la laisser dériver — c'est exactement ce qui est arrivé une fois à la
-section "7 piliers" de `lead-dev-reviewer.md`, restaurée après coup. Un
-changement qui mérite plus de détail va dans `docs/adr/` ou `CONTEXT.md`
-(glossaire domaine), avec juste un pointeur ici — ce fichier reste sous 100
-lignes, une carte pas une documentation exhaustive.
+Vit avec le projet, ne se fige pas au premier commit. Une sous-tâche qui
+introduit un pattern réellement suivi (pas une supposition) le documente ici
+dans la même PR — c'est arrivé une fois à la section "7 piliers" de
+`lead-dev-reviewer.md`, restaurée après coup faute de ça. Le détail lourd va
+dans `docs/adr/`/`CONTEXT.md`, juste un pointeur ici : une carte sous 100
+lignes, pas une documentation exhaustive.

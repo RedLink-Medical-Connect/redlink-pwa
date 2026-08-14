@@ -84,23 +84,32 @@ describe('schema.graphql — Animal.isValidatedDonor / validationExpiresAt (ADR-
     }
   )
 
-  it("le reste du type Animal (avant ET après isValidatedDonor/validationExpiresAt, ex: name, weight, bloodGroup, ownerID, ownerProfile, missions) n'est pas concerné par ce scoping champ-par-champ", () => {
+  it("le reste du type Animal (avant ET après lastDonationDate/isValidatedDonor/validationExpiresAt, ex: name, weight, bloodGroup, ownerID, ownerProfile, missions) n'est pas concerné par ce scoping champ-par-champ", () => {
     // Régression : si un @auth au niveau champ était accidentellement ajouté sur un
     // champ saisi par l'Owner (name, breed, weight...) OU sur un champ après
     // validationExpiresAt (ownerID, ownerProfile, missions...), ce test le
     // détecterait. Couvre tout le type, pas seulement le segment name->isValidatedDonor
     // (une revue précédente a signalé que la version initiale ne couvrait pas la
-    // fin du type) : on retire uniquement le bloc légitime des deux champs de
-    // validation et on vérifie qu'aucun '@auth(' ne subsiste ailleurs.
+    // fin du type) : on retire uniquement les blocs légitimes (lastDonationDate,
+    // ADR-0003, + isValidatedDonor/validationExpiresAt, ADR-0002) et on vérifie qu'aucun
+    // '@auth(' ne subsiste ailleurs.
     // On part de `name:`, pas du début du type, pour exclure le bloc @auth
     // *au niveau type* sur `type Animal @model @auth(rules: [...])` lui-même
     // (légitime, ce n'est pas le scoping champ-par-champ qu'on vérifie ici).
     const nameFieldIdx = animalType.indexOf('name: String!')
+    const lastDonationDateBlock = extractFieldBlock('lastDonationDate')
     const isValidatedDonorBlock = extractFieldBlock('isValidatedDonor')
     const validationExpiresAtBlock = extractFieldBlock('validationExpiresAt')
-    const validationBlocksStart = animalType.indexOf(isValidatedDonorBlock)
+    const validationBlocksStart = animalType.indexOf(lastDonationDateBlock)
     const validationBlocksEnd =
       animalType.indexOf(validationExpiresAtBlock) + validationExpiresAtBlock.length
+    // Les trois blocs légitimes sont contigus dans le schéma (lastDonationDate juste
+    // avant isValidatedDonor/validationExpiresAt) : on vérifie cette hypothèse plutôt que
+    // de la supposer silencieusement, sinon le slice ci-dessous retirerait plus/moins que
+    // prévu sans que ce test le détecte.
+    expect(animalType.indexOf(isValidatedDonorBlock)).toBeGreaterThan(
+      validationBlocksStart + lastDonationDateBlock.length - 1,
+    )
     const restOfType =
       animalType.slice(nameFieldIdx, validationBlocksStart) +
       animalType.slice(validationBlocksEnd)
@@ -108,4 +117,65 @@ describe('schema.graphql — Animal.isValidatedDonor / validationExpiresAt (ADR-
     // isValidatedDonor mentionne "@auth" en prose sans l'appliquer à un champ.
     expect(restOfType).not.toContain('@auth(')
   })
+})
+
+describe('schema.graphql — Animal.lastDonationDate (ADR-0003)', () => {
+  const animalType = extractType('Animal')
+
+  it('lastDonationDate est nullable (AWSDate, pas AWSDate!)', () => {
+    expect(schema).toMatch(/lastDonationDate: AWSDate\n/)
+  })
+
+  it("l'Owner n'a que 'read' sur lastDonationDate, jamais d'écriture", () => {
+    const block = extractFieldBlock('lastDonationDate')
+    expect(block).toContain('{ allow: owner, operations: [read] }')
+  })
+
+  it('les Veterinarians ont read+update sur lastDonationDate, scopé au groupe Veterinarians', () => {
+    const block = extractFieldBlock('lastDonationDate')
+    expect(block).toContain(
+      '{ allow: groups, groups: ["Veterinarians"], operations: [read, update] }',
+    )
+  })
+
+  it('lastDonationDate précède bien isValidatedDonor/validationExpiresAt dans le type Animal (position documentaire, pas fonctionnelle)', () => {
+    expect(animalType.indexOf('lastDonationDate:')).toBeLessThan(
+      animalType.indexOf('isValidatedDonor:'),
+    )
+  })
+})
+
+describe("schema.graphql — Mission.status @auth (re-clôture, Phase 2.1 / useMissionClosure.js)", () => {
+  const missionType = extractType('Mission')
+
+  it("Mission n'a aucun @auth au niveau champ — contrairement à Animal (lastDonationDate/isValidatedDonor/validationExpiresAt), les Veterinarians ne sont pas restreints champ par champ sur Mission", () => {
+    // On exclut le bloc @auth *au niveau type* (`type Mission @model @auth(rules: [...]) {`)
+    // lui-même — légitime, ce n'est pas le scoping champ-par-champ qu'on vérifie ici — même
+    // raisonnement que le test équivalent pour Animal juste au-dessus dans ce fichier.
+    const typeHeaderEnd = missionType.indexOf(']) {') + ']) {'.length
+    expect(typeHeaderEnd).toBeGreaterThan(-1)
+    const missionFieldsOnly = missionType.slice(typeHeaderEnd)
+    expect(missionFieldsOnly).not.toContain('@auth(')
+  })
+
+  it(
+    "la règle de type Veterinarians sur Mission n'a pas de clause 'operations:' (accès " +
+      'illimité create/read/update/delete) — pin test pour le raisonnement de ' +
+      "useMissionClosure.js : c'est ce qui rend une re-clôture (updateMission sur une Mission " +
+      'déjà COMPLETED/NO_SHOW) inoffensive côté serveur, sans ConditionExpression sur `status` ' +
+      "ni champ refusé par @auth. Si cette règle gagnait un jour une clause 'operations:' " +
+      'scopée (ex. retirer update), la garde réelle contre la re-clôture resterait portée par ' +
+      "l'UI (bouton visible seulement pour ACCEPTED/PENDING_ARRIVAL) sans que rien ici ne le " +
+      'signale — ce test casse plutôt que de laisser cette hypothèse dériver silencieusement.',
+    () => {
+      const typeAuthStart = schema.indexOf('type Mission @model @auth(')
+      const typeAuthEnd = schema.indexOf(']) {', typeAuthStart)
+      expect(typeAuthStart).toBeGreaterThan(-1)
+      expect(typeAuthEnd).toBeGreaterThan(typeAuthStart)
+      const typeAuthBlock = schema.slice(typeAuthStart, typeAuthEnd)
+
+      expect(typeAuthBlock).toContain('{ allow: groups, groups: ["Veterinarians"] }')
+      expect(typeAuthBlock).not.toMatch(/"Veterinarians"\][^}]*operations:/)
+    },
+  )
 })
