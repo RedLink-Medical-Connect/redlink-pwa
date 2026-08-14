@@ -213,5 +213,23 @@ describe(
       const relationFieldsOnly = relationType.slice(typeHeaderEnd)
       expect(relationFieldsOnly).not.toContain('@auth(')
     })
+
+    it(
+      'la règle owner de ClinicOwnerRelation déclare ownerField: "ownerID" — sans cet ' +
+        "override explicite, la règle owner se serait appuyée sur le champ caché " +
+        "auto-injecté par Amplify (identité de qui ÉCRIT la ligne, toujours le " +
+        'Veterinarian via useMissionClosure.js) au lieu du champ ownerID du schéma ' +
+        "(identité réelle du pet Owner) : clinicOwnerRelationsByOwnerID restait vide en " +
+        'permanence côté Owner en prod (bug constaté et corrigé, cf. schema.graphql).',
+      () => {
+        const typeAuthStart = schema.indexOf('type ClinicOwnerRelation @model @auth(')
+        const typeAuthEnd = schema.indexOf(']) {', typeAuthStart)
+        expect(typeAuthStart).toBeGreaterThan(-1)
+        expect(typeAuthEnd).toBeGreaterThan(typeAuthStart)
+        const typeAuthBlock = schema.slice(typeAuthStart, typeAuthEnd)
+
+        expect(typeAuthBlock).toContain('{ allow: owner, ownerField: "ownerID" }')
+      },
+    )
   },
 )

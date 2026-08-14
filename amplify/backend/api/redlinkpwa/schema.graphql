@@ -131,7 +131,13 @@ type Animal @model @auth(rules: [
 }
 
 type ClinicOwnerRelation @model @auth(rules: [
-  { allow: owner },
+  # ownerField explicite : ces lignes sont toujours écrites côté Veterinarian
+  # (useMissionClosure.js), jamais par l'Owner lui-même. Sans ownerField, la règle
+  # `owner` se serait appuyée sur le champ caché auto-injecté (identité de qui écrit
+  # la ligne, donc toujours le Vet) au lieu du champ `ownerID` du schéma (identité
+  # réelle du pet Owner), et clinicOwnerRelationsByOwnerID serait resté vide en
+  # permanence côté Owner.
+  { allow: owner, ownerField: "ownerID" },
   { allow: groups, groups: ["Veterinarians"] }
 ]) {
   id: ID!
