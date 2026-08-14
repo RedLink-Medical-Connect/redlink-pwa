@@ -435,6 +435,43 @@ describe('useMatchingRequests', () => {
       )
     })
 
+    // Relevé en Lead Dev review : Clinic Priority est un critère explicitement
+    // non-exclusif ("favorise, sans exclure", CONTEXT.md). Un échec transitoire de CET
+    // appel précis (throttling, hoquet @auth...) ne doit dégrader QUE le tri (repli sur
+    // "aucune priorité connue"), jamais vider matches.value en entier — sinon un critère
+    // purement consultatif finirait par exclure accidentellement TOUTES les Requests.
+    it("un échec de MyClinicRelationsByOwnerID ne vide pas matches.value — dégrade juste Clinic Priority à false pour tout le monde", async () => {
+      const requestNear = buildRequest({ id: 'request-near', clinic: { latitude: 48.8567, longitude: 2.3522 } })
+
+      graphqlMock.mockImplementation(async ({ query }) => {
+        if (query.includes('GetOwner')) {
+          return { data: { getOwner: buildOwnerProfile() } }
+        }
+        if (query.includes('ListMyAnimalsByOwnerId')) {
+          return { data: { listAnimals: { items: [buildAnimal()] } } }
+        }
+        if (query.includes('MyClinicRelationsByOwnerID')) {
+          throw new Error('réseau : timeout')
+        }
+        if (query.includes('ListOpenRequestsWithClinic')) {
+          return { data: { listRequests: { items: [requestNear] } } }
+        }
+        throw new Error(`Unexpected graphql call in test: ${query.slice(0, 60)}`)
+      })
+
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+      const { searchMatches, matches } = useMatchingRequests()
+      await searchMatches()
+
+      expect(matches.value).toHaveLength(1)
+      expect(matches.value[0].id).toBe('request-near')
+      expect(matches.value[0].hasClinicPriority).toBe(false)
+      expect(consoleErrorSpy).toHaveBeenCalled()
+
+      consoleErrorSpy.mockRestore()
+    })
+
     // La preuve du GROUPEMENT (lecture (1) retenue, voir le commentaire dans
     // useMatchingRequests.searchMatches) : une Request plus ÉLOIGNÉE mais liée à une
     // Clinic déjà connue de l'Owner doit malgré tout sortir AVANT une Request plus proche

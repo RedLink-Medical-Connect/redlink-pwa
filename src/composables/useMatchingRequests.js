@@ -45,15 +45,28 @@ export function useMatchingRequests() {
       // de searchMatches() plutôt que mémoïsé comme fetchClinicId() ailleurs dans ce repo :
       // une recherche est déjà une action de rafraîchissement complet, donc le coût d'un
       // aller-retour GraphQL de plus ici est négligeable face à la complexité d'un cache.
-      const { userId } = await getCurrentUser()
-      const { data: relationsData } = await client.graphql({
-        query: myClinicRelationsByOwnerID,
-        variables: { ownerID: userId },
-        authMode: 'userPool',
-      })
-      const ownerClinicIds = (relationsData.clinicOwnerRelationsByOwnerID?.items || []).map(
-        (item) => item.clinicID,
-      )
+      //
+      // Try/catch dédié (relevé en Lead Dev review) : Clinic Priority est un critère
+      // explicitement non-exclusif ("favorise, sans exclure", CONTEXT.md/eligibility-service.js).
+      // Sans ce bloc séparé, un échec transitoire de CET appel précis (throttling, hoquet
+      // @auth...) faisait avorter tout `searchMatches()` et vidait `matches.value` en entier —
+      // un critère purement consultatif aurait alors accidentellement exclu TOUTES les
+      // Requests, pas seulement désactivé son propre tri. Repli sur [] : dégrade la sous-tâche
+      // en "aucune priorité connue", jamais en "aucun résultat".
+      let ownerClinicIds = []
+      try {
+        const { userId } = await getCurrentUser()
+        const { data: relationsData } = await client.graphql({
+          query: myClinicRelationsByOwnerID,
+          variables: { ownerID: userId },
+          authMode: 'userPool',
+        })
+        ownerClinicIds = (relationsData.clinicOwnerRelationsByOwnerID?.items || []).map(
+          (item) => item.clinicID,
+        )
+      } catch (e) {
+        console.error('Erreur chargement des cliniques déjà liées (Clinic Priority) :', e)
+      }
 
       // 3. Récupérer TOUTES les demandes ouvertes
       // Note : Pour un MVP, filtrer côté client est acceptable et plus simple
