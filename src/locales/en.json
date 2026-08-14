@@ -287,6 +287,7 @@
       "history": "History",
       "settings": "Settings",
       "donors": "Donors",
+      "validations": "Validations",
       "logout": "Log out"
     },
     "header": {
@@ -555,6 +556,24 @@
         "action": "ACTION"
       },
       "contact": "Contact"
+    },
+    "validations": {
+      "title": "Donor Validations",
+      "columns": {
+        "animal": "ANIMAL",
+        "species": "SPECIES",
+        "breed": "BREED",
+        "blood_group": "GROUP",
+        "owner": "OWNER",
+        "action": "ACTION"
+      },
+      "validate_btn": "Validate",
+      "empty": "No animal is pending validation.",
+      "toasts": {
+        "success": "{name} is now a validated donor.",
+        "blood_group_unknown": "Unknown blood group — cannot be validated.",
+        "generic_error": "Unable to validate this animal."
+      }
     },
     "history": {
       "title": "Activity History",

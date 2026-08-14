@@ -288,6 +288,7 @@
       "history": "Historique",
       "settings": "Paramètres",
       "donors": "Donneurs",
+      "validations": "Validations",
       "logout": "Se déconnecter"
     },
     "header": {
@@ -549,6 +550,24 @@
         "action": "ACTION"
       },
       "contact": "Contacter"
+    },
+    "validations": {
+      "title": "Validations donneurs",
+      "columns": {
+        "animal": "ANIMAL",
+        "species": "ESPÈCE",
+        "breed": "RACE",
+        "blood_group": "GROUPE",
+        "owner": "PROPRIÉTAIRE",
+        "action": "ACTION"
+      },
+      "validate_btn": "Valider",
+      "empty": "Aucun animal en attente de validation.",
+      "toasts": {
+        "success": "{name} est maintenant un donneur validé.",
+        "blood_group_unknown": "Groupe sanguin inconnu — ne peut pas être validé.",
+        "generic_error": "Impossible de valider cet animal."
+      }
     },
     "history": {
       "title": "Historique d'activité",

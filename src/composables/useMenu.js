@@ -20,6 +20,12 @@ export function useMenu() {
       command: () => router.push('/dashboard/donors'),
     },
     {
+      label: 'dashboard.sidebar.validations',
+      icon: 'pi pi-verified',
+      to: '/dashboard/validations',
+      command: () => router.push('/dashboard/validations'),
+    },
+    {
       label: 'dashboard.sidebar.history',
       icon: 'pi pi-history',
       to: '/dashboard/history',
