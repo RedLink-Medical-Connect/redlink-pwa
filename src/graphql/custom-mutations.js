@@ -142,3 +142,34 @@ export const validateAnimalDonorSimple = /* GraphQL */ `
     }
   }
 `
+
+// Phase 2.1 : clôture d'une Mission côté Veterinarian (COMPLETED ou NO_SHOW). `Mission`
+// n'a pas de @auth au niveau champ (voir schema.graphql) — les Veterinarians ont un accès
+// en écriture illimité sur ce type au niveau du type lui-même, donc la mutation générée
+// `updateMission` aurait été correcte question @auth. On garde malgré tout une mutation
+// *Simple dédiée (convention de ce fichier, cf. createMissionSimple/deleteMissionSimple/
+// updateRequestStatusSimple) plutôt que la mutation `updateMission` générée : cette
+// dernière redemande tout le graphe de relations (request, animal, validatedBy imbriqués,
+// voir mutations.js) alors que useMissionClosure.js n'a besoin que de id + status en retour.
+export const closeMissionSimple = /* GraphQL */ `
+  mutation CloseMission($input: UpdateMissionInput!) {
+    updateMission(input: $input) {
+      id
+      status
+    }
+  }
+`
+
+// ADR-0003 : écriture Veterinarian sur Animal scopée par @auth au niveau champ à
+// EXACTEMENT lastDonationDate (même mécanisme qu'ADR-0002/validateAnimalDonorSimple
+// ci-dessus). L'input ne doit donc JAMAIS contenir d'autre champ sous peine de rejet par
+// @auth — cette mutation *Simple existe précisément pour empêcher qu'un appelant élargisse
+// l'input par erreur en réutilisant la mutation updateAnimal générique.
+export const updateAnimalLastDonationDateSimple = /* GraphQL */ `
+  mutation UpdateAnimalLastDonationDate($input: UpdateAnimalInput!) {
+    updateAnimal(input: $input) {
+      id
+      lastDonationDate
+    }
+  }
+`
