@@ -76,3 +76,15 @@ architecturales) et `.cursorrules` (conventions détaillées pour l'éditeur).
 - **Enums** : les valeurs de statut/type viennent de `src/constants/enums.js`,
   jamais de littéraux en dur — partiellement suivi seulement, dette existante
   par endroits (ex. `MissionStatus` n'a pas d'entrée `CANCELLED`).
+
+## Tenir ce fichier à jour
+
+Ce fichier vit avec le projet, il ne se fige pas au premier commit. Quand une
+sous-tâche introduit un nouveau composable/service/pattern GraphQL réellement
+suivi (pas une supposition — un usage observé dans le code), ou qu'une décision
+change quelque chose listé plus haut, la mettre à jour dans la même PR plutôt
+que de la laisser dériver — c'est exactement ce qui est arrivé une fois à la
+section "7 piliers" de `lead-dev-reviewer.md`, restaurée après coup. Un
+changement qui mérite plus de détail va dans `docs/adr/` ou `CONTEXT.md`
+(glossaire domaine), avec juste un pointeur ici — ce fichier reste sous 100
+lignes, une carte pas une documentation exhaustive.
