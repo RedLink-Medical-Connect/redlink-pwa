@@ -302,7 +302,8 @@
     },
     "owner": {
       "overview": {
-        "title": "Dashboard"
+        "title": "Dashboard",
+        "known_clinic_badge": "Known clinic"
       },
       "tabs": {
         "dashboard": "DASHBOARD",

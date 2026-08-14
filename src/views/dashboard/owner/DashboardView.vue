@@ -107,7 +107,7 @@ const handleAccept = async (request) => {
                     indicateur visuel, ne change rien à l'éligibilité elle-même — le tri
                     (useMatchingRequests.searchMatches) fait déjà remonter ces cartes en
                     premier. -->
-                    <Tag v-if="req.hasClinicPriority" severity="info" value="Clinique connue" rounded />
+                    <Tag v-if="req.hasClinicPriority" severity="info" :value="t('dashboard.owner.overview.known_clinic_badge')" rounded />
                     <span class="text-xs text-zinc-500 font-mono bg-zinc-100 px-2 py-1 rounded">
                       à {{ req.distanceKM }} km
                     </span>

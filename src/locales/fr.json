@@ -303,7 +303,8 @@
     },
     "owner": {
       "overview": {
-        "title": "Tableau de bord"
+        "title": "Tableau de bord",
+        "known_clinic_badge": "Clinique connue"
       },
       "tabs": {
         "dashboard": "TABLEAU DE BORD",

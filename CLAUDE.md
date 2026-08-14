@@ -96,6 +96,15 @@ architecturales) et `.cursorrules` (conventions détaillées pour l'éditeur).
   l'utilisateur verrait un échec trompeur alors que l'essentiel a réussi. Zéro
   outil de suivi d'erreurs ici : un échec répété reste invisible (trou
   d'observabilité connu, roadmap Phase 5, pas résolu).
+- **Lecture secondaire non-exclusive isolée** : un critère non-exclusif
+  ("favorise, sans exclure", ex. Clinic Priority dans `checkEligibility()`) dont
+  la lecture GraphQL est indépendante du reste d'un flux plus large a besoin de
+  son propre `try/catch` dédié, avec repli sur une valeur par défaut neutre (ex.
+  `ownerClinicIds = []` dans `useMatchingRequests.js`) — jamais le `try/catch`
+  englobant du composable. Sinon un échec transitoire de cette seule lecture
+  annule tout le flux (ex. vide `matches.value` en entier) alors que son propre
+  échec ne devrait dégrader que ce critère précis. Pendant de la "écriture
+  secondaire best-effort" ci-dessus, mais côté lecture.
 
 ## Tenir ce fichier à jour
 
