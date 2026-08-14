@@ -7,6 +7,19 @@ import { useAnimals } from '@/composables/useAnimals'
 import { useOwnerProfile } from '@/composables/useOwnerProfile'
 import { RequestStatus } from '@/constants/enums'
 
+// Rayon (en km) sous lequel Clinic Priority (critère 5 de l'Eligibility, CONTEXT.md)
+// peut faire passer une Request en tête de tri (voir le comparateur dans
+// searchMatches() ci-dessous). Un paramètre de TRI/UX, pas un critère d'Eligibility :
+// il n'a donc pas sa place dans eligibility-service.js, et checkEligibility()/
+// hasClinicPriority() (qui restent des indicateurs bruts "cette clinique est-elle déjà
+// connue de l'Owner ?") n'en ont pas connaissance.
+//
+// ⚠️ Interprétation d'ingénierie : ni le CdC ni CONTEXT.md ne chiffrent de rayon pour
+// "favorise, sans exclure". 15km est une estimation raisonnable (même statut que
+// MIN_DAYS_BETWEEN_DONATIONS dans eligibility-service.js) à valider avec l'école
+// vétérinaire partenaire avant un vrai déploiement.
+const CLINIC_PRIORITY_BOOST_RADIUS_KM = 15
+
 export function useMatchingRequests() {
   const client = generateClient()
   const matches = ref([])
@@ -106,24 +119,29 @@ export function useMatchingRequests() {
         return false
       })
 
-      // 5. Trier : Clinic Priority (critère 5, CONTEXT.md) d'abord en GROUPEMENT PRIMAIRE
-      // (les Requests d'une Clinic déjà connue de l'Owner remontent en bloc en tête de
-      // liste), puis par distance croissante au sein de chaque groupe.
+      // 5. Trier : Clinic Priority (critère 5, CONTEXT.md) ne fait passer une Request en
+      // tête de tri que si elle reste à une distance raisonnable (CLINIC_PRIORITY_BOOST_RADIUS_KM,
+      // voir la constante ci-dessus) ; au-delà, le tri redevient une pure distance croissante,
+      // sans notion de groupe.
       //
-      // Décision produit/UX à relire (voir rapport de sous-tâche) : le CdC/CONTEXT.md dit
-      // seulement "favorise, sans exclure" sans préciser l'ordre relatif à la distance
-      // (critère 4). Deux lectures existaient : (a) Clinic Priority comme groupement
-      // primaire (implémenté ici), ou (b) Clinic Priority comme simple départage à distance
-      // strictement égale. On retient (a) : deux distances GPS réelles sont quasiment
-      // jamais rigoureusement égales, donc (b) rendrait Clinic Priority inerte en pratique
-      // — un critère nommé dans le CdC qui ne changerait jamais rien à l'écran. (a) lui
-      // donne un effet réel et défendable (l'Owner voit d'abord les demandes d'une clinique
-      // qu'il connaît déjà) tout en respectant "sans exclure" : rien n'est jamais retiré de
-      // la liste, seulement réordonné. Changement d'un comparateur si cette lecture ne
-      // convient pas à l'usage.
+      // Décision produit actée avec le repo owner (remplace le groupement inconditionnel
+      // précédemment implémenté ici) : un groupement inconditionnel ferait remonter en tête
+      // une Request de Clinic Priority arbitrairement lointaine, y compris devant une Request
+      // toute proche d'une clinique inconnue de l'Owner — inacceptable pour une app d'urgence
+      // sanguine, où une urgence lointaine ne doit jamais masquer une urgence proche. Le
+      // plafond de distance garde un effet réel à Clinic Priority (départage utile entre
+      // Requests proches) tout en respectant "favorise, sans exclure" : rien n'est jamais
+      // retiré de la liste, seulement réordonné, et jamais au prix de faire disparaître de vue
+      // une Request très proche derrière une Request lointaine.
+      //
+      // `hasClinicPriority` sur chaque Request n'est pas modifié ici : il reste le booléen brut
+      // (clinique déjà connue ou non), utilisé tel quel par le badge "Clinique connue" de
+      // DashboardView.vue, indépendamment de la distance.
       matches.value = compatibleRequests.sort((a, b) => {
-        if (a.hasClinicPriority !== b.hasClinicPriority) {
-          return a.hasClinicPriority ? -1 : 1
+        const aBoosted = a.hasClinicPriority && a.distanceKM <= CLINIC_PRIORITY_BOOST_RADIUS_KM
+        const bBoosted = b.hasClinicPriority && b.distanceKM <= CLINIC_PRIORITY_BOOST_RADIUS_KM
+        if (aBoosted !== bBoosted) {
+          return aBoosted ? -1 : 1
         }
         return a.distanceKM - b.distanceKM
       })
