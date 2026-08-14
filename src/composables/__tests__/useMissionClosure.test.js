@@ -109,12 +109,12 @@ describe('useMissionClosure.closeMission', () => {
       await closeMission('mission-1', 'animal-1', MissionStatus.COMPLETED)
 
       const animalCall = calls.find((c) => c.query.includes('UpdateAnimalLastDonationDate'))
-      // BUG CONNU (signalé en QA, pas corrigé dans cette suite) : useMissionClosure.js calcule
-      // `today` via `new Date().toISOString().slice(0, 10)`, qui renvoie le jour UTC — ici
-      // '2026-08-14' — au lieu du jour civil local du vétérinaire ('2026-08-15'). Ce test échoue
-      // donc actuellement contre l'implémentation ; c'est intentionnel (voir rapport QA), pas un
-      // test à assouplir. Correctif attendu : dériver `today` via des accesseurs de date locaux
-      // (`getFullYear()`/`getMonth()`/`getDate()`, zero-paddés) plutôt que `toISOString()`.
+      // Test de non-régression pour le bug de fuseau trouvé en QA sur cette sous-tâche :
+      // useMissionClosure.js calculait `today` via `new Date().toISOString().slice(0, 10)`
+      // (jour UTC, '2026-08-14' ici) au lieu du jour civil local du vétérinaire ('2026-08-15').
+      // Corrigé par `todayAsAWSDate()` (accesseurs de date locaux, `getFullYear()`/
+      // `getMonth()`/`getDate()`, zero-paddés) — ce test verrouille le comportement local
+      // désormais correct, il ne documente plus un échec attendu.
       expect(animalCall.variables.input.lastDonationDate).toBe('2026-08-15')
     } finally {
       process.env.TZ = originalTZ
