@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { getCurrentUser } from 'aws-amplify/auth'
 import { listOpenRequestsWithClinic } from '@/graphql/custom-queries'
@@ -647,6 +647,146 @@ describe('useMatchingRequests', () => {
 
       expect(matches.value.map((m) => m.id)).toEqual(['request-near', 'request-far'])
       expect(matches.value.every((m) => m.hasClinicPriority === false)).toBe(true)
+    })
+  })
+
+  // Phase 4.1 (roadmap V1) : fallback dashboard au vrai push PWA (hors périmètre V1).
+  // Ces tests couvrent uniquement le mécanisme de déclenchement (polling + retour de
+  // focus + nettoyage), pas le contenu du matching déjà couvert ci-dessus -- les
+  // fixtures ici restent volontairement minimales (aucun animal) pour que
+  // searchMatches() s'arrête tôt (guard "pas d'animaux") tout en émettant quand même
+  // les 2 appels GraphQL (GetOwner, ListMyAnimalsByOwnerId) qui suffisent à prouver
+  // qu'un nouveau cycle de recherche a bien été déclenché.
+  //
+  // 60_000 ci-dessous doit rester synchronisé avec DASHBOARD_REFRESH_INTERVAL_MS
+  // (useMatchingRequests.js) -- ce n'est pas exporté (détail d'implémentation), donc
+  // ces tests le dupliquent en dur comme le reste de ce fichier pin déjà des
+  // constantes non exportées ailleurs (CLINIC_PRIORITY_BOOST_RADIUS_KM = 15 plus haut).
+  describe('startAutoRefresh / stopAutoRefresh (Phase 4.1, rafraîchissement dashboard)', () => {
+    const REFRESH_INTERVAL_MS = 60_000
+
+    const setVisibility = (state) => {
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        get: () => state,
+      })
+    }
+
+    // Chaque appel à useMatchingRequests() dans ce describe passe par ce wrapper plutôt
+    // que l'import direct, pour que l'afterEach ci-dessous puisse systématiquement
+    // appeler stopAutoRefresh() sur CHAQUE instance créée -- y compris celles des tests
+    // qui n'appellent pas eux-mêmes stopAutoRefresh() (ex. le test "retour de focus").
+    // Sans ça, un `document.addEventListener('visibilitychange', ...)` laissé actif par
+    // un test fuite silencieusement vers les tests suivants (même `document` jsdom
+    // partagé), qui verraient alors des appels GraphQL inattendus déclenchés par un
+    // listener d'un test précédent -- constaté en écrivant ces tests.
+    const instances = []
+    const createMatchingRequests = () => {
+      const instance = useMatchingRequests()
+      instances.push(instance)
+      return instance
+    }
+
+    beforeEach(() => {
+      mockGraphqlResponses({ profile: buildOwnerProfile(), animals: [], requests: [] })
+      setVisibility('visible')
+      instances.length = 0
+    })
+
+    afterEach(() => {
+      instances.forEach((instance) => instance.stopAutoRefresh())
+      vi.useRealTimers()
+      // `visibilityState` est un getter sur `Document.prototype` en jsdom, pas une
+      // propriété propre à l'instance `document` : `getOwnPropertyDescriptor(document,
+      // ...)` renvoie toujours `undefined`, donc un `if (original) { restore }` ne
+      // s'exécute jamais et la propriété propre posée par `setVisibility()` fuite
+      // silencieusement sur le `document` jsdom partagé vers les describe suivants de ce
+      // fichier (constaté en Lead Dev review). `delete` retire la propriété propre
+      // inconditionnellement et fait retomber l'accès sur le getter du prototype.
+      delete document.visibilityState
+    })
+
+    it("relance searchMatches() à chaque tick de l'interval tant que l'onglet est visible", async () => {
+      vi.useFakeTimers()
+
+      const { startAutoRefresh } = createMatchingRequests()
+      startAutoRefresh()
+
+      // Rien avant le premier tick.
+      expect(graphqlMock).not.toHaveBeenCalled()
+
+      await vi.advanceTimersByTimeAsync(REFRESH_INTERVAL_MS)
+      const callsAfterFirstTick = graphqlMock.mock.calls.length
+      expect(callsAfterFirstTick).toBeGreaterThan(0)
+
+      await vi.advanceTimersByTimeAsync(REFRESH_INTERVAL_MS)
+      expect(graphqlMock.mock.calls.length).toBeGreaterThan(callsAfterFirstTick)
+    })
+
+    it("ne relance PAS searchMatches() au tick de l'interval si l'onglet est en arrière-plan (visibilityState !== 'visible')", async () => {
+      vi.useFakeTimers()
+      setVisibility('hidden')
+
+      const { startAutoRefresh } = createMatchingRequests()
+      startAutoRefresh()
+
+      await vi.advanceTimersByTimeAsync(REFRESH_INTERVAL_MS)
+
+      expect(graphqlMock).not.toHaveBeenCalled()
+    })
+
+    it("déclenche un refresh immédiat sur un retour de focus (`visibilitychange`), sans attendre le prochain tick de l'interval", async () => {
+      const { startAutoRefresh } = createMatchingRequests()
+      startAutoRefresh()
+
+      expect(graphqlMock).not.toHaveBeenCalled()
+
+      document.dispatchEvent(new Event('visibilitychange'))
+      await Promise.resolve()
+      await Promise.resolve()
+
+      expect(graphqlMock).toHaveBeenCalled()
+    })
+
+    it("stopAutoRefresh() arrête le polling : plus aucun appel après le tick suivant", async () => {
+      vi.useFakeTimers()
+
+      const { startAutoRefresh, stopAutoRefresh } = createMatchingRequests()
+      startAutoRefresh()
+      stopAutoRefresh()
+
+      await vi.advanceTimersByTimeAsync(REFRESH_INTERVAL_MS * 2)
+
+      expect(graphqlMock).not.toHaveBeenCalled()
+    })
+
+    it("stopAutoRefresh() retire aussi le listener `visibilitychange` : un retour de focus après stop ne déclenche plus rien", async () => {
+      const { startAutoRefresh, stopAutoRefresh } = createMatchingRequests()
+      startAutoRefresh()
+      stopAutoRefresh()
+
+      document.dispatchEvent(new Event('visibilitychange'))
+      await Promise.resolve()
+      await Promise.resolve()
+
+      expect(graphqlMock).not.toHaveBeenCalled()
+    })
+
+    it('startAutoRefresh() est idempotent : un second appel remplace le premier interval au lieu de le doubler', async () => {
+      vi.useFakeTimers()
+
+      const { startAutoRefresh, stopAutoRefresh } = createMatchingRequests()
+      startAutoRefresh()
+      startAutoRefresh()
+      // Un seul stopAutoRefresh() doit suffire à tout arrêter. Si le 2e startAutoRefresh()
+      // avait laissé le 1er interval fuiter (pas d'appel à stopAutoRefresh() en tête de
+      // startAutoRefresh()), celui-ci continuerait de tourner après ce stop et le test
+      // échouerait sur l'assertion ci-dessous.
+      stopAutoRefresh()
+
+      await vi.advanceTimersByTimeAsync(REFRESH_INTERVAL_MS * 2)
+
+      expect(graphqlMock).not.toHaveBeenCalled()
     })
   })
 })
