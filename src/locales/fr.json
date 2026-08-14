@@ -504,6 +504,7 @@
         "id": "#",
         "date": "DATE",
         "patient": "PATIENT",
+        "type": "TYPE",
         "blood_group": "GROUPE",
         "status": "STATUT",
         "donors_found": "DONNEURS TROUVÉS",
