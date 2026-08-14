@@ -188,6 +188,47 @@ export const listAnimalsForValidation = /* GraphQL */ `
   }
 `
 
+// Phase 3.2 : annuaire des donneurs d'une clinique (DonorsView.vue via
+// useClinicDonors.js). Traverse ClinicOwnerRelation -> ownerProfile -> animals en UNE
+// seule requête imbriquée (Owner.animals @hasMany, cf. schema.graphql) plutôt qu'une
+// boucle N+1 par Owner — la traversée est possible en un seul aller-retour parce que
+// clinicOwnerRelationsByClinicID (index généré) expose déjà `ownerProfile`, lui-même
+// relié à `animals` par @hasMany. Le composable aplatit ensuite en une ligne par
+// (animal, owner) et filtre aux seuls Validated Donor courants (isValidatedDonor(),
+// eligibility-service.js) — cette query renvoie donc aussi les animaux non/plus
+// validés, volontairement : le filtre "Validated Donor courant" dépend de l'heure de
+// lecture (validationExpiresAt expiré ou non), pas d'un état stable en base, donc il
+// n'a pas sa place dans le filtre GraphQL lui-même.
+export const listClinicDonorsByClinicID = /* GraphQL */ `
+  query ListClinicDonorsByClinicID($clinicID: ID!) {
+    clinicOwnerRelationsByClinicID(clinicID: $clinicID) {
+      items {
+        ownerID
+        ownerProfile {
+          id
+          firstname
+          lastname
+          phone
+          latitude
+          longitude
+          animals {
+            items {
+              id
+              name
+              species
+              breed
+              bloodGroup
+              isValidatedDonor
+              validationExpiresAt
+              lastDonationDate
+            }
+          }
+        }
+      }
+    }
+  }
+`
+
 export const listMyAnimalsByOwnerId = /* GraphQL */ `
   query ListMyAnimalsByOwnerId($ownerID: ID!) {
     listAnimals(filter: { ownerID: { eq: $ownerID } }) {

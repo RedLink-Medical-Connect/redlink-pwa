@@ -551,12 +551,18 @@
       "search_placeholder": "Rechercher par nom, ville...",
       "columns": {
         "animal": "ANIMAL",
+        "owner": "PROPRIÉTAIRE",
         "blood": "SANG",
         "distance": "DISTANCE",
         "last_donation": "DERNIER DON",
         "action": "ACTION"
       },
-      "contact": "Contacter"
+      "contact": "Contacter",
+      "never_donated": "Jamais",
+      "distance_unknown": "—",
+      "empty": "Aucun donneur rattaché à votre clinique pour le moment.",
+      "load_error": "Impossible de charger l'annuaire des donneurs — réessayez.",
+      "retry": "Réessayer"
     },
     "validations": {
       "title": "Validations donneurs",
