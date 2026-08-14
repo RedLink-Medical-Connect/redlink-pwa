@@ -279,6 +279,11 @@
     "species": {
       "dog": "Dog",
       "cat": "Cat"
+    },
+    "toasts": {
+      "missing_required": "Please fill in all required fields.",
+      "create_success": "Request successfully created",
+      "create_failed": "Error while creating the request"
     }
   },
   "dashboard": {
@@ -296,6 +301,9 @@
       "my_account": "MY ACCOUNT"
     },
     "owner": {
+      "overview": {
+        "title": "Dashboard"
+      },
       "tabs": {
         "dashboard": "DASHBOARD",
         "general": "MY PROFILE",
@@ -426,9 +434,9 @@
         },
         "empty": {
           "active": "No active missions.",
-          "history": "No history yet."
+          "history": "No history yet.",
+          "go_to_board": "View available requests"
         },
-        "go_to_board": "View available requests",
         "status": {
           "pending_arrival": "Pending arrival",
           "accepted": "Accepted",

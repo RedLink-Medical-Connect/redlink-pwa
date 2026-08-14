@@ -280,6 +280,11 @@
     "species": {
       "dog": "Chien",
       "cat": "Chat"
+    },
+    "toasts": {
+      "missing_required": "Veuillez remplir tous les champs obligatoires.",
+      "create_success": "Demande créée avec succès",
+      "create_failed": "Erreur lors de la création de la demande"
     }
   },
   "dashboard": {
@@ -297,6 +302,9 @@
       "my_account": "MON COMPTE"
     },
     "owner": {
+      "overview": {
+        "title": "Tableau de bord"
+      },
       "tabs": {
         "dashboard": "TABLEAU DE BORD",
         "general": "MON PROFIL",
@@ -427,10 +435,9 @@
         },
         "empty": {
           "active": "Aucune mission en cours.",
-          "history": "Aucun historique."
+          "history": "Aucun historique.",
+          "go_to_board": "Voir les demandes disponibles"
         },
-        "empty_active_cta": "Voir les demandes disponibles",
-        "go_to_board": "Voir les demandes disponibles",
         "status": {
           "pending_arrival": "En attente d'arrivée",
           "accepted": "Acceptée",
