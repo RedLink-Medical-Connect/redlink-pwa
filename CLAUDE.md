@@ -26,8 +26,12 @@ architecturales) et `.cursorrules` (conventions détaillées pour l'éditeur).
 **Tests**
 - Vitest (unitaire — le seul réellement utilisé)
 - Playwright (e2e — un seul test existant, contre un vrai backend, **pas mocké**)
-- `@vue/test-utils` installé mais jamais utilisé (aucun test de composant `.vue`
-  dans ce repo à ce jour)
+- `@vue/test-utils` : un seul test de composant `.vue` à ce jour
+  (`AppMobileMenu.test.js`, Phase 6.3) — justifié par une logique de navigation
+  role-aware qui vit uniquement dans ce composant (`.cursorrules` interdit à un
+  composable de naviguer, donc pas de seam composable équivalent pour cette
+  régression précise). Rien d'automatique au-delà : cas par cas, voir R-24
+  (roadmap) pour le prochain candidat évalué.
 
 **Qualité**
 - ESLint (config plate, `eslint.config.js`) + `@intlify/eslint-plugin-vue-i18n`
@@ -109,12 +113,12 @@ touchés, en parallèle du reviewer principal).
   jamais de littéraux en dur — partiellement suivi seulement, dette existante
   par endroits (ex. `MissionStatus` n'a pas d'entrée `CANCELLED`).
 - **Écriture Veterinarian scopée sur `Animal`/`Request`/`Mission`** : pattern
-  utilisé quatre fois (ADR-0002, ADR-0003, ADR-0004) — `@auth` au niveau
+  utilisé cinq fois (ADR-0002, ADR-0003, ADR-0004, ADR-0005) — `@auth` au niveau
   champ (pas de mutation dédiée/Lambda) apparié à une mutation `*Simple`
   n'envoyant que les champs autorisés. Référence pour tout futur champ
   écrit par les Veterinarians seuls. Limite connue : le Transformer v1 ne
   restreint jamais une valeur (seulement un ensemble d'opérations) — voir
-  ADR-0004 pour les cas où ça laisse un résidu assumé.
+  ADR-0004/ADR-0005 pour les cas où ça laisse un résidu assumé.
 - **Écriture secondaire best-effort** : une écriture non critique qui suit une
   écriture critique déjà réussie (nettoyage de Mission orpheline dans
   `useOwnerMissions.js`, upsert `ClinicOwnerRelation` dans
@@ -131,6 +135,17 @@ touchés, en parallèle du reviewer principal).
   annule tout le flux (ex. vide `matches.value` en entier) alors que son propre
   échec ne devrait dégrader que ce critère précis. Pendant de la "écriture
   secondaire best-effort" ci-dessus, mais côté lecture.
+- **Lecture secondaire EXCLUSIVE isolée, fail-closed** : le pendant du point
+  précédent quand le critère lu n'est PAS "favorise sans exclure" mais
+  authentiquement exclusif (ex. `matchesAvailability()` dans
+  `useMatchingRequests.js`, ADR-0005 — un créneau de RDV que l'Owner ne peut
+  structurellement pas honorer n'est jamais un vrai match). Le repli neutre du
+  point précédent (`[]` → dégrade juste le tri) devient ici un faux positif à
+  éviter : pas de repli neutre, pas même de `try/catch` dédié si le composable
+  réutilisé (ex. `useOwnerAvailability.js`) avale déjà ses erreurs sans jamais
+  réassigner sa ref sur échec — un tableau vide en sortie du composable suffit à
+  produire `false` côté fonction pure, fail-closed par construction plutôt que
+  par code de repli dupliqué.
 
 ## Tenir ce fichier à jour
 

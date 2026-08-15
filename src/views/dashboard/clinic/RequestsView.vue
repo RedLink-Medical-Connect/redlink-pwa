@@ -17,7 +17,12 @@ const { closeMission } = useMissionClosure()
 // Phase 6.7 (CdC §2.4) : indicateurs tableau de bord vétérinaire, chargés indépendamment de
 // la liste des Requests (échec de l'un n'affecte pas l'autre — même esprit que les lectures
 // secondaires non-exclusives ailleurs dans ce repo, voir CLAUDE.md).
-const { transfusionsDone, donorOwnersCount, fetchStats: fetchClinicStats } = useClinicStats()
+const {
+  transfusionsDone,
+  donorOwnersCount,
+  loadError: statsLoadError,
+  fetchStats: fetchClinicStats,
+} = useClinicStats()
 
 const showDetails = ref(false)
 const selectedRequest = ref(null)
@@ -403,7 +408,18 @@ const handleCloseMission = async (outcome) => {
           <div
             class="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-4 flex flex-col gap-1"
           >
-            <span class="text-3xl font-bold text-zinc-900 dark:text-white">{{ transfusionsDone }}</span>
+            <!-- statsLoadError distingue "chargement en erreur" de "vraiment 0" (CLAUDE.md,
+                 convention loadError) -- sans ça, un échec réseau afficherait silencieusement
+                 le même 0 qu'une clinique sans activité (voir roadmap Phase 6.7). -->
+            <span
+              v-if="statsLoadError"
+              class="flex items-center gap-2 text-2xl font-bold text-amber-500"
+              :title="$t('dashboard.requests.stats.load_error')"
+            >
+              <i class="pi pi-exclamation-triangle text-xl"></i>
+              {{ $t('dashboard.requests.stats.unavailable') }}
+            </span>
+            <span v-else class="text-3xl font-bold text-zinc-900 dark:text-white">{{ transfusionsDone }}</span>
             <span class="text-xs text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">
               {{ $t('dashboard.requests.stats.transfusions_done') }}
             </span>
@@ -411,7 +427,15 @@ const handleCloseMission = async (outcome) => {
           <div
             class="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-4 flex flex-col gap-1"
           >
-            <span class="text-3xl font-bold text-zinc-900 dark:text-white">{{ donorOwnersCount }}</span>
+            <span
+              v-if="statsLoadError"
+              class="flex items-center gap-2 text-2xl font-bold text-amber-500"
+              :title="$t('dashboard.requests.stats.load_error')"
+            >
+              <i class="pi pi-exclamation-triangle text-xl"></i>
+              {{ $t('dashboard.requests.stats.unavailable') }}
+            </span>
+            <span v-else class="text-3xl font-bold text-zinc-900 dark:text-white">{{ donorOwnersCount }}</span>
             <span class="text-xs text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">
               {{ $t('dashboard.requests.stats.donor_owners_count') }}
             </span>

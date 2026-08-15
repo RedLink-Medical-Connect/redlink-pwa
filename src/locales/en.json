@@ -523,7 +523,9 @@
       "new_request": "New Request",
       "stats": {
         "transfusions_done": "Transfusions completed",
-        "donor_owners_count": "Donor owners"
+        "donor_owners_count": "Donor owners",
+        "load_error": "Failed to load indicators",
+        "unavailable": "—"
       },
       "columns": {
         "id": "#",

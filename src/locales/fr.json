@@ -522,7 +522,9 @@
       "new_request": "Nouvelle demande",
       "stats": {
         "transfusions_done": "Transfusions réalisées",
-        "donor_owners_count": "Propriétaires donneurs"
+        "donor_owners_count": "Propriétaires donneurs",
+        "load_error": "Erreur de chargement des indicateurs",
+        "unavailable": "—"
       },
       "columns": {
         "id": "#",
