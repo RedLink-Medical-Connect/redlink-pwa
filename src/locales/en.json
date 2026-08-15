@@ -432,7 +432,8 @@
           "error": "Error",
           "end_date_after_start_date": "End time must be after start time.",
           "slot_added": "Time slot added.",
-          "add_failed": "Unable to add the time slot."
+          "add_failed": "Unable to add the time slot.",
+          "remove_failed": "Unable to remove the time slot."
         },
         "empty": {
           "title": "Always available",

@@ -72,6 +72,7 @@ export function useOwnerAvailability() {
       availabilities.value = availabilities.value.filter((a) => a.id !== id)
     } catch (e) {
       console.error('Erreur suppression availability:', e)
+      throw e
     }
   }
 

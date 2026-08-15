@@ -415,7 +415,8 @@
           "error": "Erreur",
           "end_date_after_start_date": "L'heure de fin doit être après le début.",
           "slot_added": "Créneau ajouté.",
-          "add_failed": "Impossible d'ajouter le créneau."
+          "add_failed": "Impossible d'ajouter le créneau.",
+          "remove_failed": "Impossible de supprimer le créneau."
         },
         "title": "Zone d'intervention",
         "distance_label": "Je suis prêt à me déplacer jusqu'à :",
