@@ -7,7 +7,8 @@ import { useToast } from 'primevue/usetoast'
 import Dialog from 'primevue/dialog'
 
 import { useAnimals } from '@/composables/useAnimals'
-import { Species, DonationFrequency, BloodGroupsBySpecies } from '@/constants/enums.js'
+import { Species, DonationFrequency, BloodGroupsBySpecies, DonorStatus } from '@/constants/enums.js'
+import { getDonorStatus } from '@/services/eligibility-service.js'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -33,6 +34,15 @@ const frequencyOptions = computed(() => [
   { label: t('dashboard.owner.animals.frequency.twice_year'), value: DonationFrequency.TWICE_YEAR },
   { label: t('dashboard.owner.animals.frequency.once_year'), value: DonationFrequency.ONCE_YEAR },
 ])
+
+const formatDate = (dateString) => {
+  if (!dateString) return ''
+  return new Date(dateString).toLocaleDateString('fr-FR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  })
+}
 
 onMounted(() => {
   fetchAnimals().catch((err) => {
@@ -266,9 +276,38 @@ const onDelete = async () => {
               </div>
               <Tag
                 :value="animal.bloodGroup || '?'"
-                :severity="animal.bloodGroup ? 'danger' : 'warning'"
+                :severity="animal.bloodGroup && animal.bloodGroup !== 'UNKNOWN' ? 'danger' : 'warning'"
                 rounded
                 class="font-bold shadow-sm"
+              />
+            </div>
+
+            <div class="mb-4">
+              <Tag
+                v-if="getDonorStatus(animal) === DonorStatus.VALIDATED"
+                :value="
+                  $t('dashboard.owner.animals.donor_status.validated_until', {
+                    date: formatDate(animal.validationExpiresAt),
+                  })
+                "
+                severity="success"
+                class="text-xs"
+              />
+              <Tag
+                v-else-if="getDonorStatus(animal) === DonorStatus.EXPIRED"
+                :value="
+                  $t('dashboard.owner.animals.donor_status.expired', {
+                    date: formatDate(animal.validationExpiresAt),
+                  })
+                "
+                severity="warning"
+                class="text-xs"
+              />
+              <Tag
+                v-else
+                :value="$t('dashboard.owner.animals.donor_status.not_validated')"
+                severity="warning"
+                class="text-xs"
               />
             </div>
 

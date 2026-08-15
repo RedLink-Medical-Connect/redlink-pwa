@@ -1,12 +1,13 @@
 import { describe, it, expect } from 'vitest'
 import {
   isValidatedDonor,
+  getDonorStatus,
   satisfiesFrequencyRule,
   MIN_DAYS_BETWEEN_DONATIONS,
   hasClinicPriority,
   checkEligibility,
 } from '@/services/eligibility-service'
-import { DonationFrequency } from '@/constants/enums'
+import { DonationFrequency, DonorStatus } from '@/constants/enums'
 
 // Tests des 3 critères ajoutés au moteur d'Eligibility (CONTEXT.md) qui n'étaient pas
 // couverts par eligibility-service.test.js (celui-ci ne couvrait historiquement que
@@ -55,6 +56,41 @@ describe('eligibility-service — nouveaux critères', () => {
       expect(
         isValidatedDonor({ isValidatedDonor: true, validationExpiresAt: 'not-a-date' }, NOW),
       ).toBe(false)
+    })
+  })
+
+  describe('getDonorStatus', () => {
+    // Sous-tâche 6.1 (AnimalsView.vue) : classification pure dérivée d'isValidatedDonor,
+    // relocalisée depuis le composant vers le service pour rester testable sans monter
+    // de composant .vue (aucun test de ce type dans ce repo).
+    it('renvoie VALIDATED si isValidatedDonor et validationExpiresAt dans le futur', () => {
+      expect(
+        getDonorStatus({ isValidatedDonor: true, validationExpiresAt: '2027-01-01T00:00:00.000Z' }, NOW),
+      ).toBe(DonorStatus.VALIDATED)
+    })
+
+    it('renvoie EXPIRED si le flag brut isValidatedDonor est true mais validationExpiresAt est dépassée', () => {
+      expect(
+        getDonorStatus({ isValidatedDonor: true, validationExpiresAt: '2026-01-01T00:00:00.000Z' }, NOW),
+      ).toBe(DonorStatus.EXPIRED)
+    })
+
+    it('renvoie EXPIRED si le flag brut isValidatedDonor est true mais validationExpiresAt est absente', () => {
+      expect(getDonorStatus({ isValidatedDonor: true, validationExpiresAt: null }, NOW)).toBe(
+        DonorStatus.EXPIRED,
+      )
+    })
+
+    it("renvoie NEVER_VALIDATED si le flag brut isValidatedDonor n'a jamais été mis à true", () => {
+      expect(getDonorStatus({ isValidatedDonor: false, validationExpiresAt: null }, NOW)).toBe(
+        DonorStatus.NEVER_VALIDATED,
+      )
+      expect(getDonorStatus({}, NOW)).toBe(DonorStatus.NEVER_VALIDATED)
+    })
+
+    it('ne plante pas si animal est null/undefined', () => {
+      expect(getDonorStatus(null, NOW)).toBe(DonorStatus.NEVER_VALIDATED)
+      expect(getDonorStatus(undefined, NOW)).toBe(DonorStatus.NEVER_VALIDATED)
     })
   })
 

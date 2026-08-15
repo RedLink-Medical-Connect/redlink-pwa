@@ -332,6 +332,11 @@
         "unknown_breed": "Unknown breed",
         "weight_label": "Weight",
         "age_label": "Age",
+        "donor_status": {
+          "validated_until": "Validated donor until {date}",
+          "expired": "Validation expired on {date}",
+          "not_validated": "Not yet validated as a donor"
+        },
         "dialog": {
           "edit_title": "Edit record",
           "delete_title": "Confirmation",
