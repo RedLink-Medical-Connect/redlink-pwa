@@ -226,6 +226,7 @@
         "animal_name": "NAME",
         "animal_species": "SPECIES",
         "animal_breed": "BREED",
+        "animal_sex": "SEX",
         "animal_birth_date": "BIRTH DATE",
         "animal_age": "AGE",
         "animal_weight": "WEIGHT",
@@ -348,6 +349,10 @@
           "twice_year": "Twice a year",
           "once_year": "Once a year"
         },
+        "sex": {
+          "male": "Male",
+          "female": "Female"
+        },
         "form": {
           "name": "Name",
           "name_placeholder": "Rex",
@@ -355,6 +360,8 @@
           "breed": "Breed",
           "breed_optional": "Breed (optional)",
           "breed_placeholder": "Labrador",
+          "sex": "Sex",
+          "sex_placeholder": "Select",
           "birthdate": "Birth date",
           "weight": "Weight",
           "weight_label": "Weight (kg)",
@@ -514,6 +521,12 @@
     "requests": {
       "title": "My Active Requests",
       "new_request": "New Request",
+      "stats": {
+        "transfusions_done": "Transfusions completed",
+        "donor_owners_count": "Donor owners",
+        "load_error": "Failed to load indicators",
+        "unavailable": "—"
+      },
       "columns": {
         "id": "#",
         "date": "DATE",
@@ -526,7 +539,8 @@
         "on_the_way": "On the way",
         "waiting": "Waiting...",
         "donor": "Donor",
-        "close_tooltip": "Close"
+        "close_tooltip": "Close",
+        "cancel_tooltip": "Cancel"
       },
       "status": {
         "open": "OPEN",
@@ -546,7 +560,12 @@
         "owner_contact": "Owner contact",
         "waiting_donor": "Waiting for a donor...",
         "complete_btn": "Completed",
-        "no_show_btn": "No-show"
+        "no_show_btn": "No-show",
+        "close_confirm_title": "Close the request",
+        "close_confirm_message": "Confirm closing this request? This action is final: it means a donation took place or the need has been covered.",
+        "cancel_confirm_title": "Cancel the request",
+        "cancel_confirm_message": "Confirm cancelling this request? This action is final: it means a data-entry mistake or a blood need that no longer exists, with no donation having taken place.",
+        "confirm_action": "Confirm"
       },
       "empty": "No ongoing requests.",
       "type_emergency_short": "Emergency",
@@ -554,6 +573,8 @@
       "toasts": {
         "close_success": "Request successfully closed",
         "close_failed": "Error while closing the request",
+        "cancel_success": "Request successfully cancelled",
+        "cancel_failed": "Error while cancelling the request",
         "mission_completed_success": "Mission closed: donation recorded",
         "mission_no_show_success": "Mission closed: donor no-show",
         "mission_closure_failed": "Error while closing the mission",
@@ -562,7 +583,7 @@
     },
     "donors": {
       "title": "Donor Database",
-      "search_placeholder": "Search by name, city...",
+      "search_placeholder": "Search by animal, owner or blood group...",
       "columns": {
         "animal": "ANIMAL",
         "owner": "OWNER",
@@ -575,6 +596,7 @@
       "never_donated": "Never",
       "distance_unknown": "—",
       "empty": "No donor linked to your clinic yet.",
+      "no_search_results": "No donor matches your search.",
       "load_error": "Couldn't load the donor directory — try again.",
       "retry": "Retry"
     },
@@ -635,5 +657,10 @@
     "error": "Error: {message}",
     "unexpected_status": "Unexpected status: {status}",
     "technical_error": "Technical error: {message}"
+  },
+  "notFound": {
+    "title": "Page not found",
+    "description": "This page doesn't exist or has been moved. Check the address or go back home.",
+    "cta": "Back to home"
   }
 }

@@ -26,12 +26,19 @@ import { useMissionClosure, resolveClinicOwnerRelationUpsert } from '@/composabl
 import { MissionStatus } from '@/constants/enums'
 
 /**
- * Mock GraphQL réutilisé par les tests de cette sous-tâche : gère les 4 mutations/queries
+ * Mock GraphQL réutilisé par les tests de cette sous-tâche : gère les 6 mutations/queries
  * que closeMission() peut appeler sur COMPLETED (CloseMission, UpdateAnimalLastDonationDate,
- * ClinicOwnerRelationsByOwnerID, CreateClinicOwnerRelation). `existingRelations` simule la
- * réponse de clinicOwnerRelationsByOwnerID pour l'Owner ciblé.
+ * ClinicOwnerRelationsByOwnerID, CreateClinicOwnerRelation, GetClinic, UpdateClinicStats —
+ * ces deux derniers pour l'incrément des indicateurs, Phase 6.7). `existingRelations` simule
+ * la réponse de clinicOwnerRelationsByOwnerID pour l'Owner ciblé ; `clinicStats` simule l'état
+ * courant de Clinic.transfusionsDone/donorOwnersCount AVANT l'incrément (0/0 par défaut, comme
+ * une Clinic fraîchement créée — voir VerifyEmailView.vue).
  */
-function mockGraphqlForCompletedFlow(existingRelations, calls = []) {
+function mockGraphqlForCompletedFlow(
+  existingRelations,
+  calls = [],
+  clinicStats = { transfusionsDone: 0, donorOwnersCount: 0 },
+) {
   graphqlMock.mockImplementation(async ({ query, variables }) => {
     calls.push({ query, variables })
     if (query.includes('CloseMission')) {
@@ -49,6 +56,20 @@ function mockGraphqlForCompletedFlow(existingRelations, calls = []) {
     }
     if (query.includes('CreateClinicOwnerRelation')) {
       return { data: { createClinicOwnerRelation: { id: 'relation-new', ...variables.input } } }
+    }
+    if (query.includes('GetClinic')) {
+      return { data: { getClinic: { id: variables.id, ...clinicStats } } }
+    }
+    if (query.includes('UpdateClinicStats')) {
+      return {
+        data: {
+          updateClinic: {
+            id: variables.input.id,
+            transfusionsDone: variables.input.transfusionsDone,
+            donorOwnersCount: variables.input.donorOwnersCount,
+          },
+        },
+      }
     }
     throw new Error(`Unexpected graphql call in test: ${query.slice(0, 60)}`)
   })
@@ -77,7 +98,9 @@ describe('useMissionClosure.closeMission', () => {
 
     await closeMission('mission-1', 'animal-1', MissionStatus.COMPLETED, 'clinic-1', 'owner-1')
 
-    expect(graphqlMock).toHaveBeenCalledTimes(3)
+    // 5 = CloseMission, UpdateAnimalLastDonationDate, ClinicOwnerRelationsByOwnerID (no-op,
+    // Owner déjà lié à cette clinique), GetClinic, UpdateClinicStats (Phase 6.7).
+    expect(graphqlMock).toHaveBeenCalledTimes(5)
 
     expect(calls[0].query).toContain('CloseMission')
     expect(calls[0].variables).toEqual({
@@ -300,7 +323,10 @@ describe('useMissionClosure — upsert ClinicOwnerRelation (Phase 3.1, COMPLETED
     expect(createCall.variables).toEqual({
       input: { clinicID: 'clinic-1', ownerID: 'owner-1', isPrimaryClinic: true },
     })
-    expect(graphqlMock).toHaveBeenCalledTimes(4)
+    // 6 = les 4 précédentes (CloseMission, UpdateAnimalLastDonationDate,
+    // ClinicOwnerRelationsByOwnerID, CreateClinicOwnerRelation) + GetClinic +
+    // UpdateClinicStats (Phase 6.7).
+    expect(graphqlMock).toHaveBeenCalledTimes(6)
   })
 
   it('Owner déjà lié à une AUTRE clinique : crée une nouvelle ClinicOwnerRelation avec isPrimaryClinic: false', async () => {
@@ -314,7 +340,7 @@ describe('useMissionClosure — upsert ClinicOwnerRelation (Phase 3.1, COMPLETED
     expect(createCall.variables).toEqual({
       input: { clinicID: 'clinic-1', ownerID: 'owner-1', isPrimaryClinic: false },
     })
-    expect(graphqlMock).toHaveBeenCalledTimes(4)
+    expect(graphqlMock).toHaveBeenCalledTimes(6)
   })
 
   it("Owner déjà lié à CETTE clinique exacte : aucune nouvelle mutation ClinicOwnerRelation n'est appelée (no-op, pas juste \"ne plante pas\")", async () => {
@@ -325,10 +351,11 @@ describe('useMissionClosure — upsert ClinicOwnerRelation (Phase 3.1, COMPLETED
       closeMission('mission-1', 'animal-1', MissionStatus.COMPLETED, 'clinic-1', 'owner-1'),
     ).resolves.toBeUndefined()
 
-    // 3 appels seulement : CloseMission, UpdateAnimalLastDonationDate, et le check
-    // ClinicOwnerRelationsByOwnerID lui-même — jamais CreateClinicOwnerRelation. On vérifie le
-    // COMPTE exact d'appels, pas juste l'absence d'exception.
-    expect(graphqlMock).toHaveBeenCalledTimes(3)
+    // 5 appels : CloseMission, UpdateAnimalLastDonationDate, le check
+    // ClinicOwnerRelationsByOwnerID lui-même (jamais CreateClinicOwnerRelation), puis
+    // GetClinic + UpdateClinicStats (Phase 6.7, toujours appelés sur COMPLETED). On vérifie
+    // le COMPTE exact d'appels, pas juste l'absence d'exception.
+    expect(graphqlMock).toHaveBeenCalledTimes(5)
     expect(graphqlMock).not.toHaveBeenCalledWith(
       expect.objectContaining({ query: expect.stringContaining('CreateClinicOwnerRelation') }),
     )
@@ -431,6 +458,175 @@ describe('useMissionClosure — upsert ClinicOwnerRelation (Phase 3.1, COMPLETED
 
     expect(graphqlMock).toHaveBeenCalledTimes(2)
     expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('ClinicOwnerRelation'))
+
+    consoleErrorSpy.mockRestore()
+  })
+})
+
+describe('useMissionClosure — incrément des indicateurs Clinic (Phase 6.7, CdC §2.4, COMPLETED uniquement)', () => {
+  beforeEach(() => {
+    graphqlMock.mockReset()
+  })
+
+  it("nouveau propriétaire donneur (relation ClinicOwnerRelation créée) : transfusionsDone ET donorOwnersCount sont tous les deux incrémentés de 1", async () => {
+    const calls = mockGraphqlForCompletedFlow([], [], { transfusionsDone: 4, donorOwnersCount: 2 })
+    const { closeMission } = useMissionClosure()
+
+    await closeMission('mission-1', 'animal-1', MissionStatus.COMPLETED, 'clinic-1', 'owner-1')
+
+    const updateCall = calls.find((c) => c.query.includes('UpdateClinicStats'))
+    expect(updateCall).toBeDefined()
+    expect(updateCall.variables).toEqual({
+      input: { id: 'clinic-1', transfusionsDone: 5, donorOwnersCount: 3 },
+    })
+  })
+
+  it("propriétaire donneur déjà connu de cette clinique (pas de nouvelle relation) : transfusionsDone incrémenté, donorOwnersCount INCHANGÉ — ne compte pas deux fois le même propriétaire", async () => {
+    const calls = mockGraphqlForCompletedFlow(
+      [{ clinicID: 'clinic-1', isPrimaryClinic: true }],
+      [],
+      { transfusionsDone: 4, donorOwnersCount: 2 },
+    )
+    const { closeMission } = useMissionClosure()
+
+    await closeMission('mission-1', 'animal-1', MissionStatus.COMPLETED, 'clinic-1', 'owner-1')
+
+    const updateCall = calls.find((c) => c.query.includes('UpdateClinicStats'))
+    expect(updateCall).toBeDefined()
+    expect(updateCall.variables).toEqual({
+      input: { id: 'clinic-1', transfusionsDone: 5, donorOwnersCount: 2 },
+    })
+  })
+
+  it('Clinic fraîchement créée (compteurs à 0, comme fixé par VerifyEmailView.vue à l\'inscription) : part bien de 0, pas de NaN/undefined', async () => {
+    const calls = mockGraphqlForCompletedFlow([], [], { transfusionsDone: 0, donorOwnersCount: 0 })
+    const { closeMission } = useMissionClosure()
+
+    await closeMission('mission-1', 'animal-1', MissionStatus.COMPLETED, 'clinic-1', 'owner-1')
+
+    const updateCall = calls.find((c) => c.query.includes('UpdateClinicStats'))
+    expect(updateCall.variables).toEqual({
+      input: { id: 'clinic-1', transfusionsDone: 1, donorOwnersCount: 1 },
+    })
+  })
+
+  it('compteurs null/absents côté serveur (défensif, ne devrait pas arriver mais schema.graphql les déclare Int nullable) : traités comme 0, pas de NaN', async () => {
+    const calls = mockGraphqlForCompletedFlow(
+      [{ clinicID: 'clinic-1', isPrimaryClinic: true }],
+      [],
+      { transfusionsDone: null, donorOwnersCount: null },
+    )
+    const { closeMission } = useMissionClosure()
+
+    await closeMission('mission-1', 'animal-1', MissionStatus.COMPLETED, 'clinic-1', 'owner-1')
+
+    const updateCall = calls.find((c) => c.query.includes('UpdateClinicStats'))
+    expect(updateCall.variables).toEqual({
+      input: { id: 'clinic-1', transfusionsDone: 1, donorOwnersCount: 0 },
+    })
+  })
+
+  it("échec de GetClinic (lecture des compteurs) ne fait PAS échouer closeMission (best-effort) — Mission/Animal déjà écrits avec succès à ce stade", async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    graphqlMock.mockImplementation(async ({ query, variables }) => {
+      if (query.includes('CloseMission')) {
+        return { data: { updateMission: { id: variables.input.id, status: variables.input.status } } }
+      }
+      if (query.includes('UpdateAnimalLastDonationDate')) {
+        return {
+          data: {
+            updateAnimal: { id: variables.input.id, lastDonationDate: variables.input.lastDonationDate },
+          },
+        }
+      }
+      if (query.includes('ClinicOwnerRelationsByOwnerID')) {
+        return { data: { clinicOwnerRelationsByOwnerID: { items: [{ clinicID: 'clinic-1', isPrimaryClinic: true }] } } }
+      }
+      if (query.includes('GetClinic')) {
+        throw new Error('DynamoDB throttled')
+      }
+      throw new Error(`Unexpected graphql call in test: ${query.slice(0, 60)}`)
+    })
+
+    const { closeMission, isClosing } = useMissionClosure()
+
+    await expect(
+      closeMission('mission-1', 'animal-1', MissionStatus.COMPLETED, 'clinic-1', 'owner-1'),
+    ).resolves.toBeUndefined()
+
+    expect(isClosing.value).toBe(false)
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('indicateurs clinique'),
+      expect.any(Error),
+    )
+
+    consoleErrorSpy.mockRestore()
+  })
+
+  it("échec de UpdateClinicStats (écriture des compteurs) ne fait PAS échouer closeMission (best-effort)", async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    graphqlMock.mockImplementation(async ({ query, variables }) => {
+      if (query.includes('CloseMission')) {
+        return { data: { updateMission: { id: variables.input.id, status: variables.input.status } } }
+      }
+      if (query.includes('UpdateAnimalLastDonationDate')) {
+        return {
+          data: {
+            updateAnimal: { id: variables.input.id, lastDonationDate: variables.input.lastDonationDate },
+          },
+        }
+      }
+      if (query.includes('ClinicOwnerRelationsByOwnerID')) {
+        return { data: { clinicOwnerRelationsByOwnerID: { items: [{ clinicID: 'clinic-1', isPrimaryClinic: true }] } } }
+      }
+      if (query.includes('GetClinic')) {
+        return { data: { getClinic: { id: variables.id, transfusionsDone: 0, donorOwnersCount: 0 } } }
+      }
+      if (query.includes('UpdateClinicStats')) {
+        throw new Error('ConditionalCheckFailedException')
+      }
+      throw new Error(`Unexpected graphql call in test: ${query.slice(0, 60)}`)
+    })
+
+    const { closeMission, isClosing } = useMissionClosure()
+
+    await expect(
+      closeMission('mission-1', 'animal-1', MissionStatus.COMPLETED, 'clinic-1', 'owner-1'),
+    ).resolves.toBeUndefined()
+
+    expect(isClosing.value).toBe(false)
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('indicateurs clinique'),
+      expect.any(Error),
+    )
+
+    consoleErrorSpy.mockRestore()
+  })
+
+  it('clinicID manquant (appelant non migré) : aucun appel GetClinic/UpdateClinicStats, no-op silencieux + log, ne bloque pas closeMission', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    graphqlMock.mockImplementation(async ({ query, variables }) => {
+      if (query.includes('CloseMission')) {
+        return { data: { updateMission: { id: variables.input.id, status: variables.input.status } } }
+      }
+      if (query.includes('UpdateAnimalLastDonationDate')) {
+        return {
+          data: {
+            updateAnimal: { id: variables.input.id, lastDonationDate: variables.input.lastDonationDate },
+          },
+        }
+      }
+      throw new Error(`Unexpected graphql call in test: ${query.slice(0, 60)}`)
+    })
+
+    const { closeMission } = useMissionClosure()
+
+    // Pas de clinicID/ownerID : upsertClinicOwnerRelation ET incrementClinicStats no-opent
+    // tous les deux avant le moindre appel GraphQL les concernant.
+    await expect(closeMission('mission-1', 'animal-1', MissionStatus.COMPLETED)).resolves.toBeUndefined()
+
+    expect(graphqlMock).toHaveBeenCalledTimes(2)
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('indicateurs clinique'))
 
     consoleErrorSpy.mockRestore()
   })

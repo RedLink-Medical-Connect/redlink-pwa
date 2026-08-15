@@ -151,6 +151,73 @@ export const hasClinicPriority = (ownerClinicIds, requestClinicId) => {
 }
 
 /**
+ * Normalise un `AWSTime` (`OwnerAvailability.startTime`/`endTime`, ex. `"09:00"`,
+ * `"09:00:00"`, `"09:00:00.000"`) en `"HH:mm"` comparable lexicographiquement — même
+ * troncature que `AvailabilityView.vue` (`slot.startTime.substring(0, 5)`), pour rester
+ * cohérent avec ce que l'Owner voit déjà affiché.
+ *
+ * @param {string|null|undefined} awsTime
+ * @returns {string|null}
+ */
+const normalizeTimeOfDay = (awsTime) => {
+  if (typeof awsTime !== 'string' || awsTime.length < 5) return null
+  return awsTime.slice(0, 5)
+}
+
+/**
+ * Filtre EXCLUSIF supplémentaire pour les Requests de type APPOINTMENT (Phase 6.5, voir
+ * `docs/adr/0005-appointment-availability-matching.md`) — volontairement séparé des 5
+ * critères hiérarchisés de `checkEligibility()` (CONTEXT.md : "Frequency Rule" != "Disponibilité",
+ * un concept distinct réservé aux créneaux `OwnerAvailability`). Cette fonction n'est PAS
+ * appelée depuis `checkEligibility()` ; `useMatchingRequests.js` l'appelle séparément, en
+ * plus, uniquement quand `request.requestType === RequestType.APPOINTMENT`.
+ *
+ * Vérifie que `appointmentDatetime` (`Request.appointmentDatetime`, choisi par la clinique à
+ * la création) tombe dans au moins un créneau `OwnerAvailability` (`dayOfWeek` +
+ * `startTime`/`endTime`) de l'Owner. `dayOfWeek` suit la même convention que
+ * `Date.prototype.getDay()` (0 = dimanche ... 6 = samedi), déjà utilisée telle quelle par
+ * `src/constants/date-constants.js`/`AvailabilityView.vue` — aucune conversion nécessaire ici.
+ *
+ * Fail-closed par construction : sans `appointmentDatetime` connue, sans disponibilité
+ * renseignée, ou sur une date invalide, renvoie `false` plutôt que `true`. Contrairement à
+ * Clinic Priority (critère non-exclusif, CLAUDE.md, replie sur `[]`/"aucune priorité connue"),
+ * une Request de RDV que l'Owner ne peut structurellement pas honorer ne doit jamais
+ * apparaître comme un match valide — le repli neutre serait ici un faux positif, pas une
+ * simple dégradation de tri.
+ *
+ * ⚠️ Limite assumée pour ce pilote (voir ADR-0005) : compare heure/minute en fuseau horaire
+ * LOCAL du navigateur des deux côtés (celui qui saisit ses disponibilités et celui qui fait
+ * matcher), sans stocker ni convertir de fuseau horaire explicite — cohérent avec le reste du
+ * repo (`AvailabilityView.vue` stocke déjà `startTime`/`endTime` en heure locale non
+ * qualifiée), mais suppose un seul fuseau horaire pour tous les utilisateurs (pilote école
+ * vétérinaire française, hypothèse raisonnable pour ce périmètre).
+ *
+ * @param {Array<{dayOfWeek: number, startTime: string, endTime: string}>} availabilities
+ * @param {string|null|undefined} appointmentDatetime - AWSDateTime (ISO 8601)
+ * @returns {boolean}
+ */
+export const matchesAvailability = (availabilities, appointmentDatetime) => {
+  if (!appointmentDatetime) return false
+  if (!Array.isArray(availabilities) || availabilities.length === 0) return false
+
+  const date = new Date(appointmentDatetime)
+  if (Number.isNaN(date.getTime())) return false
+
+  const dayOfWeek = date.getDay()
+  const timeOfDay = `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+
+  return availabilities.some((availability) => {
+    if (availability?.dayOfWeek !== dayOfWeek) return false
+
+    const start = normalizeTimeOfDay(availability?.startTime)
+    const end = normalizeTimeOfDay(availability?.endTime)
+    if (!start || !end) return false
+
+    return timeOfDay >= start && timeOfDay <= end
+  })
+}
+
+/**
  * Composite : évalue les 5 critères hiérarchisés de l'Eligibility (CONTEXT.md) pour un
  * couple (Animal, Request) donné, dans l'ordre imposé par le CdC :
  *   1. Validated Donor

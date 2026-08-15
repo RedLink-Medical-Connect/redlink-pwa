@@ -129,6 +129,9 @@ export function useAnimals() {
         name: form.name,
         species: form.species,
         breed: form.breed || null,
+        // Sous-tâche 6.8 : champ informatif uniquement (PAS un critère d'éligibilité,
+        // voir schema.graphql) — optionnel, pas de valeur par défaut imposée.
+        sex: form.sex || null,
         birthDate: form.birthDate ? form.birthDate : null,
         weight: parseFloat(form.weight),
         bloodGroup: form.bloodGroup || 'UNKNOWN',

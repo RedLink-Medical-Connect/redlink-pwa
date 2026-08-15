@@ -169,6 +169,7 @@ describe('schema.graphql — Request @auth au niveau champ (durcissement Phase 5
     'requiredSpecies',
     'requiredBloodGroup',
     'quantity',
+    'appointmentDatetime',
     'createdAt',
     'clinicID',
   ])(
@@ -187,6 +188,7 @@ describe('schema.graphql — Request @auth au niveau champ (durcissement Phase 5
     'requiredSpecies',
     'requiredBloodGroup',
     'quantity',
+    'appointmentDatetime',
     'createdAt',
     'clinicID',
   ])(
@@ -199,6 +201,20 @@ describe('schema.graphql — Request @auth au niveau champ (durcissement Phase 5
       )
     },
   )
+
+  // Phase 6.5 (ADR-0005) : appointmentDatetime doit vivre entre quantity et status dans le
+  // type Request -- position purement documentaire (regroupé avec les autres champs saisis
+  // à la création, avant le couple status/activeMissionID volontairement hors scoping champ),
+  // mais un futur ajout de champ mal placé entre appointmentDatetime et son bloc @auth
+  // casserait extractRequestFieldBlock() silencieusement pour d'autres tests -- ce test
+  // documente l'intention plutôt que de laisser un tel bug de position se glisser sans échec.
+  it('appointmentDatetime est bien positionné après quantity et avant status dans le type Request', () => {
+    const quantityIdx = requestType.indexOf('quantity: Int!')
+    const appointmentIdx = requestType.indexOf('appointmentDatetime: AWSDateTime')
+    const statusIdx = requestType.indexOf('status: RequestStatus!')
+    expect(quantityIdx).toBeLessThan(appointmentIdx)
+    expect(appointmentIdx).toBeLessThan(statusIdx)
+  })
 
   it("status/activeMissionID n'ont AUCUN @auth au niveau champ — ce sont les deux seuls champs que linkRequestToMission (Owner, à l'acceptation) doit pouvoir écrire via la règle de type 'private'", () => {
     const statusIdx = requestType.indexOf('status: RequestStatus!')

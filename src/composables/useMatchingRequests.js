@@ -2,10 +2,11 @@ import { ref } from 'vue'
 import { generateClient } from 'aws-amplify/api'
 import { getCurrentUser } from 'aws-amplify/auth'
 import { listOpenRequestsWithClinic, myClinicRelationsByOwnerID } from '@/graphql/custom-queries'
-import { checkEligibility } from '@/services/eligibility-service'
+import { checkEligibility, matchesAvailability } from '@/services/eligibility-service'
 import { useAnimals } from '@/composables/useAnimals'
 import { useOwnerProfile } from '@/composables/useOwnerProfile'
-import { RequestStatus } from '@/constants/enums'
+import { useOwnerAvailability } from '@/composables/useOwnerAvailability'
+import { RequestStatus, RequestType } from '@/constants/enums'
 
 // Rayon (en km) sous lequel Clinic Priority (critère 5 de l'Eligibility, CONTEXT.md)
 // peut faire passer une Request en tête de tri (voir le comparateur dans
@@ -46,6 +47,13 @@ export function useMatchingRequests() {
   // useOwnerProfile() expose `form` (et non `ownerProfile`) : on l'alias ici
   // pour ne pas toucher au reste de la logique de ce composable.
   const { form: ownerProfile, fetchProfile } = useOwnerProfile()
+  // Phase 6.5 (ADR-0005) : même pattern que useAnimals/useOwnerProfile ci-dessus -- instance
+  // propre à ce composable, réutilise le composable/la query existants
+  // (useOwnerAvailability.js / listMyAvailabilities, custom-queries.js) plutôt que d'écrire un
+  // nouvel aller-retour GraphQL dédié. Ne sert qu'au filtre EXCLUSIF supplémentaire des
+  // Requests APPOINTMENT (voir plus bas) -- jamais lu par checkEligibility() lui-même.
+  const { availabilities: ownerAvailabilities, fetchAvailabilities: fetchOwnerAvailabilities } =
+    useOwnerAvailability()
 
   // `searchMatches({ silent: true })` est utilisé par le polling/retour de focus
   // (voir `refreshIfVisibleAndIdle` ci-dessous) : contrairement à un chargement
@@ -120,6 +128,28 @@ export function useMatchingRequests() {
 
       const allRequests = data.listRequests.items
 
+      // 3.5. Phase 6.5 (ADR-0005) : les Requests APPOINTMENT ont besoin des
+      // OwnerAvailability de l'Owner pour un filtre EXCLUSIF supplémentaire
+      // (matchesAvailability(), eligibility-service.js), appliqué APRÈS checkEligibility()
+      // dans la boucle ci-dessous -- jamais à sa place, jamais pour EMERGENCY. On ne charge
+      // les disponibilités que si au moins une Request ouverte est de type APPOINTMENT, pour
+      // ne pas payer un aller-retour GraphQL inutile aux Owners qui ne voient que des
+      // urgences (cas le plus fréquent pour ce pilote).
+      //
+      // Pas de try/catch dédié ici (à la différence de Clinic Priority juste au-dessus) :
+      // fetchOwnerAvailabilities() (useOwnerAvailability.js) n'expose déjà aucune erreur --
+      // elle avale tout en interne dans un console.error et ne rethrow jamais. En cas
+      // d'échec réseau, `ownerAvailabilities.value` retombe donc simplement sur son état par
+      // défaut ([] au premier appel), jamais réassigné par le catch de ce composable-là.
+      // C'est le bon repli ici : matchesAvailability(..., []) renvoie toujours `false`, donc
+      // un échec de cette lecture exclut prudemment les Requests APPOINTMENT (fail-closed) au
+      // lieu de les inclure par défaut -- contrairement au repli neutre `[]` de Clinic
+      // Priority (critère non-exclusif, CLAUDE.md), où `[]` dégrade juste le tri sans jamais
+      // exclure de résultat.
+      if (allRequests.some((req) => req.requestType === RequestType.APPOINTMENT)) {
+        await fetchOwnerAvailabilities()
+      }
+
       // 4. Le Moteur de Matching : on passe par le composite checkEligibility()
       // (src/services/eligibility-service.js) pour que les 5 critères de
       // l'Eligibility (CONTEXT.md) soient réellement appliqués ici, et pas
@@ -135,14 +165,25 @@ export function useMatchingRequests() {
             ownerClinicIds,
           })
 
-          if (result.eligible) {
-            // On attache l'animal qui matche, la distance et le critère Clinic Priority
-            // pour l'affichage, même arrondi qu'avant ce fix.
-            req.matchingAnimal = animal
-            req.distanceKM = Math.round(result.distanceKM * 10) / 10
-            req.hasClinicPriority = result.hasClinicPriority
-            return true
+          if (!result.eligible) continue
+
+          // Phase 6.5 (ADR-0005) : filtre EXCLUSIF additionnel, uniquement pour APPOINTMENT
+          // -- appliqué une fois que checkEligibility() a déjà rendu son verdict, jamais
+          // inséré DANS checkEligibility() (les 5 critères de l'Eligibility, CONTEXT.md,
+          // restent une hiérarchie fixe et universelle, pas spécifique au type de Request).
+          if (
+            req.requestType === RequestType.APPOINTMENT &&
+            !matchesAvailability(ownerAvailabilities.value, req.appointmentDatetime)
+          ) {
+            continue
           }
+
+          // On attache l'animal qui matche, la distance et le critère Clinic Priority
+          // pour l'affichage, même arrondi qu'avant ce fix.
+          req.matchingAnimal = animal
+          req.distanceKM = Math.round(result.distanceKM * 10) / 10
+          req.hasClinicPriority = result.hasClinicPriority
+          return true
         }
 
         return false

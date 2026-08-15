@@ -4,8 +4,9 @@ import {
   closeMissionSimple,
   updateAnimalLastDonationDateSimple,
   createClinicOwnerRelationSimple,
+  updateClinicStatsSimple,
 } from '@/graphql/custom-mutations'
-import { clinicOwnerRelationsByOwnerID } from '@/graphql/queries'
+import { clinicOwnerRelationsByOwnerID, getClinic } from '@/graphql/queries'
 import { MissionStatus } from '@/constants/enums'
 
 // Les deux seules issues valides pour la clôture d'une Mission côté Veterinarian (roadmap
@@ -86,6 +87,8 @@ export function resolveClinicOwnerRelationUpsert(existingRelations, clinicID) {
  *   mutations CRUD soient générées depuis le début. Voir `resolveClinicOwnerRelationUpsert`
  *   ci-dessus pour la logique d'upsert, et `upsertClinicOwnerRelation` plus bas pour son
  *   traitement d'erreur délibérément best-effort (documenté sur cette fonction).
+ * - `Clinic.transfusionsDone`/`donorOwnersCount` sont incrémentés (Phase 6.7, CdC §2.4) —
+ *   voir `incrementClinicStats` plus bas, même traitement best-effort.
  *
  * Sur NO_SHOW, aucun don n'a eu lieu — ni `Animal` ni `ClinicOwnerRelation` ne sont jamais
  * touchés.
@@ -121,13 +124,20 @@ export function useMissionClosure() {
    *
    * Si `clinicID`/`ownerID` sont absents (ex. appelant qui n'a pas encore migré vers le
    * nouveau contrat de `closeMission`), no-op silencieux + log — mêmes raisons.
+   *
+   * @returns {Promise<boolean>} `true` si une NOUVELLE `ClinicOwnerRelation` a été créée
+   *   (donc un nouveau propriétaire donneur pour cette clinique — voir
+   *   `incrementClinicStats` ci-dessous, Phase 6.7), `false` sinon (relation déjà
+   *   existante, ids manquants, ou erreur — mêmes raisons best-effort que le reste de
+   *   cette fonction : une incertitude sur `donorOwnersCount` est préférable à faire
+   *   échouer la clôture).
    */
   const upsertClinicOwnerRelation = async (clinicID, ownerID) => {
     if (!clinicID || !ownerID) {
       console.error(
         'Liaison clinique/propriétaire (ClinicOwnerRelation) ignorée : clinicID ou ownerID manquant.',
       )
-      return
+      return false
     }
 
     try {
@@ -141,15 +151,68 @@ export function useMissionClosure() {
         data.clinicOwnerRelationsByOwnerID.items,
         clinicID,
       )
-      if (!toCreate) return
+      if (!toCreate) return false
 
       await client.graphql({
         query: createClinicOwnerRelationSimple,
         variables: { input: { clinicID: toCreate.clinicID, ownerID, isPrimaryClinic: toCreate.isPrimaryClinic } },
         authMode: 'userPool',
       })
+      return true
     } catch (e) {
       console.error('Erreur liaison clinique/propriétaire (ClinicOwnerRelation) :', e)
+      // Volontairement avalée, pas relancée — voir le commentaire de fonction ci-dessus.
+      return false
+    }
+  }
+
+  /**
+   * Incrément best-effort des indicateurs tableau de bord vétérinaire (CdC §2.4, Phase
+   * 6.7) : `Clinic.transfusionsDone` (toujours, une transfusion a réellement eu lieu) et
+   * `Clinic.donorOwnersCount` (seulement si `isNewDonorOwner` — sinon ce don compterait un
+   * propriétaire déjà connu de cette clinique une deuxième fois). Même traitement d'erreur
+   * best-effort que `upsertClinicOwnerRelation` ci-dessus et pour la même raison : au
+   * moment de l'appel, `Mission.status`/`Animal.lastDonationDate` ont déjà été écrits avec
+   * succès (le don a réellement eu lieu), donc un échec ici est une imprécision de
+   * tableau de bord, pas une perte de donnée médicale — ne doit jamais faire échouer
+   * `closeMission`.
+   *
+   * Lecture-puis-écriture, pas d'incrément atomique côté serveur (le Transformer v1 n'en
+   * expose pas nativement sur un scalaire `Int`) : même course acceptée, non résolue, que
+   * `resolveClinicOwnerRelationUpsert` documente plus haut — deux Missions de la même
+   * Clinic closes à quelques instants d'écart peuvent perdre un incrément. Accepté pour ce
+   * pilote (scénario mono-vétérinaire à faible fréquence) ; un vrai incrément atomique
+   * (ex. `ADD` DynamoDB) demanderait un resolver VTL dédié, hors périmètre de cette
+   * sous-tâche.
+   */
+  const incrementClinicStats = async (clinicID, isNewDonorOwner) => {
+    if (!clinicID) {
+      console.error('Incrément des indicateurs clinique ignoré : clinicID manquant.')
+      return
+    }
+
+    try {
+      const { data } = await client.graphql({
+        query: getClinic,
+        variables: { id: clinicID },
+        authMode: 'userPool',
+      })
+      const current = data.getClinic
+      if (!current) return
+
+      await client.graphql({
+        query: updateClinicStatsSimple,
+        variables: {
+          input: {
+            id: clinicID,
+            transfusionsDone: (current.transfusionsDone ?? 0) + 1,
+            donorOwnersCount: (current.donorOwnersCount ?? 0) + (isNewDonorOwner ? 1 : 0),
+          },
+        },
+        authMode: 'userPool',
+      })
+    } catch (e) {
+      console.error('Erreur incrément des indicateurs clinique (transfusionsDone/donorOwnersCount) :', e)
       // Volontairement avalée, pas relancée — voir le commentaire de fonction ci-dessus.
     }
   }
@@ -198,7 +261,8 @@ export function useMissionClosure() {
           authMode: 'userPool',
         })
 
-        await upsertClinicOwnerRelation(clinicID, ownerID)
+        const isNewDonorOwner = await upsertClinicOwnerRelation(clinicID, ownerID)
+        await incrementClinicStats(clinicID, isNewDonorOwner)
       }
     } catch (e) {
       console.error('Erreur clôture de la mission:', e)

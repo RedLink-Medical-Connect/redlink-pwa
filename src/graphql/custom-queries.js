@@ -127,6 +127,10 @@ export const listMyAnimalsMissions = /* GraphQL */ `
   }
 `
 
+// Phase 6.5 (roadmap V1, ADR-0005) : `appointmentDatetime` sélectionné en plus depuis cette
+// sous-tâche -- useMatchingRequests.js en a besoin pour évaluer matchesAvailability()
+// (eligibility-service.js) sur les Requests de type APPOINTMENT (null/absent pour EMERGENCY,
+// ignoré par matchesAvailability() dans ce cas).
 export const listOpenRequestsWithClinic = /* GraphQL */ `
   query ListOpenRequestsWithClinic($filter: ModelRequestFilterInput) {
     listRequests(filter: $filter) {
@@ -136,6 +140,7 @@ export const listOpenRequestsWithClinic = /* GraphQL */ `
         requiredSpecies
         requiredBloodGroup
         quantity
+        appointmentDatetime
         status
         createdAt
         clinicID
@@ -263,6 +268,7 @@ export const listMyAnimalsByOwnerId = /* GraphQL */ `
         name
         species
         breed
+        sex
         birthDate
         weight
         bloodGroup

@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { generateClient } from 'aws-amplify/api'
 import { getCurrentUser } from 'aws-amplify/auth'
 import { getVetWithClinic, listClinicDonorsByClinicID } from '@/graphql/custom-queries'
@@ -30,6 +30,34 @@ export function useClinicDonors() {
   const clinicId = ref(null)
   const clinicLatitude = ref(null)
   const clinicLongitude = ref(null)
+
+  // Phase 6.6 : recherche client-side sur l'annuaire déjà chargé (`donors`) — pas
+  // d'aller-retour GraphQL supplémentaire (voir docstring de `fetchDonors()` : tout est
+  // déjà en mémoire après le premier chargement).
+  const searchQuery = ref('')
+
+  /**
+   * Critères de recherche choisis (Phase 6.6) : nom d'animal, nom/prénom du propriétaire,
+   * groupe sanguin — les trois colonnes textuelles réellement affichées dans
+   * DonorsView.vue (`columns.animal`/`columns.owner`/`columns.blood`). Volontairement PAS
+   * la race (`breed`) : présente dans les données mais pas affichée comme colonne dans
+   * cette vue, donc un match dessus surprendrait l'utilisateur sans qu'il puisse voir sur
+   * quoi il a matché. Comparaison insensible à la casse, sous-chaîne (`includes`), sans
+   * normalisation des accents (aucun utilitaire de ce type ailleurs dans le repo à ce
+   * jour — pas introduit ici pour une seule vue).
+   */
+  const filteredDonors = computed(() => {
+    const query = searchQuery.value.trim().toLowerCase()
+    if (!query) return donors.value
+
+    return donors.value.filter((donor) => {
+      const haystack = [donor.animalName, donor.ownerFirstname, donor.ownerLastname, donor.bloodGroup]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+      return haystack.includes(query)
+    })
+  })
 
   /**
    * Résout le `clinicID` du Veterinarian courant ET les coordonnées GPS de sa clinique
@@ -154,6 +182,8 @@ export function useClinicDonors() {
 
   return {
     donors,
+    filteredDonors,
+    searchQuery,
     isLoading,
     loadError,
     fetchDonors,

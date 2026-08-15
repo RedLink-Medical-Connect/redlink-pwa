@@ -41,7 +41,9 @@ onMounted(() => {
       showPasswordInput.value = true
     } else {
       auth.setError(t('errors.session_expired'))
-      setTimeout(() => router.push('/register/selection'), 2000)
+      // La route s'appelle '/register' (nom 'register-selection') — '/register/selection'
+      // n'existe pas dans router/index.js et menait à un cul-de-sac (page 404). Phase 6.4.
+      setTimeout(() => router.push('/register'), 2000)
     }
   }
 })
@@ -103,6 +105,8 @@ const handleVerify = async () => {
               name: data.animal_name,
               species: (data.animal_species || 'DOG').toUpperCase(),
               breed: data.animal_breed || '',
+              // Sous-tâche 6.8 : champ informatif uniquement, optionnel (voir schema.graphql).
+              sex: data.animal_sex || null,
               weight: parseFloat(data.animal_weight || 0),
               bloodGroup: data.blood_group || 'UNKNOWN',
               isVaccinated: true,
