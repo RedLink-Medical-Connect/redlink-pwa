@@ -56,7 +56,11 @@ onMounted(async () => {
 })
 
 const handleSubmit = async () => {
-  if (!form.value.name || !form.value.weight || !currentOwnerId.value) {
+  // Sous-tâche 6.1 : bloodGroup ajouté aux champs obligatoires — sans lui,
+  // `useAnimals.js`/`createAnimalSimple` enverrait un `bloodGroup` vide (accepté par
+  // le schéma, `String!`) et l'Animal ne matcherait jamais aucune Request à groupe
+  // précis, sans le moindre avertissement (voir roadmap 6.1).
+  if (!form.value.name || !form.value.weight || !form.value.bloodGroup || !currentOwnerId.value) {
     error.value = t('errors.fill_required_fields')
     return
   }
@@ -180,6 +184,7 @@ const handleSubmit = async () => {
               :options="bloodOptions"
               :disabled="!form.species"
               :placeholder="$t('dashboard.owner.animals.form.blood_group_placeholder')"
+              required
               class="!bg-zinc-50 dark:!bg-zinc-950 !border-zinc-300 dark:!border-zinc-800 !p-3 focus:!border-[#ff3b4e]"
             />
           </div>

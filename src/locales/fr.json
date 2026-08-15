@@ -333,6 +333,11 @@
         "unknown_breed": "Race inconnue",
         "weight_label": "Poids",
         "age_label": "Âge",
+        "donor_status": {
+          "validated_until": "Donneur validé jusqu'au {date}",
+          "expired": "Validation expirée le {date}",
+          "not_validated": "Pas encore validé comme donneur"
+        },
         "dialog": {
           "edit_title": "Modifier la fiche",
           "delete_title": "Confirmation",

@@ -71,6 +71,15 @@ const onAddressSelect = (data) => {
 }
 
 const handleRegister = async () => {
+  // Sous-tâche 6.1 : bloodGroup est le seul champ obligatoire ajouté à ce step 2 —
+  // sans lui, `useAnimals.js`/`createAnimalSimple` enverrait un `bloodGroup` vide
+  // (accepté par le schéma, `String!`) et l'Animal ne matcherait jamais aucune Request
+  // à groupe précis, sans le moindre avertissement (voir roadmap 6.1).
+  if (!form.value.blood_group) {
+    auth.setError(t('errors.fill_required_fields'))
+    return
+  }
+
   isLoading.value = true
   auth.clearError()
 
@@ -259,6 +268,7 @@ const handleRegister = async () => {
             :options="bloodOptions"
             :disabled="!form.animal_species"
             :placeholder="$t('auth.register_owner.fields.blood_group')"
+            required
             class="!bg-zinc-200 dark:!bg-zinc-800 !border-none !text-zinc-900 dark:!text-white !p-3 !rounded-md"
           />
         </div>
