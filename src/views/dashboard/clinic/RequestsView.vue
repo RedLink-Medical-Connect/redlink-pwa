@@ -564,11 +564,8 @@ const handleCloseMission = async (outcome) => {
                     text
                     rounded
                     severity="success"
-                    :pt="{
-                      root: {
-                        'v-tooltip.top': $t('dashboard.requests.columns.close_tooltip'),
-                      },
-                    }"
+                    :aria-label="$t('dashboard.requests.columns.close_tooltip')"
+                    :title="$t('dashboard.requests.columns.close_tooltip')"
                     @click="askClose(slotProps.data.id)"
                   />
                   <Button
@@ -577,11 +574,8 @@ const handleCloseMission = async (outcome) => {
                     text
                     rounded
                     severity="danger"
-                    :pt="{
-                      root: {
-                        'v-tooltip.top': $t('dashboard.requests.columns.cancel_tooltip'),
-                      },
-                    }"
+                    :aria-label="$t('dashboard.requests.columns.cancel_tooltip')"
+                    :title="$t('dashboard.requests.columns.cancel_tooltip')"
                     @click="askCancel(slotProps.data.id)"
                   />
                   <Button
