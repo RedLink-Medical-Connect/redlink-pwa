@@ -40,7 +40,14 @@ const selectType = (type) => {
 }
 
 const handleSubmit = async () => {
-  if (!form.value.species || !form.value.bloodGroup || !form.value.quantity) {
+  // Phase 6.5 : pour un RDV, la date/heure souhaitée (form.date) est la seule donnée qui
+  // permet ensuite au moteur de matching de confronter cette Request aux OwnerAvailability
+  // d'un Owner (useMatchingRequests.js, matchesAvailability()) — sans elle, la Request
+  // APPOINTMENT créée ne matchera jamais aucun Owner. `breed`/`weight`/`patientName`
+  // restent volontairement collectés par ce formulaire mais jamais envoyés : ce sont des
+  // attributs de l'Animal matché, pas de la Request elle-même (voir docs/adr/0005).
+  const isAppointmentDateMissing = requestType.value === 'appointment' && !form.value.date
+  if (!form.value.species || !form.value.bloodGroup || !form.value.quantity || isAppointmentDateMissing) {
     toast.add({
       severity: 'warn',
       summary: t('common.error'),
@@ -56,7 +63,9 @@ const handleSubmit = async () => {
       species: form.value.species,
       bloodGroup: form.value.bloodGroup,
       quantity: form.value.quantity,
-      // Note: breed, weight, date, details peuvent être ajoutés si le backend les supporte plus tard
+      // Non pertinent pour 'emergency' (createNewRequest ne l'envoie que pour 'appointment').
+      appointmentDatetime: form.value.date,
+      // Note: breed, weight, details peuvent être ajoutés si le backend les supporte plus tard
     }
 
     await createNewRequest(payload)
@@ -283,6 +292,8 @@ const handleSubmit = async () => {
                 <DatePicker
                   v-model="form.date"
                   show-icon
+                  show-time
+                  hour-format="24"
                   class="w-full"
                   input-class="!bg-white dark:!bg-zinc-900 !border-blue-200 dark:!border-blue-800"
                 />

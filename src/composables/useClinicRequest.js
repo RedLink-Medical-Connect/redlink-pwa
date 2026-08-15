@@ -114,6 +114,16 @@ export function useClinicRequests() {
         status: 'OPEN',
       }
 
+      // Phase 6.5 (ADR-0005) : appointmentDatetime n'a de sens que pour un RDV planifié
+      // (non-pertinent pour 'emergency', laissé absent de l'input dans ce cas plutôt que
+      // d'envoyer explicitement `null`). NewRequestView.vue impose déjà ce champ avant
+      // d'appeler createNewRequest() pour un RDV (voir son handleSubmit) -- ce garde-fou
+      // supplémentaire évite malgré tout d'envoyer un appointmentDatetime vide/invalide si
+      // ce composable est un jour appelé par un autre appelant sans cette validation UI.
+      if (formData.type === 'appointment' && formData.appointmentDatetime) {
+        input.appointmentDatetime = new Date(formData.appointmentDatetime).toISOString()
+      }
+
       console.log("🚀 Envoi Mutation avec Input :", input)
 
       // 3. Appel de la mutation simple

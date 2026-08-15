@@ -135,8 +135,12 @@ const buildRequest = (overrides = {}) => ({
  * `clinicRelations` defaults to `[]` — most tests don't care about Clinic
  * Priority (critère 5) and must keep behaving exactly as before this was
  * wired in (regression coverage, see the dedicated `describe` block below).
+ *
+ * `availabilities` defaults to `[]` — Phase 6.5 (ADR-0005) : useMatchingRequests only
+ * queries ListMyAvailabilities when at least one open Request is APPOINTMENT (see the
+ * dedicated `describe` block below), so most tests here never trigger it at all.
  */
-function mockGraphqlResponses({ profile, animals, requests, clinicRelations = [] }) {
+function mockGraphqlResponses({ profile, animals, requests, clinicRelations = [], availabilities = [] }) {
   graphqlMock.mockImplementation(async ({ query }) => {
     if (query.includes('GetOwner')) {
       return { data: { getOwner: profile } }
@@ -149,6 +153,9 @@ function mockGraphqlResponses({ profile, animals, requests, clinicRelations = []
     }
     if (query.includes('ListOpenRequestsWithClinic')) {
       return { data: { listRequests: { items: requests } } }
+    }
+    if (query.includes('ListMyAvailabilities')) {
+      return { data: { listOwnerAvailabilities: { items: availabilities } } }
     }
     throw new Error(`Unexpected graphql call in test: ${query.slice(0, 60)}`)
   })
@@ -647,6 +654,153 @@ describe('useMatchingRequests', () => {
 
       expect(matches.value.map((m) => m.id)).toEqual(['request-near', 'request-far'])
       expect(matches.value.every((m) => m.hasClinicPriority === false)).toBe(true)
+    })
+  })
+
+  // Phase 6.5 (ADR-0005) : filtre EXCLUSIF supplémentaire pour les Requests APPOINTMENT,
+  // câblé dans useMatchingRequests.js en plus de checkEligibility() (jamais à sa place --
+  // matchesAvailability() elle-même est testée en isolation dans
+  // src/services/__tests__/eligibility-service.availability.test.js). Ces tests couvrent
+  // uniquement le CÂBLAGE : le déclenchement conditionnel de ListMyAvailabilities, et le
+  // fait qu'un résultat "non disponible" exclut bien la Request du match final.
+  describe('APPOINTMENT / OwnerAvailability (Phase 6.5, ADR-0005)', () => {
+    // Mercredi 12 août 2026, 10h30 (heure locale) -- Date.prototype.getDay() === 3, même
+    // fixture que eligibility-service.availability.test.js.
+    const WEDNESDAY_10_30 = new Date(2026, 7, 12, 10, 30, 0).toISOString()
+
+    const buildAppointmentRequest = (overrides = {}) =>
+      buildRequest({
+        id: 'request-appointment',
+        requestType: 'APPOINTMENT',
+        appointmentDatetime: WEDNESDAY_10_30,
+        ...overrides,
+      })
+
+    it("n'interroge PAS ListMyAvailabilities si aucune Request ouverte n'est APPOINTMENT (coût GraphQL évité pour le cas le plus fréquent)", async () => {
+      mockGraphqlResponses({
+        profile: buildOwnerProfile(),
+        animals: [buildAnimal()],
+        requests: [buildRequest()], // EMERGENCY par défaut
+      })
+
+      const { searchMatches } = useMatchingRequests()
+      await searchMatches()
+
+      expect(graphqlMock).not.toHaveBeenCalledWith(
+        expect.objectContaining({ query: expect.stringContaining('ListMyAvailabilities') }),
+      )
+    })
+
+    it('interroge ListMyAvailabilities dès qu\'au moins une Request ouverte est APPOINTMENT', async () => {
+      mockGraphqlResponses({
+        profile: buildOwnerProfile(),
+        animals: [buildAnimal()],
+        requests: [buildAppointmentRequest()],
+        availabilities: [{ dayOfWeek: 3, startTime: '09:00', endTime: '12:00' }],
+      })
+
+      const { searchMatches } = useMatchingRequests()
+      await searchMatches()
+
+      expect(graphqlMock).toHaveBeenCalledWith(
+        expect.objectContaining({ query: expect.stringContaining('ListMyAvailabilities') }),
+      )
+    })
+
+    it('inclut une Request APPOINTMENT dont appointmentDatetime tombe dans une OwnerAvailability', async () => {
+      mockGraphqlResponses({
+        profile: buildOwnerProfile(),
+        animals: [buildAnimal()],
+        requests: [buildAppointmentRequest()],
+        availabilities: [{ dayOfWeek: 3, startTime: '09:00', endTime: '12:00' }],
+      })
+
+      const { matches, searchMatches } = useMatchingRequests()
+      await searchMatches()
+
+      expect(matches.value).toHaveLength(1)
+      expect(matches.value[0].id).toBe('request-appointment')
+    })
+
+    it("exclut une Request APPOINTMENT par ailleurs éligible (checkEligibility OK) si aucune OwnerAvailability ne couvre le jour/l'heure demandés", async () => {
+      mockGraphqlResponses({
+        profile: buildOwnerProfile(),
+        animals: [buildAnimal()],
+        requests: [buildAppointmentRequest()],
+        // Créneau un jeudi -- ne couvre jamais un rendez-vous un mercredi.
+        availabilities: [{ dayOfWeek: 4, startTime: '09:00', endTime: '12:00' }],
+      })
+
+      const { matches, searchMatches } = useMatchingRequests()
+      await searchMatches()
+
+      expect(matches.value).toHaveLength(0)
+    })
+
+    it("exclut une Request APPOINTMENT si l'Owner n'a renseigné AUCUNE OwnerAvailability (fail-closed, pas de repli neutre)", async () => {
+      mockGraphqlResponses({
+        profile: buildOwnerProfile(),
+        animals: [buildAnimal()],
+        requests: [buildAppointmentRequest()],
+        availabilities: [],
+      })
+
+      const { matches, searchMatches } = useMatchingRequests()
+      await searchMatches()
+
+      expect(matches.value).toHaveLength(0)
+    })
+
+    it("exclut une Request APPOINTMENT (fail-closed) si ListMyAvailabilities échoue en réseau, sans faire planter searchMatches() ni vider le reste de matches.value", async () => {
+      const appointmentReq = buildAppointmentRequest()
+      const emergencyReq = buildRequest({ id: 'request-emergency' })
+
+      graphqlMock.mockImplementation(async ({ query }) => {
+        if (query.includes('GetOwner')) {
+          return { data: { getOwner: buildOwnerProfile() } }
+        }
+        if (query.includes('ListMyAnimalsByOwnerId')) {
+          return { data: { listAnimals: { items: [buildAnimal()] } } }
+        }
+        if (query.includes('MyClinicRelationsByOwnerID')) {
+          return { data: { clinicOwnerRelationsByOwnerID: { items: [] } } }
+        }
+        if (query.includes('ListOpenRequestsWithClinic')) {
+          return { data: { listRequests: { items: [appointmentReq, emergencyReq] } } }
+        }
+        if (query.includes('ListMyAvailabilities')) {
+          throw new Error('réseau : timeout')
+        }
+        throw new Error(`Unexpected graphql call in test: ${query.slice(0, 60)}`)
+      })
+
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+      const { matches, searchMatches } = useMatchingRequests()
+      await searchMatches()
+
+      // La Request EMERGENCY n'est jamais concernée par matchesAvailability() -- son match
+      // survit intact à l'échec de ListMyAvailabilities.
+      expect(matches.value.map((m) => m.id)).toEqual(['request-emergency'])
+      expect(consoleErrorSpy).toHaveBeenCalled()
+
+      consoleErrorSpy.mockRestore()
+    })
+
+    it('ignore matchesAvailability pour une Request EMERGENCY même sans aucune OwnerAvailability compatible', async () => {
+      mockGraphqlResponses({
+        profile: buildOwnerProfile(),
+        animals: [buildAnimal()],
+        // EMERGENCY par défaut + une APPOINTMENT non disponible, pour prouver que le filtre
+        // ne s'applique bien qu'à la seconde.
+        requests: [buildRequest({ id: 'request-emergency' }), buildAppointmentRequest()],
+        availabilities: [{ dayOfWeek: 4, startTime: '09:00', endTime: '12:00' }], // jeudi seulement
+      })
+
+      const { matches, searchMatches } = useMatchingRequests()
+      await searchMatches()
+
+      expect(matches.value.map((m) => m.id)).toEqual(['request-emergency'])
     })
   })
 

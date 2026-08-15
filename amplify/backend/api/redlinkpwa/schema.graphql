@@ -200,6 +200,25 @@ type Request @model @auth(rules: [
       { allow: private, operations: [read] },
       { allow: groups, groups: ["Veterinarians"], operations: [create, read] }
     ])
+  # Phase 6.5 (roadmap V1, ADR-0005) : date/heure de rendez-vous souhaitée par la clinique
+  # pour une Request de type APPOINTMENT (null/absent pour EMERGENCY, sans signification dans
+  # ce cas). Seule donnée strictement nécessaire pour confronter une Request APPOINTMENT aux
+  # créneaux OwnerAvailability d'un Owner (useMatchingRequests.js / matchesAvailability(),
+  # eligibility-service.js) — `notes`/`patientName`/`breed`/`weight`, collectés par le
+  # formulaire NewRequestView.vue mais jamais envoyés jusqu'ici, restent délibérément hors du
+  # schéma (voir ADR-0005 : `patientName`/`breed`/`weight` sont des attributs de l'Animal
+  # matché, pas de la Request elle-même — les y ajouter serait une erreur de modélisation, pas
+  # juste un oubli). Même @auth de champ que ses voisins ci-dessus : Owner lecture seule,
+  # Veterinarians create+read (jamais update, même raison que les champs voisins).
+  # ⚠️ Nommage identique à Mission.appointmentDatetime (existant, non lié) : ce dernier est
+  # horodaté à "maintenant" au moment où l'Owner accepte la Mission (useOwnerMissions.js), pas
+  # la date de RDV souhaitée par la clinique à la création de la Request — deux champs
+  # distincts, sur deux types distincts, avec des sémantiques différentes malgré le même nom.
+  appointmentDatetime: AWSDateTime
+    @auth(rules: [
+      { allow: private, operations: [read] },
+      { allow: groups, groups: ["Veterinarians"], operations: [create, read] }
+    ])
   status: RequestStatus!
   createdAt: AWSDateTime
     @auth(rules: [
