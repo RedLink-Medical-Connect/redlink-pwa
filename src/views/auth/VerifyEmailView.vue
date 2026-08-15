@@ -4,21 +4,13 @@ import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useI18n } from 'vue-i18n'
 import { resendSignUpCode, getCurrentUser } from 'aws-amplify/auth'
-import { generateClient } from 'aws-amplify/api'
-
-import {
-  createOwnerSimple,
-  createAnimalSimple,
-  createOwnerAvailabilitySimple,
-  createClinicSimple,
-  createVeterinarianSimple
-} from '@/graphql/custom-mutations'
+import { useRegistrationCompletion } from '@/composables/useRegistrationCompletion'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const { t } = useI18n()
-const client = generateClient()
+const { completeRegistration } = useRegistrationCompletion()
 
 const email = ref('')
 const code = ref('')
@@ -62,7 +54,7 @@ const handleVerify = async () => {
     try {
       await auth.confirmRegistration(email.value, code.value)
     } catch (e) {
-      if (!e.message.includes('Current status is CONFIRMED')) throw e
+      if (!e.message?.includes('Current status is CONFIRMED')) throw e
     }
 
     const pwd = showPasswordInput.value ? confirmPassword.value : registrationData.password
@@ -76,87 +68,7 @@ const handleVerify = async () => {
 
     const cognitoUserId = currentUser.userId
 
-    const data = registrationData
-
-    if (data.role === 'owner') {
-      const ownerRes = await client.graphql({
-        query: createOwnerSimple,
-        variables: { input: {
-            id: cognitoUserId,
-            firstname: data.firstname,
-            lastname: data.lastname,
-            email: data.email,
-            phone: data.phone || '',
-            address: data.address || '',
-            latitude: parseFloat(data.latitude || 0),
-            longitude: parseFloat(data.longitude || 0),
-            maxTravelDistance: 50,
-            totalDonations: 0
-          }}
-      })
-
-      const ownerID = ownerRes.data.createOwner.id
-
-      if (data.animal_name) {
-        await client.graphql({
-          query: createAnimalSimple,
-          variables: { input: {
-              ownerID: ownerID,
-              name: data.animal_name,
-              species: (data.animal_species || 'DOG').toUpperCase(),
-              breed: data.animal_breed || '',
-              // Sous-tâche 6.8 : champ informatif uniquement, optionnel (voir schema.graphql).
-              sex: data.animal_sex || null,
-              weight: parseFloat(data.animal_weight || 0),
-              bloodGroup: data.blood_group || 'UNKNOWN',
-              isVaccinated: true,
-              isSterilized: false,
-              donationFrequency: 'ASAP'
-            }}
-        })
-      }
-
-      await client.graphql({
-        query: createOwnerAvailabilitySimple,
-        variables: { input: {
-            ownerID: ownerID,
-            dayOfWeek: 6,
-            startTime: "09:00Z",
-            endTime: "12:00Z"
-          }}
-      })
-
-    } else if (data.role === 'vet') {
-      // Clinic.id est un identifiant propre généré côté backend (comme Animal/OwnerAvailability) :
-      // Clinic.veterinarians est une relation @hasMany, un Clinic peut donc avoir plusieurs
-      // Veterinarian, et Clinic.id ne doit jamais être aliasé sur le cognitoUserId d'un vétérinaire.
-      const clinicRes = await client.graphql({
-        query: createClinicSimple,
-        variables: { input: {
-            name: data.clinic_name,
-            rpps: data.rpps,
-            email: data.email,
-            phone: data.phone || '',
-            address: data.address,
-            latitude: parseFloat(data.latitude || 0),
-            longitude: parseFloat(data.longitude || 0),
-            hasEmergencyService: false,
-            transfusionsDone: 0,
-            donorOwnersCount: 0
-          }}
-      })
-
-      await client.graphql({
-        query: createVeterinarianSimple,
-        variables: { input: {
-            id: cognitoUserId,
-            clinicID: clinicRes.data.createClinic.id,
-            firstname: data.firstname,
-            lastname: data.lastname,
-            email: data.email
-          }}
-      })
-    }
+    await completeRegistration(registrationData, cognitoUserId)
 
     auth.clearTempRegistrationData()
     localStorage.removeItem('temp_register_safe_data')
