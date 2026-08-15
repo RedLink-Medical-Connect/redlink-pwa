@@ -10,6 +10,13 @@ export function useAnimals() {
   const isLoading = ref(false)
   const isSaving = ref(false)
   const animals = ref([])
+  // Distingue "chargement en erreur" d'une liste réellement vide (Owner sans animal) --
+  // même convention que `loadError` dans useClinicDonors.js/useAnimalValidation.js
+  // (CLAUDE.md). Avant ce champ, `fetchAnimals()` avalait son erreur en silence et
+  // AnimalsView.vue affichait le même état "grille vide" dans les deux cas -- le
+  // `.catch()` posé côté vue ne se déclenchait d'ailleurs jamais, `fetchAnimals()` ne
+  // rejetant jamais sa promesse.
+  const loadError = ref(false)
 
   const calculateAge = (d) => {
     if (!d) return '?'
@@ -18,8 +25,18 @@ export function useAnimals() {
     return Math.abs(ageDate.getUTCFullYear() - 1970)
   }
 
+  /**
+   * Charge les Animals de l'Owner courant (résolu via `getCurrentUser()`, pas passé en
+   * paramètre). Met à jour `animals` et bascule `loadError` à `true` en cas d'échec (réseau,
+   * @auth...) sans relancer l'erreur -- un appelant qui a besoin de réagir à l'échec (ex.
+   * redirection) doit lire `loadError` après l'`await`, pas s'appuyer sur un rejet de
+   * promesse.
+   *
+   * @returns {Promise<string|undefined>} l'`ownerID` courant en cas de succès, sinon `undefined`.
+   */
   const fetchAnimals = async () => {
     isLoading.value = true
+    loadError.value = false
     try {
       const { userId } = await getCurrentUser()
 
@@ -43,12 +60,27 @@ export function useAnimals() {
       return userId
     } catch (e) {
       console.error('Erreur fetch animals:', e)
+      loadError.value = true
       animals.value = []
     } finally {
       isLoading.value = false
     }
   }
 
+  /**
+   * Met à jour les champs éditables d'un Animal (via `updateAnimal`, mutation complète --
+   * pas de scoping `@auth` particulier ici, l'Owner est propriétaire de la fiche) et
+   * synchronise `animals` avec la réponse serveur. Gère le succès partiel GraphQL (réponse
+   * contenant à la fois `data` et `errors` sans lever d'exception JS classique -- Amplify la
+   * remonte comme une erreur porteuse d'un `.data`) : si `error.data.updateAnimal` est
+   * présent malgré l'erreur, on traite comme un succès (même pattern que `deleteAnimalById`
+   * ci-dessous) plutôt que de relancer une erreur trompeuse pour une écriture qui a en
+   * réalité abouti côté serveur.
+   *
+   * @param {object} form Formulaire d'édition (voir `editForm` dans AnimalsView.vue) --
+   *   doit au moins contenir `id`.
+   * @returns {Promise<void>}
+   */
   const updateAnimalDetails = async (form) => {
     isSaving.value = true
     let updatedItem = null
@@ -121,6 +153,18 @@ export function useAnimals() {
     }
   }
 
+  /**
+   * Crée un nouvel Animal pour `ownerID` via `createAnimalSimple` (custom-mutations.js) et
+   * l'ajoute localement à `animals` en cas de succès. `bloodGroup` retombe sur `'UNKNOWN'`
+   * quand non renseigné -- CONTEXT.md ("Validated Donor") interdit un groupe sanguin inconnu
+   * à la validation, mais pas à la création : un Owner peut déclarer un animal sans connaître
+   * son groupe, ce sera bloqué plus tard par `useAnimalValidation.js`.
+   *
+   * @param {object} form Formulaire de création (voir AddAnimalView.vue).
+   * @param {string} ownerID Owner propriétaire de l'Animal créé.
+   * @returns {Promise<object|undefined>} l'Animal créé (réponse serveur), ou `undefined` si
+   *   la mutation n'a renvoyé aucune donnée.
+   */
   const createNewAnimal = async (form, ownerID) => {
     isSaving.value = true
     try {
@@ -165,6 +209,7 @@ export function useAnimals() {
     animals,
     isLoading,
     isSaving,
+    loadError,
     fetchAnimals,
     updateAnimalDetails,
     deleteAnimalById,

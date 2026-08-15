@@ -329,6 +329,8 @@
         "age": "years",
         "title": "My Animals",
         "subtitle": "Manage your donor pets.",
+        "load_error": "Unable to load the animal list — try again.",
+        "retry": "Retry",
         "add_card": "Add an animal",
         "unknown_breed": "Unknown breed",
         "weight_label": "Weight",

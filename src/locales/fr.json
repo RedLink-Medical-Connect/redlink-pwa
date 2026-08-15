@@ -330,6 +330,8 @@
         "age": "ans",
         "title": "Mes Animaux",
         "subtitle": "Gérez les profils de vos compagnons donneurs.",
+        "load_error": "Impossible de charger la liste des animaux — réessayez.",
+        "retry": "Réessayer",
         "add_card": "Ajouter un animal",
         "unknown_breed": "Race inconnue",
         "weight_label": "Poids",

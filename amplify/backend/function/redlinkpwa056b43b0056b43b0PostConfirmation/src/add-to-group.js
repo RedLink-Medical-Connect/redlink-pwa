@@ -52,6 +52,24 @@ exports.handler = async (event) => {
     console.log(`✅ SUCCÈS : Utilisateur ajouté au groupe ${groupName}`);
 
   } catch (error) {
+    // Phase 7.3 (R-04) : `GroupExistsException` ferme une fenêtre de course sur la
+    // création du tout premier groupe ('Veterinarians'/'Owners') d'un environnement
+    // encore neuf -- deux signups quasi simultanés peuvent tous les deux échouer sur
+    // GetGroupCommand ("not found") puis tenter CreateGroupCommand juste au-dessus : un
+    // seul gagne, l'autre reçoit `GroupExistsException`. Ce n'est PAS un échec réel (le
+    // groupe existe bel et bien) : on ne le rethrow donc pas, et on retente l'ajout au
+    // groupe ici plutôt que de laisser cet utilisateur CONFIRMED mais sans groupe --
+    // exactement le bug que le `throw error` ci-dessous existe pour empêcher dans le cas
+    // général. On loggue quand même `error.name` (même sur ce chemin non fatal) pour que
+    // ce type d'erreur reste visible en CloudWatch, plutôt que de disparaître
+    // silencieusement du côté "bénin".
+    if (error.name === 'GroupExistsException') {
+      console.error(`⚠️ ${error.name} (bénin, course de création du groupe '${groupName}') :`, error);
+      await client.send(new AdminAddUserToGroupCommand(addUserParams));
+      console.log(`✅ SUCCÈS (après course de création de groupe) : Utilisateur ajouté au groupe ${groupName}`);
+      return event;
+    }
+
     console.error(`❌ ERREUR ajout groupe:`, error);
     // On re-throw volontairement plutôt que d'avaler l'erreur : un échec silencieux ici
     // laisserait l'utilisateur CONFIRMED côté Cognito mais sans groupe (Veterinarians/Owners),
