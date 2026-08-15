@@ -1,4 +1,4 @@
-import { DonationFrequency } from '@/constants/enums'
+import { DonationFrequency, DonorStatus } from '@/constants/enums'
 
 /**
  * Calcule la distance en km entre deux points GPS (Formule de Haversine)
@@ -65,6 +65,23 @@ export const isValidatedDonor = (animal, now = new Date()) => {
   if (Number.isNaN(expiresAt.getTime())) return false
 
   return expiresAt.getTime() > now.getTime()
+}
+
+/**
+ * Statut d'affichage "donneur validé" pour la fiche animal (AnimalsView.vue, sous-tâche
+ * 6.1) — classification pure dérivée d'`isValidatedDonor()`, distingue "jamais validé"
+ * (le flag brut `isValidatedDonor` n'a jamais été passé à `true`) de "validation
+ * expirée" (le flag brut est `true` en base mais `validationExpiresAt` est dépassée ou
+ * absente) plutôt que de retomber sur un état générique "non validé".
+ *
+ * @param {{ isValidatedDonor?: boolean, validationExpiresAt?: string|null }} animal
+ * @param {Date} now
+ * @returns {string} une valeur de `DonorStatus` (src/constants/enums.js)
+ */
+export const getDonorStatus = (animal, now = new Date()) => {
+  if (isValidatedDonor(animal, now)) return DonorStatus.VALIDATED
+  if (animal?.isValidatedDonor) return DonorStatus.EXPIRED
+  return DonorStatus.NEVER_VALIDATED
 }
 
 // Nombre minimum de jours devant séparer deux dons d'un même Animal, par

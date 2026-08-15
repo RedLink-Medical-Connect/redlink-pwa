@@ -31,6 +31,15 @@ export const RequestType = Object.freeze({
   APPOINTMENT: 'APPOINTMENT'
 })
 
+// Statut d'affichage "donneur validé" côté Owner (AnimalsView.vue) — dérivé de
+// `isValidatedDonor()`/`Animal.isValidatedDonor` (eligibility-service.js), jamais
+// persisté tel quel côté schéma.
+export const DonorStatus = Object.freeze({
+  VALIDATED: 'VALIDATED',
+  EXPIRED: 'EXPIRED',
+  NEVER_VALIDATED: 'NEVER_VALIDATED',
+})
+
 // Groupes sanguins par espèce (non typés côté schéma, mais centralisés ici)
 export const BloodGroupsBySpecies = Object.freeze({
   [Species.DOG]: ['DEA 1.1-', 'DEA 1.1+', 'Dal', 'Kai'],

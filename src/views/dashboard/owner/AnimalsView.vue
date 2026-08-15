@@ -7,8 +7,8 @@ import { useToast } from 'primevue/usetoast'
 import Dialog from 'primevue/dialog'
 
 import { useAnimals } from '@/composables/useAnimals'
-import { Species, DonationFrequency, BloodGroupsBySpecies } from '@/constants/enums.js'
-import { isValidatedDonor } from '@/services/eligibility-service.js'
+import { Species, DonationFrequency, BloodGroupsBySpecies, DonorStatus } from '@/constants/enums.js'
+import { getDonorStatus } from '@/services/eligibility-service.js'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -42,20 +42,6 @@ const formatDate = (dateString) => {
     month: '2-digit',
     year: 'numeric',
   })
-}
-
-// Sous-tâche 6.1 : statut "Validé comme donneur" affiché sur la fiche animal.
-// Recalculé à l'affichage via `isValidatedDonor()` (eligibility-service.js), pas de
-// job planifié — même logique que ValidationsView.vue/useAnimalValidation.js.
-// `listMyAnimalsByOwnerId` (useAnimals.js) sélectionne déjà `isValidatedDonor`/
-// `validationExpiresAt`, donc distingue ici "jamais validé" (le flag brut n'a jamais
-// été passé à `true`) de "validation expirée" (le flag brut est `true` en base mais
-// `validationExpiresAt` est dépassée ou absente) plutôt que de retomber sur un état
-// générique "non validé" — l'info est disponible sans appel réseau supplémentaire.
-const getDonorStatus = (animal) => {
-  if (isValidatedDonor(animal)) return 'VALIDATED'
-  if (animal.isValidatedDonor) return 'EXPIRED'
-  return 'NEVER_VALIDATED'
 }
 
 onMounted(() => {
@@ -298,7 +284,7 @@ const onDelete = async () => {
 
             <div class="mb-4">
               <Tag
-                v-if="getDonorStatus(animal) === 'VALIDATED'"
+                v-if="getDonorStatus(animal) === DonorStatus.VALIDATED"
                 :value="
                   $t('dashboard.owner.animals.donor_status.validated_until', {
                     date: formatDate(animal.validationExpiresAt),
@@ -308,7 +294,7 @@ const onDelete = async () => {
                 class="text-xs"
               />
               <Tag
-                v-else-if="getDonorStatus(animal) === 'EXPIRED'"
+                v-else-if="getDonorStatus(animal) === DonorStatus.EXPIRED"
                 :value="
                   $t('dashboard.owner.animals.donor_status.expired', {
                     date: formatDate(animal.validationExpiresAt),
