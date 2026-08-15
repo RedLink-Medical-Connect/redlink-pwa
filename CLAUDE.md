@@ -108,11 +108,13 @@ touchés, en parallèle du reviewer principal).
 - **Enums** : les valeurs de statut/type viennent de `src/constants/enums.js`,
   jamais de littéraux en dur — partiellement suivi seulement, dette existante
   par endroits (ex. `MissionStatus` n'a pas d'entrée `CANCELLED`).
-- **Écriture Veterinarian scopée sur `Animal`** : pattern utilisé deux fois
-  (ADR-0002, ADR-0003) — `@auth` au niveau champ (pas de mutation dédiée/
-  Lambda) apparié à une mutation `*Simple` n'envoyant que les champs
-  autorisés. Référence pour tout futur champ écrit par les Veterinarians
-  seuls.
+- **Écriture Veterinarian scopée sur `Animal`/`Request`/`Mission`** : pattern
+  utilisé quatre fois (ADR-0002, ADR-0003, ADR-0004) — `@auth` au niveau
+  champ (pas de mutation dédiée/Lambda) apparié à une mutation `*Simple`
+  n'envoyant que les champs autorisés. Référence pour tout futur champ
+  écrit par les Veterinarians seuls. Limite connue : le Transformer v1 ne
+  restreint jamais une valeur (seulement un ensemble d'opérations) — voir
+  ADR-0004 pour les cas où ça laisse un résidu assumé.
 - **Écriture secondaire best-effort** : une écriture non critique qui suit une
   écriture critique déjà réussie (nettoyage de Mission orpheline dans
   `useOwnerMissions.js`, upsert `ClinicOwnerRelation` dans
