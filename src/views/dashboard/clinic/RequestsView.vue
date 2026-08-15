@@ -5,6 +5,7 @@ import { useToast } from 'primevue/usetoast'
 import DashboardSidebar from '@/components/dashboard/DashboardSidebar.vue'
 import { useClinicRequests } from '@/composables/useClinicRequest.js'
 import { useMissionClosure } from '@/composables/useMissionClosure.js'
+import { useClinicStats } from '@/composables/useClinicStats.js'
 import { MissionStatus, RequestStatus } from '@/constants/enums'
 
 const { t } = useI18n()
@@ -13,6 +14,10 @@ const toast = useToast()
 const { requests, isLoading, isClosing, isCancelling, fetchRequests, closeRequest, cancelRequest } =
   useClinicRequests()
 const { closeMission } = useMissionClosure()
+// Phase 6.7 (CdC §2.4) : indicateurs tableau de bord vétérinaire, chargés indépendamment de
+// la liste des Requests (échec de l'un n'affecte pas l'autre — même esprit que les lectures
+// secondaires non-exclusives ailleurs dans ce repo, voir CLAUDE.md).
+const { transfusionsDone, donorOwnersCount, fetchStats: fetchClinicStats } = useClinicStats()
 
 const showDetails = ref(false)
 const selectedRequest = ref(null)
@@ -40,6 +45,7 @@ const closingOutcome = ref(null)
 
 onMounted(() => {
   fetchRequests()
+  fetchClinicStats()
 })
 
 const getSeverity = (status) => {
@@ -391,6 +397,25 @@ const handleCloseMission = async (outcome) => {
           >
             {{ $t('dashboard.requests.title') }}
           </h1>
+        </div>
+
+        <div class="grid grid-cols-2 gap-4 mb-6">
+          <div
+            class="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-4 flex flex-col gap-1"
+          >
+            <span class="text-3xl font-bold text-zinc-900 dark:text-white">{{ transfusionsDone }}</span>
+            <span class="text-xs text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">
+              {{ $t('dashboard.requests.stats.transfusions_done') }}
+            </span>
+          </div>
+          <div
+            class="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-4 flex flex-col gap-1"
+          >
+            <span class="text-3xl font-bold text-zinc-900 dark:text-white">{{ donorOwnersCount }}</span>
+            <span class="text-xs text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">
+              {{ $t('dashboard.requests.stats.donor_owners_count') }}
+            </span>
+          </div>
         </div>
 
         <div

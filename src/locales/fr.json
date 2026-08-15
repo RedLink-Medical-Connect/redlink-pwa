@@ -513,6 +513,10 @@
     "requests": {
       "title": "Mes demandes actives",
       "new_request": "Nouvelle demande",
+      "stats": {
+        "transfusions_done": "Transfusions réalisées",
+        "donor_owners_count": "Propriétaires donneurs"
+      },
       "columns": {
         "id": "#",
         "date": "DATE",

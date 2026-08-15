@@ -193,3 +193,19 @@ export const createClinicOwnerRelationSimple = /* GraphQL */ `
     }
   }
 `
+
+// Phase 6.7 : indicateurs tableau de bord vétérinaire (CdC §2.4). Pas de @auth au niveau
+// champ sur `transfusionsDone`/`donorOwnersCount` (voir schema.graphql) — le groupe
+// Veterinarians a déjà un accès update illimité sur Clinic. Mutation *Simple dédiée malgré
+// tout (même convention que ci-dessus) : la mutation générée `updateClinic` redemande tout
+// le graphe imbriqué (veterinarians/requests/clients) alors que useMissionClosure.js n'a
+// besoin que des deux compteurs en retour.
+export const updateClinicStatsSimple = /* GraphQL */ `
+  mutation UpdateClinicStats($input: UpdateClinicInput!) {
+    updateClinic(input: $input) {
+      id
+      transfusionsDone
+      donorOwnersCount
+    }
+  }
+`
