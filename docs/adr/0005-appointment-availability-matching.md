@@ -142,3 +142,16 @@ ne voient que des urgences (cas le plus fréquent pour ce pilote).
 4. **`notes` non modélisé** (voir section 1) : si un vrai besoin apparaît (ex. la
    clinique veut préciser un contexte au RDV, visible par l'Owner ou re-consulté côté
    clinique), l'ajout est purement additif au schéma, même `@auth` de champ.
+5. **Résidu Transformer v1 déjà connu (ADR-0004)** : comme documenté pour les autres
+   champs Veterinarian-writable de `Request`/`Mission`, le Transformer v1 ne restreint
+   jamais une VALEUR au niveau serveur, seulement un ensemble d'opérations —
+   `appointmentDatetime` n'échappe pas à cette limite. Un Veterinarian peut écrire
+   n'importe quelle valeur à la création (y compris une date passée, ou une valeur
+   renseignée sur une Request `EMERGENCY` où elle n'a pas de sens) sans contrainte
+   serveur, seule une garde côté client existe
+   (`useClinicRequest.js`, `formData.type === 'appointment'`). Impact limité : confirmé
+   à la revue schéma (2026-08-15) que `matchesAvailability()` n'exploite que
+   jour-de-semaine/heure, pas la date calendaire complète, donc une valeur fantaisiste
+   ne casse pas le matching ; `Request.appointmentDatetime` n'est jamais affiché brut à
+   l'Owner. Même modèle "pilote à utilisateurs de confiance" qu'ADR-0002/0003/0004,
+   pas une régression propre à ce lot.
