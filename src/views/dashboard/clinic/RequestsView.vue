@@ -5,17 +5,29 @@ import { useToast } from 'primevue/usetoast'
 import DashboardSidebar from '@/components/dashboard/DashboardSidebar.vue'
 import { useClinicRequests } from '@/composables/useClinicRequest.js'
 import { useMissionClosure } from '@/composables/useMissionClosure.js'
-import { MissionStatus } from '@/constants/enums'
+import { MissionStatus, RequestStatus } from '@/constants/enums'
 
 const { t } = useI18n()
 const toast = useToast()
 
-const { requests, isLoading, fetchRequests, closeRequest } = useClinicRequests()
+const { requests, isLoading, isClosing, isCancelling, fetchRequests, closeRequest, cancelRequest } =
+  useClinicRequests()
 const { closeMission } = useMissionClosure()
 
 const showDetails = ref(false)
 const selectedRequest = ref(null)
 const selectedMission = ref(null)
+
+// Confirmation avant fermeture/annulation d'une Request OPEN (Phase 6.6) — même pattern
+// de Dialog que la confirmation de suppression de compte (SettingsView.vue,
+// `showDeleteConfirm`) : un ref booléen de visibilité + une dialog PrimeVue dédiée, pas
+// de `useConfirm()`. Un seul état `pendingAction` (au lieu de deux dialogs quasi
+// identiques) porte à la fois le TYPE d'action ('close' | 'cancel') — pour afficher le
+// bon titre/texte/libellé — et la Request ciblée, afin de garder fermeture et annulation
+// clairement distinctes dans le code appelant (deux boutons, deux handlers) tout en
+// réutilisant une seule dialog de confirmation.
+const showActionConfirm = ref(false)
+const pendingAction = ref(null)
 
 // `closeMission()` expose un seul `isClosing` par instance de composable (voir
 // useMissionClosure.js) : ici, une seule instance sert les deux boutons "Terminé"/"Absent"
@@ -54,22 +66,59 @@ const formatDate = (dateString) => {
   })
 }
 
-const handleClose = async (id) => {
+const askClose = (id) => {
+  pendingAction.value = { type: 'close', id }
+  showActionConfirm.value = true
+}
+
+const askCancel = (id) => {
+  pendingAction.value = { type: 'cancel', id }
+  showActionConfirm.value = true
+}
+
+/**
+ * Exécute l'action confirmée dans la dialog (fermeture ou annulation, selon
+ * `pendingAction.type`) — Phase 6.6. `closeRequest`/`cancelRequest` (useClinicRequest.js)
+ * mettent déjà à jour `requests` localement en cas de succès, pas besoin de refetch ici.
+ */
+const confirmPendingAction = async () => {
+  if (!pendingAction.value) return
+  const { type, id } = pendingAction.value
   try {
-    await closeRequest(id)
-    toast.add({
-      severity: 'success',
-      summary: t('common.success'),
-      detail: t('dashboard.requests.toasts.close_success'),
-      life: 3000,
-    })
+    if (type === 'cancel') {
+      await cancelRequest(id)
+      toast.add({
+        severity: 'success',
+        summary: t('common.success'),
+        detail: t('dashboard.requests.toasts.cancel_success'),
+        life: 3000,
+      })
+    } else {
+      await closeRequest(id)
+      toast.add({
+        severity: 'success',
+        summary: t('common.success'),
+        detail: t('dashboard.requests.toasts.close_success'),
+        life: 3000,
+      })
+    }
+    showActionConfirm.value = false
   } catch {
     toast.add({
       severity: 'error',
       summary: t('common.error'),
-      detail: t('dashboard.requests.toasts.close_failed'),
+      detail: t(
+        type === 'cancel'
+          ? 'dashboard.requests.toasts.cancel_failed'
+          : 'dashboard.requests.toasts.close_failed',
+      ),
       life: 3000,
     })
+    // Dialog refermée même sur échec (même choix que SettingsView.vue/onDelete) : l'erreur
+    // reste visible via le toast, pas besoin de garder la dialog ouverte pour ça.
+    showActionConfirm.value = false
+  } finally {
+    pendingAction.value = null
   }
 }
 
@@ -177,6 +226,41 @@ const handleCloseMission = async (outcome) => {
 <template>
   <div class="container mx-auto px-4 py-8 md:py-12">
     <Toast />
+    <Dialog
+      v-model:visible="showActionConfirm"
+      modal
+      :header="
+        pendingAction?.type === 'cancel'
+          ? $t('dashboard.requests.dialog.cancel_confirm_title')
+          : $t('dashboard.requests.dialog.close_confirm_title')
+      "
+      :style="{ width: '350px' }"
+    >
+      <div class="flex items-center gap-3 mb-4">
+        <i class="pi pi-exclamation-triangle text-red-600 text-3xl"></i>
+        <span class="text-sm text-zinc-600 dark:text-zinc-300 leading-relaxed">
+          {{
+            pendingAction?.type === 'cancel'
+              ? $t('dashboard.requests.dialog.cancel_confirm_message')
+              : $t('dashboard.requests.dialog.close_confirm_message')
+          }}
+        </span>
+      </div>
+      <template #footer>
+        <Button
+          :label="$t('common.cancel')"
+          text
+          class="!text-zinc-500"
+          @click="showActionConfirm = false"
+        />
+        <Button
+          :label="$t('dashboard.requests.dialog.confirm_action')"
+          severity="danger"
+          :loading="isClosing || isCancelling"
+          @click="confirmPendingAction"
+        />
+      </template>
+    </Dialog>
     <Dialog
       v-model:visible="showDetails"
       modal
@@ -426,7 +510,7 @@ const handleCloseMission = async (outcome) => {
               <template #body="slotProps">
                 <div class="flex gap-2">
                   <Button
-                    v-if="slotProps.data.status === 'OPEN'"
+                    v-if="slotProps.data.status === RequestStatus.OPEN"
                     icon="pi pi-check"
                     text
                     rounded
@@ -436,7 +520,20 @@ const handleCloseMission = async (outcome) => {
                         'v-tooltip.top': $t('dashboard.requests.columns.close_tooltip'),
                       },
                     }"
-                    @click="handleClose(slotProps.data.id)"
+                    @click="askClose(slotProps.data.id)"
+                  />
+                  <Button
+                    v-if="slotProps.data.status === RequestStatus.OPEN"
+                    icon="pi pi-ban"
+                    text
+                    rounded
+                    severity="danger"
+                    :pt="{
+                      root: {
+                        'v-tooltip.top': $t('dashboard.requests.columns.cancel_tooltip'),
+                      },
+                    }"
+                    @click="askCancel(slotProps.data.id)"
                   />
                   <Button
                     icon="pi pi-eye"

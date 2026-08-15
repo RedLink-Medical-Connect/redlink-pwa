@@ -525,7 +525,8 @@
         "on_the_way": "En route",
         "waiting": "En attente...",
         "donor": "Donneur",
-        "close_tooltip": "Clôturer"
+        "close_tooltip": "Clôturer",
+        "cancel_tooltip": "Annuler"
       },
       "status": {
         "open": "OUVERTE",
@@ -545,7 +546,12 @@
         "owner_contact": "Contact propriétaire",
         "waiting_donor": "En attente de donneur...",
         "complete_btn": "Terminé",
-        "no_show_btn": "Absent"
+        "no_show_btn": "Absent",
+        "close_confirm_title": "Clôturer la demande",
+        "close_confirm_message": "Confirmez-vous la clôture de cette demande ? Cette action est définitive : elle indique qu'un don a eu lieu ou que le besoin est comblé.",
+        "cancel_confirm_title": "Annuler la demande",
+        "cancel_confirm_message": "Confirmez-vous l'annulation de cette demande ? Cette action est définitive : elle indique une erreur de saisie ou un besoin de sang qui a disparu, sans qu'aucun don n'ait eu lieu.",
+        "confirm_action": "Confirmer"
       },
       "empty": "Aucune demande en cours.",
       "type_emergency_short": "Urgence",
@@ -553,6 +559,8 @@
       "toasts": {
         "close_success": "Demande clôturée avec succès",
         "close_failed": "Erreur lors de la clôture",
+        "cancel_success": "Demande annulée avec succès",
+        "cancel_failed": "Erreur lors de l'annulation",
         "mission_completed_success": "Mission clôturée : don enregistré",
         "mission_no_show_success": "Mission clôturée : donneur absent",
         "mission_closure_failed": "Erreur lors de la clôture de la mission",
@@ -561,7 +569,7 @@
     },
     "donors": {
       "title": "Base des donneurs",
-      "search_placeholder": "Rechercher par nom, ville...",
+      "search_placeholder": "Rechercher par animal, propriétaire ou groupe sanguin...",
       "columns": {
         "animal": "ANIMAL",
         "owner": "PROPRIÉTAIRE",
@@ -574,6 +582,7 @@
       "never_donated": "Jamais",
       "distance_unknown": "—",
       "empty": "Aucun donneur rattaché à votre clinique pour le moment.",
+      "no_search_results": "Aucun donneur ne correspond à votre recherche.",
       "load_error": "Impossible de charger l'annuaire des donneurs — réessayez.",
       "retry": "Réessayer"
     },

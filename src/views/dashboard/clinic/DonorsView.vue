@@ -1,9 +1,19 @@
 <script setup>
-import { onMounted } from 'vue'
+import { onMounted, ref } from 'vue'
 import DashboardSidebar from '@/components/dashboard/DashboardSidebar.vue'
 import { useClinicDonors } from '@/composables/useClinicDonors.js'
 
-const { donors, isLoading, loadError, fetchDonors } = useClinicDonors()
+const { donors, filteredDonors, searchQuery, isLoading, loadError, fetchDonors } = useClinicDonors()
+
+// Le filtre est déjà appliqué en direct via `v-model="searchQuery"` (computed
+// `filteredDonors`, useClinicDonors.js) — ce bouton n'a donc pas de logique de recherche
+// à déclencher lui-même. Il retire le focus du champ (masque le clavier virtuel mobile
+// une fois la recherche lue), pour ne pas laisser un bouton "Rechercher" sans aucun
+// `@click` (Phase 6.6).
+const searchInputRef = ref(null)
+const dismissSearchKeyboard = () => {
+  searchInputRef.value?.$el?.blur()
+}
 
 onMounted(() => {
   fetchDonors()
@@ -29,10 +39,17 @@ const formatDate = (dateString) => {
 
         <div class="bg-white dark:bg-zinc-900 p-4 rounded-lg border border-zinc-200 dark:border-zinc-800 mb-6 flex gap-4 shadow-sm transition-colors duration-300">
           <InputText
+            ref="searchInputRef"
+            v-model="searchQuery"
             :placeholder="$t('dashboard.donors.search_placeholder')"
             class="flex-grow !bg-zinc-50 dark:!bg-zinc-950 !border-zinc-300 dark:!border-zinc-800 !text-zinc-900 dark:!text-white placeholder:!text-zinc-400"
           />
-          <Button :label="$t('common.search')" icon="pi pi-search" class="!bg-zinc-800 !border-zinc-700 !text-white" />
+          <Button
+            :label="$t('common.search')"
+            icon="pi pi-search"
+            class="!bg-zinc-800 !border-zinc-700 !text-white"
+            @click="dismissSearchKeyboard"
+          />
         </div>
 
         <div
@@ -68,7 +85,15 @@ const formatDate = (dateString) => {
             <p>{{ $t('dashboard.donors.empty') }}</p>
           </div>
 
-          <DataTable v-else :value="donors" striped-rows class="p-datatable-sm" table-style="min-width: 50rem">
+          <div
+            v-else-if="!isLoading && filteredDonors.length === 0"
+            class="flex flex-col items-center justify-center h-64 text-zinc-400"
+          >
+            <i class="pi pi-search text-5xl mb-4 opacity-20"></i>
+            <p>{{ $t('dashboard.donors.no_search_results') }}</p>
+          </div>
+
+          <DataTable v-else :value="filteredDonors" striped-rows class="p-datatable-sm" table-style="min-width: 50rem">
             <Column field="animalName" :header="$t('dashboard.donors.columns.animal')" class="!text-zinc-900 dark:!text-white font-bold"></Column>
             <Column :header="$t('dashboard.donors.columns.owner')" class="!text-zinc-600 dark:!text-zinc-400">
               <template #body="slotProps">

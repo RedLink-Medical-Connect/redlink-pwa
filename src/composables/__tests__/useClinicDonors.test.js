@@ -538,3 +538,113 @@ describe('useClinicDonors.fetchDonors', () => {
     expect(capturedQueries).toContain(listClinicDonorsByClinicID)
   })
 })
+
+// Phase 6.6 : barre de recherche de DonorsView.vue câblée sur un filtre côté client
+// (searchQuery + computed filteredDonors), sans aller-retour GraphQL supplémentaire —
+// donors.value est peuplé directement ici (pas besoin de repasser par fetchDonors()/le
+// mock GraphQL, la logique de filtre est indépendante du chargement).
+describe('useClinicDonors.filteredDonors', () => {
+  const seedDonors = (donors) => {
+    const composable = useClinicDonors()
+    composable.donors.value = donors
+    return composable
+  }
+
+  it('sans recherche (searchQuery vide ou non renseignée), filteredDonors === donors au complet', () => {
+    const { donors, filteredDonors } = seedDonors([
+      { animalName: 'Rex', ownerFirstname: 'Jean', ownerLastname: 'Dupont', bloodGroup: 'DEA 1.1-' },
+      { animalName: 'Milo', ownerFirstname: 'Alice', ownerLastname: 'Martin', bloodGroup: 'DEA 1.1+' },
+    ])
+
+    expect(filteredDonors.value).toEqual(donors.value)
+  })
+
+  it("filtre sur le nom de l'animal, insensible à la casse", () => {
+    const { searchQuery, filteredDonors } = seedDonors([
+      { animalName: 'Rex', ownerFirstname: 'Jean', ownerLastname: 'Dupont', bloodGroup: 'DEA 1.1-' },
+      { animalName: 'Milo', ownerFirstname: 'Alice', ownerLastname: 'Martin', bloodGroup: 'DEA 1.1+' },
+    ])
+
+    searchQuery.value = 'rEx'
+
+    expect(filteredDonors.value).toHaveLength(1)
+    expect(filteredDonors.value[0].animalName).toBe('Rex')
+  })
+
+  it('filtre sur le prénom OU le nom du propriétaire', () => {
+    const { searchQuery, filteredDonors } = seedDonors([
+      { animalName: 'Rex', ownerFirstname: 'Jean', ownerLastname: 'Dupont', bloodGroup: 'DEA 1.1-' },
+      { animalName: 'Milo', ownerFirstname: 'Alice', ownerLastname: 'Martin', bloodGroup: 'DEA 1.1+' },
+    ])
+
+    searchQuery.value = 'dupont'
+    expect(filteredDonors.value.map((d) => d.animalName)).toEqual(['Rex'])
+
+    searchQuery.value = 'alice'
+    expect(filteredDonors.value.map((d) => d.animalName)).toEqual(['Milo'])
+  })
+
+  it('filtre sur le groupe sanguin', () => {
+    const { searchQuery, filteredDonors } = seedDonors([
+      { animalName: 'Rex', ownerFirstname: 'Jean', ownerLastname: 'Dupont', bloodGroup: 'DEA 1.1-' },
+      { animalName: 'Milo', ownerFirstname: 'Alice', ownerLastname: 'Martin', bloodGroup: 'DEA 1.1+' },
+    ])
+
+    searchQuery.value = 'DEA 1.1+'
+
+    expect(filteredDonors.value.map((d) => d.animalName)).toEqual(['Milo'])
+  })
+
+  it('la casse et les espaces superflus de la recherche sont ignorés (trim)', () => {
+    const { searchQuery, filteredDonors } = seedDonors([
+      { animalName: 'Rex', ownerFirstname: 'Jean', ownerLastname: 'Dupont', bloodGroup: 'DEA 1.1-' },
+    ])
+
+    searchQuery.value = '   REX   '
+
+    expect(filteredDonors.value).toHaveLength(1)
+  })
+
+  it('aucune correspondance : filteredDonors est vide sans planter (donors.value reste intact)', () => {
+    const { searchQuery, filteredDonors, donors } = seedDonors([
+      { animalName: 'Rex', ownerFirstname: 'Jean', ownerLastname: 'Dupont', bloodGroup: 'DEA 1.1-' },
+    ])
+
+    searchQuery.value = 'inexistant'
+
+    expect(filteredDonors.value).toEqual([])
+    expect(donors.value).toHaveLength(1)
+  })
+
+  it("ignore la race (breed) : présente dans les données mais pas affichée comme colonne dans DonorsView.vue, donc volontairement exclue des critères de recherche", () => {
+    const { searchQuery, filteredDonors } = seedDonors([
+      {
+        animalName: 'Rex',
+        ownerFirstname: 'Jean',
+        ownerLastname: 'Dupont',
+        bloodGroup: 'DEA 1.1-',
+        breed: 'Labrador',
+      },
+    ])
+
+    searchQuery.value = 'labrador'
+
+    expect(filteredDonors.value).toEqual([])
+  })
+
+  it('reste réactif : filteredDonors se recalcule quand donors.value change après une recherche déjà saisie', () => {
+    const { searchQuery, filteredDonors, donors } = seedDonors([
+      { animalName: 'Rex', ownerFirstname: 'Jean', ownerLastname: 'Dupont', bloodGroup: 'DEA 1.1-' },
+    ])
+
+    searchQuery.value = 'milo'
+    expect(filteredDonors.value).toEqual([])
+
+    donors.value = [
+      ...donors.value,
+      { animalName: 'Milo', ownerFirstname: 'Alice', ownerLastname: 'Martin', bloodGroup: 'DEA 1.1+' },
+    ]
+
+    expect(filteredDonors.value.map((d) => d.animalName)).toEqual(['Milo'])
+  })
+})
