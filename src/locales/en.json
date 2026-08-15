@@ -226,6 +226,7 @@
         "animal_name": "NAME",
         "animal_species": "SPECIES",
         "animal_breed": "BREED",
+        "animal_sex": "SEX",
         "animal_birth_date": "BIRTH DATE",
         "animal_age": "AGE",
         "animal_weight": "WEIGHT",
@@ -348,6 +349,10 @@
           "twice_year": "Twice a year",
           "once_year": "Once a year"
         },
+        "sex": {
+          "male": "Male",
+          "female": "Female"
+        },
         "form": {
           "name": "Name",
           "name_placeholder": "Rex",
@@ -355,6 +360,8 @@
           "breed": "Breed",
           "breed_optional": "Breed (optional)",
           "breed_placeholder": "Labrador",
+          "sex": "Sex",
+          "sex_placeholder": "Select",
           "birthdate": "Birth date",
           "weight": "Weight",
           "weight_label": "Weight (kg)",

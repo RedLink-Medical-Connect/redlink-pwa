@@ -227,6 +227,7 @@
         "animal_name": "NOM DE L'ANIMAL",
         "animal_species": "ESPÈCE",
         "animal_breed": "RACE",
+        "animal_sex": "SEXE",
         "animal_birth_date": "DATE DE NAISSANCE",
         "animal_age": "ÂGE",
         "animal_weight": "POIDS (KG)",
@@ -349,6 +350,10 @@
           "twice_year": "2 fois par an",
           "once_year": "1 fois par an"
         },
+        "sex": {
+          "male": "Mâle",
+          "female": "Femelle"
+        },
         "form": {
           "name": "Nom",
           "name_placeholder": "Rex",
@@ -356,6 +361,8 @@
           "breed": "Race",
           "breed_optional": "Race (Optionnel)",
           "breed_placeholder": "Labrador",
+          "sex": "Sexe",
+          "sex_placeholder": "Sélectionner",
           "birthdate": "Date de naissance",
           "weight": "Poids",
           "weight_label": "Poids (kg)",

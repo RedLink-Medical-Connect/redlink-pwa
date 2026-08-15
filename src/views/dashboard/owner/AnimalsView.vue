@@ -7,7 +7,13 @@ import { useToast } from 'primevue/usetoast'
 import Dialog from 'primevue/dialog'
 
 import { useAnimals } from '@/composables/useAnimals'
-import { Species, DonationFrequency, BloodGroupsBySpecies, DonorStatus } from '@/constants/enums.js'
+import {
+  Species,
+  DonationFrequency,
+  BloodGroupsBySpecies,
+  DonorStatus,
+  AnimalSex,
+} from '@/constants/enums.js'
 import { getDonorStatus } from '@/services/eligibility-service.js'
 
 const { t } = useI18n()
@@ -34,6 +40,14 @@ const frequencyOptions = computed(() => [
   { label: t('dashboard.owner.animals.frequency.twice_year'), value: DonationFrequency.TWICE_YEAR },
   { label: t('dashboard.owner.animals.frequency.once_year'), value: DonationFrequency.ONCE_YEAR },
 ])
+
+// Sous-tâche 6.8 : champ informatif uniquement (voir schema.graphql) — pas de valeur
+// pour un Animal sans sexe renseigné, on n'affiche simplement rien plutôt qu'un '?'.
+const sexLabel = (sex) => {
+  if (sex === AnimalSex.MALE) return t('dashboard.owner.animals.sex.male')
+  if (sex === AnimalSex.FEMALE) return t('dashboard.owner.animals.sex.female')
+  return ''
+}
 
 const formatDate = (dateString) => {
   if (!dateString) return ''
@@ -272,6 +286,11 @@ const onDelete = async () => {
                   <span class="text-xs font-bold uppercase text-zinc-400 tracking-wider">{{
                     animal.breed || $t('dashboard.owner.animals.unknown_breed')
                   }}</span>
+                  <span
+                    v-if="sexLabel(animal.sex)"
+                    class="ml-1 text-xs font-bold uppercase text-zinc-400 tracking-wider before:content-['·'] before:mr-1"
+                    >{{ sexLabel(animal.sex) }}</span
+                  >
                 </div>
               </div>
               <Tag

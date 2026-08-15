@@ -263,6 +263,7 @@ export const listMyAnimalsByOwnerId = /* GraphQL */ `
         name
         species
         breed
+        sex
         birthDate
         weight
         bloodGroup

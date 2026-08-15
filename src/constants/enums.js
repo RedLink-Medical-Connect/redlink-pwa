@@ -6,6 +6,15 @@ export const Species = Object.freeze({
   CAT: 'CAT',
 })
 
+// Sexe de l'animal (CdC §2.1) — Animal.sex, champ informatif uniquement pour ce pilote,
+// PAS un critère d'éligibilité (décision produit, cf. schema.graphql). Pas d'enum
+// GraphQL dédié côté schéma (String simple) : ces valeurs sont la seule source de
+// vérité côté front pour éviter les fautes de frappe.
+export const AnimalSex = Object.freeze({
+  MALE: 'MALE',
+  FEMALE: 'FEMALE',
+})
+
 export const DonationFrequency = Object.freeze({
   ASAP: 'ASAP',
   TWICE_YEAR: 'TWICE_YEAR',

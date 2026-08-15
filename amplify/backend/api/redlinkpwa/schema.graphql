@@ -91,6 +91,12 @@ type Animal @model @auth(rules: [
   name: String!
   species: Species!
   breed: String
+  # Sexe de l'animal (CdC §2.1) — champ informatif uniquement pour ce pilote, PAS un
+  # critère d'éligibilité (décision produit) : ne pas le référencer dans
+  # eligibility-service.js. Valeur libre plutôt qu'un enum GraphQL dédié pour ce pilote
+  # ('MALE'/'FEMALE', voir AnimalSex dans constants/enums.js) ; pas de règle @auth
+  # dédiée, suit les règles de type ci-dessus (même bord Owner que breed/weight).
+  sex: String
   birthDate: AWSDate
   weight: Float!
   bloodGroup: String!

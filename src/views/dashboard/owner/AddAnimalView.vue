@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { getCurrentUser } from 'aws-amplify/auth'
 import { useAnimals } from '@/composables/useAnimals'
-import { Species, DonationFrequency, BloodGroupsBySpecies } from '@/constants/enums.js'
+import { Species, DonationFrequency, BloodGroupsBySpecies, AnimalSex } from '@/constants/enums.js'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -17,6 +17,7 @@ const form = ref({
   name: '',
   species: Species.DOG,
   breed: '',
+  sex: null,
   birthDate: '',
   weight: null,
   bloodGroup: '',
@@ -31,6 +32,11 @@ const speciesOptions = computed(() => [
 ])
 
 const bloodOptions = computed(() => BloodGroupsBySpecies[form.value.species] || [])
+
+const sexOptions = computed(() => [
+  { label: t('dashboard.owner.animals.sex.male'), value: AnimalSex.MALE },
+  { label: t('dashboard.owner.animals.sex.female'), value: AnimalSex.FEMALE },
+])
 
 const frequencyOptions = computed(() => [
   { label: t('dashboard.owner.animals.frequency.asap'), value: DonationFrequency.ASAP },
@@ -135,7 +141,7 @@ const handleSubmit = async () => {
           </div>
         </div>
 
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div class="flex flex-col gap-2">
             <label class="text-xs font-bold text-zinc-500 uppercase">{{
               $t('dashboard.owner.animals.form.breed_optional')
@@ -154,6 +160,21 @@ const handleSubmit = async () => {
             <AppDatePicker
               v-model="form.birthDate"
               :placeholder="$t('auth.register_owner.fields.animal_birth_date')"
+            />
+          </div>
+
+          <div class="flex flex-col gap-2">
+            <label class="text-xs font-bold text-zinc-500 uppercase">{{
+              $t('dashboard.owner.animals.form.sex')
+            }}</label>
+            <Select
+              v-model="form.sex"
+              :options="sexOptions"
+              option-label="label"
+              option-value="value"
+              :placeholder="$t('dashboard.owner.animals.form.sex_placeholder')"
+              show-clear
+              class="!bg-zinc-50 dark:!bg-zinc-950 !border-zinc-300 dark:!border-zinc-800 !text-zinc-900 dark:!text-white w-full"
             />
           </div>
         </div>

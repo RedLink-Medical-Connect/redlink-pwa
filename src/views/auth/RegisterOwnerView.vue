@@ -6,7 +6,7 @@ import { usePassword } from '@/composables/usePassword'
 import { useI18n } from 'vue-i18n'
 import AddressAutocomplete from '@/components/common/AddressAutocomplete.vue'
 import PhoneInput from '@/components/common/PhoneInput.vue'
-import { Species, BloodGroupsBySpecies } from '@/constants/enums.js'
+import { Species, BloodGroupsBySpecies, AnimalSex } from '@/constants/enums.js'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -34,6 +34,7 @@ const form = ref({
   animal_name: '',
   animal_species: Species.DOG,
   animal_breed: '',
+  animal_sex: null,
   animal_birthDate: '',
   animal_weight: null,
   blood_group: '',
@@ -42,6 +43,11 @@ const form = ref({
 const bloodOptions = computed(() => {
   return BloodGroupsBySpecies[form.value.animal_species] || []
 })
+
+const sexOptions = computed(() => [
+  { label: t('dashboard.owner.animals.sex.male'), value: AnimalSex.MALE },
+  { label: t('dashboard.owner.animals.sex.female'), value: AnimalSex.FEMALE },
+])
 
 const nextStep = () => {
   if (!form.value.lastname || !form.value.firstname || !form.value.email || !password.value) {
@@ -272,6 +278,16 @@ const handleRegister = async () => {
             class="!bg-zinc-200 dark:!bg-zinc-800 !border-none !text-zinc-900 dark:!text-white !p-3 !rounded-md"
           />
         </div>
+
+        <Select
+          v-model="form.animal_sex"
+          :options="sexOptions"
+          option-label="label"
+          option-value="value"
+          :placeholder="$t('auth.register_owner.fields.animal_sex')"
+          show-clear
+          class="!bg-zinc-200 dark:!bg-zinc-800 !border-none !text-zinc-900 dark:!text-white !p-3 !rounded-md w-full"
+        />
 
         <div class="flex gap-4 mt-4">
           <Button
