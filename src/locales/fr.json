@@ -634,5 +634,10 @@
     "error": "Erreur : {message}",
     "unexpected_status": "Statut inattendu : {status}",
     "technical_error": "Erreur technique : {message}"
+  },
+  "notFound": {
+    "title": "Page introuvable",
+    "description": "Cette page n'existe pas ou plus. Vérifiez l'adresse ou revenez à l'accueil.",
+    "cta": "Retour à l'accueil"
   }
 }

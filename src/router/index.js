@@ -133,6 +133,13 @@ const router = createRouter({
       meta: { requiresAuth: true, role: 'owner' },
     },
     { path: '/test-stripe', component: () => import('@/views/TestStripe.vue') },
+
+    // --- CATCH-ALL (404) ---
+    {
+      path: '/:pathMatch(.*)*',
+      name: 'not-found',
+      component: () => import('@/views/NotFoundView.vue'),
+    },
   ],
 })
 

@@ -635,5 +635,10 @@
     "error": "Error: {message}",
     "unexpected_status": "Unexpected status: {status}",
     "technical_error": "Technical error: {message}"
+  },
+  "notFound": {
+    "title": "Page not found",
+    "description": "This page doesn't exist or has been moved. Check the address or go back home.",
+    "cta": "Back to home"
   }
 }
