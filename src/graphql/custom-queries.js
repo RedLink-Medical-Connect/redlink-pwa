@@ -260,6 +260,23 @@ export const myClinicRelationsByOwnerID = /* GraphQL */ `
   }
 `
 
+// Phase 7.8 : garde-fou multi-vétérinaire sur useClinicSettings.deleteAccount -- avant de
+// supprimer la Clinic, il faut savoir si un AUTRE Veterinarian y est encore rattaché
+// (Clinic.veterinarians: [Veterinarian] @hasMany, schema.graphql -- plusieurs Veterinarian
+// par Clinic est un cas prévu par le schéma, pas un cas limite). La query générée
+// `veterinariansByClinicID` (queries.js) redemande createdAt/updatedAt/owner/__typename en
+// plus -- on n'a besoin que de `id` ici pour compter/exclure le vétérinaire courant, même
+// raisonnement de sur-fetch que `myClinicRelationsByOwnerID` ci-dessus.
+export const veterinariansByClinicIDSimple = /* GraphQL */ `
+  query VeterinariansByClinicIDSimple($clinicID: ID!) {
+    veterinariansByClinicID(clinicID: $clinicID) {
+      items {
+        id
+      }
+    }
+  }
+`
+
 export const listMyAnimalsByOwnerId = /* GraphQL */ `
   query ListMyAnimalsByOwnerId($ownerID: ID!) {
     listAnimals(filter: { ownerID: { eq: $ownerID } }) {

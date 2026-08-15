@@ -521,7 +521,7 @@
       },
       "dialog": {
         "title": "Attention !",
-        "confirm": "Êtes-vous sûr ? Cette action est irréversible.",
+        "confirm": "Êtes-vous sûr ? Cette action est irréversible. Si vous êtes le seul vétérinaire rattaché à cette clinique, elle sera supprimée avec votre compte ; sinon, seul votre compte sera supprimé.",
         "confirm_action": "Confirmer"
       }
     },

@@ -522,7 +522,7 @@
       },
       "dialog": {
         "title": "Warning!",
-        "confirm": "Are you sure? This action is irreversible.",
+        "confirm": "Are you sure? This action is irreversible. If you are the only veterinarian attached to this clinic, it will be deleted along with your account; otherwise, only your account will be deleted.",
         "confirm_action": "Confirm"
       }
     },
