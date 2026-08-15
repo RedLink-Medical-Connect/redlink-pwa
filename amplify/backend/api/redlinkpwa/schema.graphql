@@ -159,17 +159,54 @@ type Request @model @auth(rules: [
   # NB : un scoping plus fin (mutation dédiée ne touchant que le statut, à la ADR-0002 pour
   # la validation véto) serait plus propre mais empiéterait sur l'écriture conditionnelle
   # atomique prévue par l'ADR-0001 pour la Phase 0.3 — volontairement hors périmètre ici.
+  # Le champ `update` ci-dessus reste large au niveau type ; restreint plus finement au
+  # niveau champ ci-dessous (revue DevSecOps, Phase 5) : sans ce second niveau, cette règle
+  # autorisait n'importe quel Owner authentifié à réécrire N'IMPORTE QUEL champ de
+  # N'IMPORTE QUELLE Request via un appel updateRequest direct (y compris d'une autre
+  # clinique) — pas seulement status/activeMissionID comme linkRequestToMission en a besoin.
   { allow: private, operations: [read, update] }
 ]) {
   id: ID!
+
+  # @auth au niveau champ (remplace, pour ces champs, les règles de type ci-dessus —
+  # Transformer v1 ne les fusionne pas) : Owner en lecture seule, écriture réservée aux
+  # Veterinarians (create : createRequestSimple : à la création de la Request ; update non
+  # inclus, aucun code applicatif ne réécrit ces champs après création — à étendre si un futur
+  # besoin d'édition apparaît). `status`/`activeMissionID` restent hors de cette liste : ce
+  # sont les deux seuls champs que linkRequestToMission (Owner, à l'acceptation) écrit.
   requestType: RequestType!
+    @auth(rules: [
+      { allow: private, operations: [read] },
+      { allow: groups, groups: ["Veterinarians"], operations: [create, read] }
+    ])
   requiredSpecies: Species!
+    @auth(rules: [
+      { allow: private, operations: [read] },
+      { allow: groups, groups: ["Veterinarians"], operations: [create, read] }
+    ])
   requiredBloodGroup: String!
+    @auth(rules: [
+      { allow: private, operations: [read] },
+      { allow: groups, groups: ["Veterinarians"], operations: [create, read] }
+    ])
   quantity: Int!
+    @auth(rules: [
+      { allow: private, operations: [read] },
+      { allow: groups, groups: ["Veterinarians"], operations: [create, read] }
+    ])
   status: RequestStatus!
   createdAt: AWSDateTime
+    @auth(rules: [
+      { allow: private, operations: [read] },
+      { allow: groups, groups: ["Veterinarians"], operations: [create, read] }
+    ])
 
-  clinicID: ID! @index(name: "byClinicRequest")
+  clinicID: ID!
+    @index(name: "byClinicRequest")
+    @auth(rules: [
+      { allow: private, operations: [read] },
+      { allow: groups, groups: ["Veterinarians"], operations: [create, read] }
+    ])
   clinic: Clinic @belongsTo(fields: ["clinicID"])
 
   activeMissionID: ID
@@ -177,8 +214,15 @@ type Request @model @auth(rules: [
 }
 
 type Mission @model @auth(rules: [
-  { allow: owner },
-  { allow: groups, groups: ["Veterinarians"] }
+  # Restreint aux opérations réellement utilisées (revue DevSecOps, Phase 5) : sans ces
+  # `operations`, la règle owner à elle seule autorisait un Owner authentifié à appeler
+  # updateMission(status: COMPLETED) (ou écrire validatedByVeterinarianID) directement sur sa
+  # propre Mission — contournant useMissionClosure.js et cassant la garantie centrale de la
+  # Phase 2 ("l'Owner ne peut pas s'auto-valider sa Mission comme terminée"). L'Owner voit
+  # toujours le statut (read) mais ne peut plus l'écrire ; seuls createMissionSimple/
+  # deleteMissionSimple (jamais updateMission) sont appelés côté Owner (useOwnerMissions.js).
+  { allow: owner, operations: [create, read, delete] },
+  { allow: groups, groups: ["Veterinarians"], operations: [read, update] }
 ]) {
   id: ID!
   requestID: ID! @index(name: "byRequestMission")
@@ -190,15 +234,48 @@ type Mission @model @auth(rules: [
   status: MissionStatus!
   appointmentDatetime: AWSDateTime
 
+  # @auth au niveau champ (revue graphql-schema-reviewer, Phase 5) : retirer `update` au
+  # niveau type à la règle owner (ci-dessus) ne suffisait pas — `create` y restait, et sans
+  # @auth de niveau champ un Owner pouvait fabriquer directement un `createMission(status:
+  # COMPLETED, validatedByVeterinarianID: "...")`, usurpant une validation vétérinaire dès la
+  # création plutôt que par une `update` bloquée. Ces 5 champs sont par ailleurs inutilisés
+  # par tout code applicatif actuel (flow QR-scan abandonné, Stripe hors périmètre V1 — voir
+  # CLAUDE.md) : aucune régression possible à les verrouiller entièrement aux Veterinarians.
+  # `status` lui-même reste hors de ce scoping champ-par-champ : createMissionSimple (Owner,
+  # useOwnerMissions.js) doit pouvoir l'écrire à la création (PENDING_ARRIVAL/ACCEPTED) — le
+  # Transformer v1 ne sait pas restreindre un champ à un sous-ensemble de valeurs par
+  # opération, seulement à des opérations entières. Un Owner peut donc toujours fabriquer un
+  # `createMission(status: COMPLETED)` en appelant l'API GraphQL directement (hors UI) ; limite
+  # connue, non fermée par ce commit — voir la discussion Phase 5 dans la roadmap.
   validationCode: String
+    @auth(rules: [
+      { allow: owner, operations: [read] },
+      { allow: groups, groups: ["Veterinarians"], operations: [read, update] }
+    ])
   scannedAt: AWSDateTime
+    @auth(rules: [
+      { allow: owner, operations: [read] },
+      { allow: groups, groups: ["Veterinarians"], operations: [read, update] }
+    ])
 
   # Note : Si vous voulez lister les missions par véto, ajoutez @index(name: "byVet") ici
   validatedByVeterinarianID: ID
+    @auth(rules: [
+      { allow: owner, operations: [read] },
+      { allow: groups, groups: ["Veterinarians"], operations: [read, update] }
+    ])
   validatedBy: Veterinarian @belongsTo(fields: ["validatedByVeterinarianID"])
 
   stripePaymentIntentId: String
+    @auth(rules: [
+      { allow: owner, operations: [read] },
+      { allow: groups, groups: ["Veterinarians"], operations: [read, update] }
+    ])
   stripePaymentStatus: String
+    @auth(rules: [
+      { allow: owner, operations: [read] },
+      { allow: groups, groups: ["Veterinarians"], operations: [read, update] }
+    ])
 }
 
 # 4. ENUMS

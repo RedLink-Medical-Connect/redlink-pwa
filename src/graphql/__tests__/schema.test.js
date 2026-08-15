@@ -145,28 +145,124 @@ describe('schema.graphql — Animal.lastDonationDate (ADR-0003)', () => {
   })
 })
 
-describe("schema.graphql — Mission.status @auth (re-clôture, Phase 2.1 / useMissionClosure.js)", () => {
+describe('schema.graphql — Request @auth au niveau champ (durcissement Phase 5, revue DevSecOps)', () => {
+  const requestType = extractType('Request')
+
+  // Comme extractFieldBlock, mais scopé au texte du type Request : `clinicID:` existe aussi
+  // sur Veterinarian et ClinicOwnerRelation plus haut dans le fichier, et extractFieldBlock
+  // fait un indexOf global (premier match du fichier entier) — il aurait donc extrait le
+  // mauvais bloc pour ce champ précis.
+  function extractRequestFieldBlock(fieldName) {
+    const startIdx = requestType.indexOf(`${fieldName}:`)
+    if (startIdx === -1) {
+      throw new Error(`champ ${fieldName} introuvable dans le type Request`)
+    }
+    const endIdx = requestType.indexOf('])', startIdx)
+    if (endIdx === -1) {
+      throw new Error(`bloc @auth introuvable pour Request.${fieldName}`)
+    }
+    return requestType.slice(startIdx, endIdx + 2)
+  }
+
+  it.each([
+    'requestType',
+    'requiredSpecies',
+    'requiredBloodGroup',
+    'quantity',
+    'createdAt',
+    'clinicID',
+  ])(
+    "%s : l'Owner n'a que 'read' — sans ce scoping, la règle de type " +
+      "'{ allow: private, operations: [read, update] }' (nécessaire à linkRequestToMission " +
+      "pour status/activeMissionID) aurait permis à N'IMPORTE QUEL Owner authentifié de " +
+      "réécrire ce champ sur N'IMPORTE QUELLE Request, y compris d'une autre clinique",
+    (fieldName) => {
+      const block = extractRequestFieldBlock(fieldName)
+      expect(block).toContain('{ allow: private, operations: [read] }')
+    },
+  )
+
+  it.each([
+    'requestType',
+    'requiredSpecies',
+    'requiredBloodGroup',
+    'quantity',
+    'createdAt',
+    'clinicID',
+  ])(
+    '%s : les Veterinarians ont create+read (pas update — aucun code applicatif ne réécrit ' +
+      'ces champs après création, createRequestSimple seul les écrit)',
+    (fieldName) => {
+      const block = extractRequestFieldBlock(fieldName)
+      expect(block).toContain(
+        '{ allow: groups, groups: ["Veterinarians"], operations: [create, read] }',
+      )
+    },
+  )
+
+  it("status/activeMissionID n'ont AUCUN @auth au niveau champ — ce sont les deux seuls champs que linkRequestToMission (Owner, à l'acceptation) doit pouvoir écrire via la règle de type 'private'", () => {
+    const statusIdx = requestType.indexOf('status: RequestStatus!')
+    const activeMissionIdIdx = requestType.indexOf('activeMissionID: ID')
+    expect(statusIdx).toBeGreaterThan(-1)
+    expect(activeMissionIdIdx).toBeGreaterThan(-1)
+
+    // status: rien entre `status: RequestStatus!` et le champ suivant (`createdAt`) qui
+    // ressemble à un @auth de niveau champ.
+    const createdAtIdx = requestType.indexOf('createdAt: AWSDateTime')
+    expect(requestType.slice(statusIdx, createdAtIdx)).not.toContain('@auth(')
+
+    // activeMissionID: rien entre lui et la fin du type (mission: ... est le dernier champ).
+    expect(requestType.slice(activeMissionIdIdx)).not.toContain('@auth(')
+  })
+})
+
+describe("schema.graphql — Mission @auth (re-clôture, Phase 2.1 / useMissionClosure.js ; durcissement Phase 5)", () => {
   const missionType = extractType('Mission')
 
-  it("Mission n'a aucun @auth au niveau champ — contrairement à Animal (lastDonationDate/isValidatedDonor/validationExpiresAt), les Veterinarians ne sont pas restreints champ par champ sur Mission", () => {
-    // On exclut le bloc @auth *au niveau type* (`type Mission @model @auth(rules: [...]) {`)
-    // lui-même — légitime, ce n'est pas le scoping champ-par-champ qu'on vérifie ici — même
-    // raisonnement que le test équivalent pour Animal juste au-dessus dans ce fichier.
-    const typeHeaderEnd = missionType.indexOf(']) {') + ']) {'.length
-    expect(typeHeaderEnd).toBeGreaterThan(-1)
-    const missionFieldsOnly = missionType.slice(typeHeaderEnd)
-    expect(missionFieldsOnly).not.toContain('@auth(')
+  it.each(['validationCode', 'scannedAt', 'validatedByVeterinarianID', 'stripePaymentIntentId', 'stripePaymentStatus'])(
+    "%s : l'Owner n'a que 'read' (revue graphql-schema-reviewer, Phase 5) — sans ce scoping, " +
+      "le retrait d'`update` sur la règle de type owner ne suffisait pas : `create` y restait, " +
+      'et sans @auth de niveau champ un Owner pouvait fabriquer directement un ' +
+      "createMission(validatedByVeterinarianID: '...') dès la création, usurpant une " +
+      "validation vétérinaire plutôt que par une update désormais bloquée",
+    (fieldName) => {
+      const block = extractFieldBlock(fieldName)
+      expect(block).toContain('{ allow: owner, operations: [read] }')
+    },
+  )
+
+  it.each(['validationCode', 'scannedAt', 'validatedByVeterinarianID', 'stripePaymentIntentId', 'stripePaymentStatus'])(
+    '%s : les Veterinarians ont read+update (pas create — ces 5 champs sont inutilisés par ' +
+      'tout code applicatif actuel, flow QR-scan abandonné et Stripe hors périmètre V1, aucune ' +
+      "régression à leur retirer 'create' même côté Veterinarians)",
+    (fieldName) => {
+      const block = extractFieldBlock(fieldName)
+      expect(block).toContain(
+        '{ allow: groups, groups: ["Veterinarians"], operations: [read, update] }',
+      )
+    },
+  )
+
+  it("status/requestID/animalID/appointmentDatetime n'ont AUCUN @auth au niveau champ — createMissionSimple (Owner, à l'acceptation) doit pouvoir écrire status/requestID/animalID à la création ; le Transformer v1 ne sait pas restreindre un champ à un sous-ensemble de valeurs par opération (limite connue, voir le commentaire au-dessus de validationCode dans schema.graphql)", () => {
+    const requestIdIdx = missionType.indexOf('requestID: ID!')
+    const appointmentIdx = missionType.indexOf('appointmentDatetime: AWSDateTime')
+    const validationCodeIdx = missionType.indexOf('validationCode: String')
+    expect(requestIdIdx).toBeGreaterThan(-1)
+    expect(missionType.indexOf('status: MissionStatus!')).toBeGreaterThan(requestIdIdx)
+    expect(validationCodeIdx).toBeGreaterThan(appointmentIdx)
+    expect(missionType.slice(requestIdIdx, validationCodeIdx)).not.toContain('@auth(')
   })
 
   it(
-    "la règle de type Veterinarians sur Mission n'a pas de clause 'operations:' (accès " +
-      'illimité create/read/update/delete) — pin test pour le raisonnement de ' +
-      "useMissionClosure.js : c'est ce qui rend une re-clôture (updateMission sur une Mission " +
-      'déjà COMPLETED/NO_SHOW) inoffensive côté serveur, sans ConditionExpression sur `status` ' +
-      "ni champ refusé par @auth. Si cette règle gagnait un jour une clause 'operations:' " +
-      'scopée (ex. retirer update), la garde réelle contre la re-clôture resterait portée par ' +
-      "l'UI (bouton visible seulement pour ACCEPTED/PENDING_ARRIVAL) sans que rien ici ne le " +
-      'signale — ce test casse plutôt que de laisser cette hypothèse dériver silencieusement.',
+    "la règle de type Veterinarians sur Mission garde 'update' dans ses operations (revue " +
+      "DevSecOps, Phase 5, a retiré create/delete — jamais utilisés côté Veterinarians — mais " +
+      "PAS update) — pin test pour le raisonnement de useMissionClosure.js : c'est ce qui rend " +
+      'une re-clôture (updateMission sur une Mission déjà COMPLETED/NO_SHOW) inoffensive côté ' +
+      "serveur, sans ConditionExpression sur `status` ni champ refusé par @auth. Si `update` " +
+      "disparaissait un jour de cette liste, la garde réelle contre la re-clôture resterait " +
+      "portée par l'UI (bouton visible seulement pour ACCEPTED/PENDING_ARRIVAL) sans que rien " +
+      'ici ne le signale — ce test casse plutôt que de laisser cette hypothèse dériver ' +
+      'silencieusement.',
     () => {
       const typeAuthStart = schema.indexOf('type Mission @model @auth(')
       const typeAuthEnd = schema.indexOf(']) {', typeAuthStart)
@@ -174,8 +270,29 @@ describe("schema.graphql — Mission.status @auth (re-clôture, Phase 2.1 / useM
       expect(typeAuthEnd).toBeGreaterThan(typeAuthStart)
       const typeAuthBlock = schema.slice(typeAuthStart, typeAuthEnd)
 
-      expect(typeAuthBlock).toContain('{ allow: groups, groups: ["Veterinarians"] }')
-      expect(typeAuthBlock).not.toMatch(/"Veterinarians"\][^}]*operations:/)
+      expect(typeAuthBlock).toContain(
+        '{ allow: groups, groups: ["Veterinarians"], operations: [read, update] }',
+      )
+    },
+  )
+
+  it(
+    "la règle owner de Mission est restreinte à [create, read, delete] (pas 'update') — " +
+      'revue DevSecOps Phase 5 : sans cette restriction, un Owner authentifié pouvait appeler ' +
+      "updateMission(status: COMPLETED) (ou écrire validatedByVeterinarianID) directement sur " +
+      "sa propre Mission, contournant useMissionClosure.js et cassant la garantie centrale de " +
+      "la Phase 2 (\"l'Owner ne peut pas s'auto-valider sa Mission comme terminée\"). L'Owner " +
+      "garde 'read' (voit toujours le statut) ; useOwnerMissions.js n'appelle jamais " +
+      'updateMission côté Owner (seulement createMissionSimple/deleteMissionSimple), donc ce ' +
+      "retrait n'enlève aucune capacité réellement utilisée.",
+    () => {
+      const typeAuthStart = schema.indexOf('type Mission @model @auth(')
+      const typeAuthEnd = schema.indexOf(']) {', typeAuthStart)
+      const typeAuthBlock = schema.slice(typeAuthStart, typeAuthEnd)
+
+      expect(typeAuthBlock).toContain(
+        '{ allow: owner, operations: [create, read, delete] }',
+      )
     },
   )
 })
