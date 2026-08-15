@@ -30,29 +30,37 @@ export function useClinicRequests() {
   // change pas le comportement observable de RequestsView.vue (qui ne le consomme pas).
   const loadError = ref(false)
 
-  // Récupère l'ID de la clinique
+  /**
+   * Résout et mémoïse le `clinicID` du Veterinarian courant (un seul aller-retour réseau par
+   * instance de composable).
+   *
+   * Ne catch PAS ses propres erreurs (Phase 7.6, R-12 — contrairement à l'ancienne version qui
+   * avalait tout dans un `console.error` + `return null`) : elle ne renvoie `null` QUE pour le
+   * cas légitime "ce Veterinarian n'a pas (encore) de clinicID" — une vraie erreur (réseau,
+   * `@auth`, `getCurrentUser()` sans session...) est laissée à remonter à l'appelant. Sans cette
+   * distinction, `fetchRequests()` ne pouvait pas différencier "cet Owner n'a simplement pas de
+   * clinique" (état légitime, ne doit jamais s'afficher comme une erreur) d'un vrai échec de
+   * résolution du contexte clinique (doit déclencher `loadError`) : les deux ressortaient
+   * identiquement en `null`. Même pattern que `fetchClinicContext()` dans useClinicDonors.js, qui
+   * ne catch pas non plus ses propres appels réseau, pour la même raison.
+   */
   const fetchClinicId = async () => {
     if (clinicId.value) return clinicId.value
 
-    try {
-      const { userId } = await getCurrentUser()
-      if (!userId) throw new Error('Utilisateur non connecté')
+    const { userId } = await getCurrentUser()
+    if (!userId) throw new Error('Utilisateur non connecté')
 
-      const { data } = await client.graphql({
-        query: getVeterinarian,
-        variables: { id: userId },
-        authMode: 'userPool',
-      })
+    const { data } = await client.graphql({
+      query: getVeterinarian,
+      variables: { id: userId },
+      authMode: 'userPool',
+    })
 
-      const vet = data.getVeterinarian
-      if (!vet || !vet.clinicID) return null
+    const vet = data.getVeterinarian
+    if (!vet || !vet.clinicID) return null
 
-      clinicId.value = vet.clinicID
-      return vet.clinicID
-    } catch (e) {
-      console.error('Erreur récupération contexte clinique:', e)
-      return null
-    }
+    clinicId.value = vet.clinicID
+    return vet.clinicID
   }
 
   const fetchRequests = async () => {
@@ -124,16 +132,12 @@ export function useClinicRequests() {
         input.appointmentDatetime = new Date(formData.appointmentDatetime).toISOString()
       }
 
-      console.log("🚀 Envoi Mutation avec Input :", input)
-
       // 3. Appel de la mutation simple
-      const result = await client.graphql({
+      await client.graphql({
         query: createRequestSimple,
         variables: { input },
         authMode: 'userPool',
       })
-
-      console.log("✅ Succès création :", result)
 
       await fetchRequests()
       await router.push('/dashboard/requests')
@@ -142,7 +146,10 @@ export function useClinicRequests() {
       // 👇 LE LOG DÉTAILLÉ POUR LE DÉBUG
       console.error("💥 ERREUR CRÉATION DEMANDE 💥")
 
-      if (e.errors) {
+      // R-05 : `e.errors` peut être présent mais vide selon la forme de l'erreur renvoyée par
+      // client.graphql() — indexer [0] sans vérifier la longueur levait une TypeError qui
+      // masquait l'erreur GraphQL d'origine de création de Request derrière une erreur de log.
+      if (e.errors?.length > 0) {
         console.error("👉 Message Backend :", e.errors[0].message)
         console.error("👉 Type d'erreur :", e.errors[0].errorType)
       } else {

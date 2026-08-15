@@ -17,6 +17,7 @@ const toast = useToast()
 const {
   matches,
   isLoading: loadingMatches,
+  loadError: matchesLoadError,
   searchMatches,
   startAutoRefresh,
   stopAutoRefresh,
@@ -91,6 +92,33 @@ const handleAccept = async (request) => {
           <div v-if="loadingMatches" class="p-12 text-center">
             <i class="pi pi-spin pi-spinner text-3xl text-[#ff3b4e]"></i>
             <p class="text-zinc-400 mt-2">Recherche d'urgences à proximité...</p>
+          </div>
+
+          <!-- Phase 7.6 (R-09, roadmap Phase 6.2) : écran le plus critique de l'app -- avant ce
+               fix, un échec réel de searchMatches() affichait le même message rassurant que
+               "aucune urgence détectée", indistinguable pour l'Owner. État d'erreur distinct
+               (rouge/amber, jamais confondu avec le vert "tout va bien" ci-dessous). Contenu
+               NEUF de ce fichier : passe par $t() plutôt que de reproduire la dette de chaînes
+               françaises en dur déjà trackée sur ce fichier (CLAUDE.md) -- ne pas copier
+               l'exception dans du code nouveau. -->
+          <div
+            v-else-if="matchesLoadError"
+            class="bg-red-50 border border-red-200 rounded-xl p-8 text-center"
+          >
+            <div class="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <i class="pi pi-exclamation-triangle text-2xl text-red-600"></i>
+            </div>
+            <h3 class="font-bold text-red-800 text-lg">
+              {{ $t('dashboard.owner.overview.load_error_title') }}
+            </h3>
+            <p class="text-red-600">{{ $t('dashboard.owner.overview.load_error') }}</p>
+            <Button
+              :label="$t('dashboard.owner.overview.retry')"
+              icon="pi pi-refresh"
+              text
+              class="mt-2 !text-red-700 hover:!bg-red-100"
+              @click="searchMatches"
+            />
           </div>
 
           <div v-else-if="matches.length === 0" class="bg-green-50 border border-green-200 rounded-xl p-8 text-center">

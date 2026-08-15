@@ -4,7 +4,8 @@ import { useI18n } from 'vue-i18n'
 import DashboardSidebar from '@/components/dashboard/DashboardSidebar.vue'
 import { useOwnerMissions } from '@/composables/useOwnerMissions'
 
-const { fetchMyMissions, activeMissions, historyMissions, isLoading } = useOwnerMissions()
+const { fetchMyMissions, activeMissions, historyMissions, isLoading, loadError } =
+  useOwnerMissions()
 
 const { t } = useI18n()
 
@@ -119,6 +120,24 @@ const getStatusSeverity = (status) => {
 
         <div v-if="isLoading" class="flex justify-center py-12">
           <i class="pi pi-spin pi-spinner text-4xl text-[#ff3b4e]"></i>
+        </div>
+
+        <!-- Phase 7.6 (R-09) : état d'erreur distinct de "aucune mission" -- sans ça, un échec
+             de fetchMyMissions() (loadError, useOwnerMissions.js) affichait silencieusement le
+             même état vide qu'un Owner sans mission, cf. CLAUDE.md/roadmap Phase 6.2. -->
+        <div
+          v-else-if="loadError"
+          class="flex flex-col items-center justify-center py-12 text-zinc-400"
+        >
+          <i class="pi pi-exclamation-triangle text-5xl mb-4 text-amber-500 opacity-60"></i>
+          <p>{{ $t('dashboard.owner.missions_list.load_error') }}</p>
+          <Button
+            :label="$t('dashboard.owner.missions_list.retry')"
+            icon="pi pi-refresh"
+            text
+            class="mt-2"
+            @click="fetchMyMissions"
+          />
         </div>
 
         <div v-else>

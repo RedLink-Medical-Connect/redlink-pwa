@@ -304,7 +304,10 @@
     "owner": {
       "overview": {
         "title": "Dashboard",
-        "known_clinic_badge": "Known clinic"
+        "known_clinic_badge": "Known clinic",
+        "load_error_title": "Search unavailable",
+        "load_error": "Unable to check for emergencies near you — try again.",
+        "retry": "Retry"
       },
       "tabs": {
         "dashboard": "DASHBOARD",
@@ -453,6 +456,8 @@
           "history": "No history yet.",
           "go_to_board": "View available requests"
         },
+        "load_error": "Unable to load your missions — try again.",
+        "retry": "Retry",
         "status": {
           "pending_arrival": "Pending arrival",
           "accepted": "Accepted",
@@ -571,6 +576,8 @@
         "confirm_action": "Confirm"
       },
       "empty": "No ongoing requests.",
+      "load_error": "Unable to load requests — try again.",
+      "retry": "Retry",
       "type_emergency_short": "Emergency",
       "type_appointment_short": "Appointment",
       "toasts": {

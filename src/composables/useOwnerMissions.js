@@ -86,9 +86,18 @@ export function useOwnerMissions() {
   const myMissions = ref([])
   const isLoading = ref(false)
   const isAccepting = ref(false)
+  // Phase 7.6 (R-09) : distingue "chargement en erreur" d'une liste réellement vide pour les
+  // deux flux principaux de lecture ci-dessous (fetchAvailableMissions/fetchMyMissions),
+  // même convention `loadError` que le reste du repo (CLAUDE.md). Partagé entre les deux
+  // fetchers comme `isLoading` l'est déjà. Ne couvre QUE ces flux principaux : le nettoyage
+  // best-effort de la Mission orpheline dans `acceptMission()` (voir son catch dédié
+  // plus bas) continue d'avaler son erreur sans jamais toucher `loadError` — une écriture
+  // secondaire best-effort ne doit pas se travestir en échec de lecture de la liste.
+  const loadError = ref(false)
 
   const fetchAvailableMissions = async () => {
     isLoading.value = true
+    loadError.value = false
     try {
       const { data } = await client.graphql({
         query: listRequests,
@@ -105,6 +114,7 @@ export function useOwnerMissions() {
       })
     } catch (e) {
       console.error('Erreur chargement missions:', e)
+      loadError.value = true
     } finally {
       isLoading.value = false
     }
@@ -112,6 +122,7 @@ export function useOwnerMissions() {
 
   const fetchMyMissions = async () => {
     isLoading.value = true
+    loadError.value = false
     try {
       const { userId } = await getCurrentUser()
 
@@ -137,6 +148,7 @@ export function useOwnerMissions() {
       myMissions.value = flatList.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
     } catch (e) {
       console.error('Erreur chargement mes missions:', e)
+      loadError.value = true
     } finally {
       isLoading.value = false
     }
@@ -288,6 +300,7 @@ export function useOwnerMissions() {
     historyMissions,
     isLoading,
     isAccepting,
+    loadError,
     fetchAvailableMissions,
     acceptMission,
     fetchMyMissions,

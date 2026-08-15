@@ -11,8 +11,16 @@ import { MissionStatus, RequestStatus } from '@/constants/enums'
 const { t } = useI18n()
 const toast = useToast()
 
-const { requests, isLoading, isClosing, isCancelling, fetchRequests, closeRequest, cancelRequest } =
-  useClinicRequests()
+const {
+  requests,
+  isLoading,
+  isClosing,
+  isCancelling,
+  loadError,
+  fetchRequests,
+  closeRequest,
+  cancelRequest,
+} = useClinicRequests()
 const { closeMission } = useMissionClosure()
 // Phase 6.7 (CdC §2.4) : indicateurs tableau de bord vétérinaire, chargés indépendamment de
 // la liste des Requests (échec de l'un n'affecte pas l'autre — même esprit que les lectures
@@ -453,7 +461,22 @@ const handleCloseMission = async (outcome) => {
           </div>
 
           <div
-            v-if="!isLoading && requests.length === 0"
+            v-if="!isLoading && loadError"
+            class="flex flex-col items-center justify-center h-64 text-zinc-400"
+          >
+            <i class="pi pi-exclamation-triangle text-5xl mb-4 text-amber-500 opacity-60"></i>
+            <p>{{ $t('dashboard.requests.load_error') }}</p>
+            <Button
+              :label="$t('dashboard.requests.retry')"
+              icon="pi pi-refresh"
+              text
+              class="mt-2"
+              @click="fetchRequests"
+            />
+          </div>
+
+          <div
+            v-else-if="!isLoading && requests.length === 0"
             class="flex flex-col items-center justify-center h-64 text-zinc-400"
           >
             <i class="pi pi-inbox text-5xl mb-4 opacity-20"></i>

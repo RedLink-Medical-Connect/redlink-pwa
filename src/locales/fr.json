@@ -305,7 +305,10 @@
     "owner": {
       "overview": {
         "title": "Tableau de bord",
-        "known_clinic_badge": "Clinique connue"
+        "known_clinic_badge": "Clinique connue",
+        "load_error_title": "Recherche impossible",
+        "load_error": "Impossible de vérifier les urgences autour de vous — réessayez.",
+        "retry": "Réessayer"
       },
       "tabs": {
         "dashboard": "TABLEAU DE BORD",
@@ -454,6 +457,8 @@
           "history": "Aucun historique.",
           "go_to_board": "Voir les demandes disponibles"
         },
+        "load_error": "Impossible de charger vos missions — réessayez.",
+        "retry": "Réessayer",
         "status": {
           "pending_arrival": "En attente d'arrivée",
           "accepted": "Acceptée",
@@ -570,6 +575,8 @@
         "confirm_action": "Confirmer"
       },
       "empty": "Aucune demande en cours.",
+      "load_error": "Impossible de charger les demandes — réessayez.",
+      "retry": "Réessayer",
       "type_emergency_short": "Urgence",
       "type_appointment_short": "RDV",
       "toasts": {
