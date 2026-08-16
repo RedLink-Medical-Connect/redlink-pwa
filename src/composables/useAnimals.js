@@ -182,7 +182,6 @@ export function useAnimals() {
         isVaccinated: form.isVaccinated,
         isSterilized: form.isSterilized,
         donationFrequency: form.donationFrequency,
-        lastDonationDate: null
       }
 
       const { data } = await client.graphql({
