@@ -13,6 +13,12 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  // Accessible name du champ, pour un formulaire qui n'affiche pas de <label> visible
+  // (PrimeVue AutoComplete expose `ariaLabel` en prop dédiée, cf. RegisterOwnerView.vue).
+  ariaLabel: {
+    type: String,
+    default: '',
+  },
 })
 
 const suggestions = ref([])
@@ -61,6 +67,7 @@ const onSelect = (event) => {
       :suggestions="suggestions"
       option-label="label"
       :placeholder="$t('common.address_placeholder')"
+      :aria-label="ariaLabel || undefined"
       class="w-full"
       :input-class="[
         'w-full !p-3 rounded-md transition-colors',

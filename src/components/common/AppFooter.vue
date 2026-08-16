@@ -12,7 +12,7 @@ const currentYear = new Date().getFullYear();
           <h4 class="font-bold text-lg border-l-4 border-white pl-3">{{ $t('layout.footer.clinic_section') }}</h4>
           <nav class="flex flex-col gap-2 mt-2">
             <a href="#" class="text-white/80 hover:text-white transition text-sm block">{{ $t('layout.footer.team') }}</a>
-            <a href="#" class="text-white/80 hover:text-white transition text-sm block">{{ $t('layout.footer.contact') }}</a>
+            <router-link to="/support" class="text-white/80 hover:text-white transition text-sm block">{{ $t('layout.footer.contact') }}</router-link>
             <a href="#" class="text-white/80 hover:text-white transition text-sm block">{{ $t('layout.footer.about') }}</a>
           </nav>
         </div>
@@ -20,8 +20,8 @@ const currentYear = new Date().getFullYear();
         <div class="md:col-span-3 flex flex-col gap-3">
           <h4 class="font-bold text-lg border-l-4 border-white pl-3">{{ $t('layout.footer.legal_section') }}</h4>
           <nav class="flex flex-col gap-2 mt-2">
-            <a href="#" class="text-white/80 hover:text-white transition text-sm block">{{ $t('layout.footer.terms') }}</a>
-            <a href="#" class="text-white/80 hover:text-white transition text-sm block">{{ $t('layout.footer.privacy') }}</a>
+            <router-link to="/legal" class="text-white/80 hover:text-white transition text-sm block">{{ $t('layout.footer.terms') }}</router-link>
+            <router-link to="/legal" class="text-white/80 hover:text-white transition text-sm block">{{ $t('layout.footer.privacy') }}</router-link>
           </nav>
         </div>
 

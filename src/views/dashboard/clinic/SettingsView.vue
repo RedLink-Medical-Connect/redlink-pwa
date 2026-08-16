@@ -196,7 +196,7 @@ const onDelete = async () => {
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div class="flex flex-col gap-2">
                 <label class="text-xs font-bold text-zinc-500 uppercase">
-                  {{ $t('dashboard.settings.tabs.general') }}
+                  {{ $t('dashboard.settings.rpps') }}
                 </label>
                 <InputText
                   v-model="clinicForm.rpps"

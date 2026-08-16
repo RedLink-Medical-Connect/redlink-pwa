@@ -12,6 +12,12 @@ const props = defineProps({
   modelValue: {
     type: String,
     default: ''
+  },
+  // Accessible name du champ, pour un formulaire qui n'affiche pas de <label> visible
+  // (PrimeVue InputText forwarde aria-label sur l'<input> natif — cf. RegisterOwnerView.vue).
+  ariaLabel: {
+    type: String,
+    default: ''
   }
 })
 
@@ -41,6 +47,7 @@ const handleInput = (event) => {
     <InputText
       v-model="phone"
       placeholder="06 12 34 56 78"
+      :aria-label="ariaLabel || undefined"
       :class="[
         'w-full !p-3 rounded-md transition-colors',
         !$attrs.class ? '!bg-zinc-200 dark:!bg-zinc-800 !border-none' : '',

@@ -19,6 +19,17 @@ const router = createRouter({
       name: 'home',
       component: HomeView,
     },
+    // --- PAGES STATIQUES PUBLIQUES (Support, mentions légales) ---
+    {
+      path: '/support',
+      name: 'support',
+      component: () => import('@/views/SupportView.vue'),
+    },
+    {
+      path: '/legal',
+      name: 'legal',
+      component: () => import('@/views/LegalView.vue'),
+    },
     // --- AUTH (Accessible uniquement si NON connecté) ---
     {
       path: '/login',
