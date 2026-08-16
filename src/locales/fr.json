@@ -202,7 +202,10 @@
       "resend_success": "Un nouveau code a été envoyé !",
       "db_creation_error": "Compte créé mais erreur lors de la configuration du profil.",
       "password_label": "Confirmez votre mot de passe",
-      "password_placeholder": "Requis après rechargement"
+      "password_placeholder": "Requis après rechargement",
+      "express_defaults_title": "Inscription terminée",
+      "express_defaults_message": "Pour aller plus vite, nous avons automatiquement complété le profil de {animal} avec des valeurs par défaut : vacciné, disponible dès que possible, et un créneau de disponibilité le samedi de 9h à 12h. Vous pourrez les modifier à tout moment depuis « Mes animaux » et « Disponibilité ».",
+      "express_defaults_continue": "Accéder à mon tableau de bord"
     },
     "forgot": {
       "title": "MOT DE PASSE OUBLIÉ",
@@ -332,10 +335,23 @@
     "owner": {
       "overview": {
         "title": "Tableau de bord",
+        "subtitle": "Bienvenue sur Redlink. Voici les urgences autour de vous.",
+        "searching": "Recherche d'urgences à proximité...",
         "known_clinic_badge": "Clinique connue",
         "load_error_title": "Recherche impossible",
         "load_error": "Impossible de vérifier les urgences autour de vous — réessayez.",
-        "retry": "Réessayer"
+        "retry": "Réessayer",
+        "empty_title": "Aucune urgence détectée",
+        "empty_message": "Tout est calme autour de vous. Profitez de votre journée avec vos animaux ! 🐶🐱",
+        "refresh": "Actualiser",
+        "urgent_badge": "URGENCE",
+        "clinic_fallback": "Clinique vétérinaire",
+        "search_line": "Recherche {species} (Groupe {bloodGroup})",
+        "compatible_animal": "Votre animal compatible : {name}",
+        "distance_away": "à {km} km",
+        "accept_button": "J'accepte d'aider",
+        "accept_hint": "Crée une mission immédiate",
+        "accept_success": "Merci ! Mission acceptée."
       },
       "tabs": {
         "dashboard": "TABLEAU DE BORD",

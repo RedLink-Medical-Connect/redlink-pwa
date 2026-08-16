@@ -50,7 +50,7 @@ const handleAccept = async (request) => {
     toast.add({
       severity: 'success',
       summary: t('common.success'),
-      detail: "Merci ! Mission acceptée.",
+      detail: t('dashboard.owner.overview.accept_success'),
       life: 3000
     })
 
@@ -85,13 +85,13 @@ const handleAccept = async (request) => {
           {{ $t('dashboard.owner.overview.title') }}
         </h1>
         <p class="text-zinc-500 dark:text-zinc-400 text-sm mb-8 ml-5">
-          Bienvenue sur Redlink. Voici les urgences autour de vous.
+          {{ $t('dashboard.owner.overview.subtitle') }}
         </p>
 
         <div class="mb-8">
           <div v-if="loadingMatches" class="p-12 text-center">
             <i class="pi pi-spin pi-spinner text-3xl text-[#ff3b4e]"></i>
-            <p class="text-zinc-400 mt-2">Recherche d'urgences à proximité...</p>
+            <p class="text-zinc-400 mt-2">{{ $t('dashboard.owner.overview.searching') }}</p>
           </div>
 
           <!-- Phase 7.6 (R-09, roadmap Phase 6.2) : écran le plus critique de l'app -- avant ce
@@ -127,10 +127,12 @@ const handleAccept = async (request) => {
             <div class="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
               <i class="pi pi-check text-2xl text-green-600"></i>
             </div>
-            <h3 class="font-bold text-green-800 text-lg">Aucune urgence détectée</h3>
-            <p class="text-green-600">Tout est calme autour de vous. Profitez de votre journée avec vos animaux ! 🐶🐱</p>
+            <h3 class="font-bold text-green-800 text-lg">
+              {{ $t('dashboard.owner.overview.empty_title') }}
+            </h3>
+            <p class="text-green-600">{{ $t('dashboard.owner.overview.empty_message') }}</p>
             <Button
-              label="Actualiser"
+              :label="$t('dashboard.owner.overview.refresh')"
               icon="pi pi-refresh"
               text
               class="mt-2 !text-green-700 hover:!bg-green-100"
@@ -147,44 +149,57 @@ const handleAccept = async (request) => {
               <div class="flex flex-col md:flex-row justify-between items-start gap-4">
                 <div class="flex-grow">
                   <div class="flex items-center gap-2 mb-2">
-                    <Tag severity="danger" value="URGENCE" rounded class="font-bold" />
+                    <Tag
+                      severity="danger"
+                      :value="$t('dashboard.owner.overview.urgent_badge')"
+                      rounded
+                      class="font-bold"
+                    />
                     <!-- Critère 5 de l'Eligibility (Clinic Priority, CONTEXT.md) : simple
                     indicateur visuel, ne change rien à l'éligibilité elle-même — le tri
                     (useMatchingRequests.searchMatches) fait déjà remonter ces cartes en
                     premier. -->
                     <Tag v-if="req.hasClinicPriority" severity="info" :value="t('dashboard.owner.overview.known_clinic_badge')" rounded />
                     <span class="text-xs text-zinc-500 font-mono bg-zinc-100 px-2 py-1 rounded">
-                      à {{ req.distanceKM }} km
+                      {{ $t('dashboard.owner.overview.distance_away', { km: req.distanceKM }) }}
                     </span>
                   </div>
 
                   <h3 class="font-black text-xl text-zinc-900 dark:text-white mb-1">
-                    {{ req.clinic?.name || 'Clinique Vétérinaire' }}
+                    {{ req.clinic?.name || $t('dashboard.owner.overview.clinic_fallback') }}
                   </h3>
 
-                  <p class="text-zinc-600 dark:text-zinc-300 mb-4">
-                    Recherche <strong>{{ req.requiredSpecies }}</strong>
-                    (Groupe <strong>{{ req.requiredBloodGroup }}</strong>)
+                  <p class="text-zinc-600 dark:text-zinc-300 mb-4 font-medium">
+                    {{
+                      $t('dashboard.owner.overview.search_line', {
+                        species: req.requiredSpecies,
+                        bloodGroup: req.requiredBloodGroup,
+                      })
+                    }}
                   </p>
 
                   <div class="bg-[#ff3b4e]/10 p-3 rounded-lg inline-block">
                     <p class="text-sm font-bold text-[#ff3b4e] flex items-center gap-2">
                       <i class="pi pi-heart-fill"></i>
-                      Votre animal compatible : {{ req.matchingAnimal?.name }}
+                      {{
+                        $t('dashboard.owner.overview.compatible_animal', {
+                          name: req.matchingAnimal?.name,
+                        })
+                      }}
                     </p>
                   </div>
                 </div>
 
                 <div class="flex flex-col items-end gap-2 min-w-[150px]">
                   <Button
-                    label="J'accepte d'aider"
+                    :label="$t('dashboard.owner.overview.accept_button')"
                     icon="pi pi-check-circle"
                     class="w-full bg-[#ff3b4e]! border-[#ff3b4e]! hover:bg-[#e63545]!"
                     :loading="loadingAccept"
                     @click="handleAccept(req)"
                   />
                   <small class="text-xs text-zinc-400 text-center block">
-                    Crée une mission immédiate
+                    {{ $t('dashboard.owner.overview.accept_hint') }}
                   </small>
                 </div>
               </div>

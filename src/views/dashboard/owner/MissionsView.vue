@@ -3,6 +3,7 @@ import { onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import DashboardSidebar from '@/components/dashboard/DashboardSidebar.vue'
 import { useOwnerMissions } from '@/composables/useOwnerMissions'
+import { MissionStatus, Species } from '@/constants/enums'
 
 const { fetchMyMissions, activeMissions, historyMissions, isLoading, loadError } =
   useOwnerMissions()
@@ -37,13 +38,13 @@ const openMaps = (clinic) => {
 
 const getStatusLabel = (status) => {
   switch (status) {
-    case 'PENDING_ARRIVAL':
+    case MissionStatus.PENDING_ARRIVAL:
       return t('dashboard.owner.missions_list.status.pending_arrival')
-    case 'ACCEPTED':
+    case MissionStatus.ACCEPTED:
       return t('dashboard.owner.missions_list.status.accepted')
-    case 'COMPLETED':
+    case MissionStatus.COMPLETED:
       return t('dashboard.owner.missions_list.status.completed')
-    case 'NO_SHOW':
+    case MissionStatus.NO_SHOW:
       return t('dashboard.owner.missions_list.status.no_show')
     default:
       return status
@@ -52,18 +53,23 @@ const getStatusLabel = (status) => {
 
 const getStatusSeverity = (status) => {
   switch (status) {
-    case 'PENDING_ARRIVAL':
+    case MissionStatus.PENDING_ARRIVAL:
       return 'warn'
-    case 'ACCEPTED':
+    case MissionStatus.ACCEPTED:
       return 'info'
-    case 'COMPLETED':
+    case MissionStatus.COMPLETED:
       return 'success'
-    case 'NO_SHOW':
+    case MissionStatus.NO_SHOW:
       return 'danger'
     default:
       return 'secondary'
   }
 }
+
+// Phase 6.B/2 : réplique le mapping espèce -> emoji déjà utilisé dans AnimalsView.vue
+// (Species.DOG/Species.CAT) -- avant ce fix, 🐶 était codé en dur pour toute Mission
+// active, y compris pour un chat.
+const getAnimalEmoji = (species) => (species === Species.DOG ? '🐶' : '🐱')
 </script>
 
 <template>
@@ -172,7 +178,7 @@ const getStatusSeverity = (status) => {
                   <div
                     class="w-8 h-8 rounded-full bg-white dark:bg-zinc-800 flex items-center justify-center text-lg shadow-sm"
                   >
-                    🐶
+                    {{ getAnimalEmoji(mission.animalSpecies) }}
                   </div>
                   <span class="font-bold text-zinc-900 dark:text-white">{{
                     mission.animalName

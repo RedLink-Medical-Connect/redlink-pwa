@@ -9,7 +9,7 @@ import { listRequestsByClinic } from '@/graphql/custom-queries'
 
 // 👇 On importe les mutations SIMPLES pour éviter les erreurs de sous-champs
 import { createRequestSimple, updateRequestStatusSimple } from '@/graphql/custom-mutations'
-import { Species, RequestStatus } from '@/constants/enums'
+import { Species, RequestStatus, RequestType } from '@/constants/enums'
 
 export function useClinicRequests() {
   const client = generateClient()
@@ -115,11 +115,11 @@ export function useClinicRequests() {
 
       const input = {
         clinicID: cId,
-        requestType: formData.type === 'emergency' ? 'EMERGENCY' : 'APPOINTMENT',
+        requestType: formData.type === 'emergency' ? RequestType.EMERGENCY : RequestType.APPOINTMENT,
         requiredSpecies: safeSpecies,
         requiredBloodGroup: formData.bloodGroup,
         quantity: parseInt(formData.quantity), // On s'assure que c'est un entier
-        status: 'OPEN',
+        status: RequestStatus.OPEN,
       }
 
       // Phase 6.5 (ADR-0005) : appointmentDatetime n'a de sens que pour un RDV planifié
@@ -166,11 +166,11 @@ export function useClinicRequests() {
     try {
       await client.graphql({
         query: updateRequestStatusSimple,
-        variables: { input: { id: requestId, status: 'CLOSED' } },
+        variables: { input: { id: requestId, status: RequestStatus.CLOSED } },
         authMode: 'userPool',
       })
       const req = requests.value.find((r) => r.id === requestId)
-      if (req) req.status = 'CLOSED'
+      if (req) req.status = RequestStatus.CLOSED
     } catch (e) {
       console.error('Erreur fermeture demande:', e)
       throw e
