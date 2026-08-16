@@ -112,6 +112,13 @@ touchés, en parallèle du reviewer principal).
 - **Enums** : les valeurs de statut/type viennent de `src/constants/enums.js`,
   jamais de littéraux en dur — partiellement suivi seulement, dette existante
   par endroits (ex. `MissionStatus` n'a pas d'entrée `CANCELLED`).
+- **Accessibilité — nom accessible sur un champ à placeholder seul** : prop
+  `ariaLabel` (défaut `''`) sur un composant wrapper (`inheritAttrs: false`),
+  forwardée nommément sur le composant PrimeVue interne (`:aria-label="ariaLabel
+  || undefined"` — le `|| undefined` évite un `aria-label=""` qui viderait le nom
+  accessible). Voir `PhoneInput.vue`/`AddressAutocomplete.vue`, consommé par
+  `RegisterOwnerView.vue` (roadmap Phase 6.B). Référence pour tout futur
+  formulaire qui ne peut pas se permettre un `<label>` visible.
 - **Écriture Veterinarian scopée sur `Animal`/`Request`/`Mission`** : pattern
   utilisé cinq fois (ADR-0002, ADR-0003, ADR-0004, ADR-0005) — `@auth` au niveau
   champ (pas de mutation dédiée/Lambda) apparié à une mutation `*Simple`
