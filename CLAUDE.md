@@ -58,9 +58,10 @@ local, pas encore packagé pour être partageable en l'état.
   erreurs à la compilation).
 - **vitest** — lance les tests via ce MCP plutôt que `npm run test` en Bash brut.
 - **eslint** — vérifie les warnings avant de proposer un commit, en particulier
-  les règles i18n. Une dette de warnings i18n est déjà trackée sur ce repo (voir
-  `DashboardView.vue`) — demande confirmation avant de la corriger en masse ;
-  voir le skill `/i18n-audit` pour un état des lieux sans correction automatique.
+  les règles i18n. Une dette de warnings i18n (`no-raw-text` sur emojis/
+  ponctuation notamment) subsiste par endroits sur ce repo — demande
+  confirmation avant de la corriger en masse ; voir le skill `/i18n-audit` pour
+  un état des lieux sans correction automatique.
 - **playwright** — le seul test e2e tourne contre un vrai backend (Cognito/
   DynamoDB réels, pas mocké). Demande une confirmation explicite avant de le
   lancer : ça peut créer ou modifier des données réelles.
@@ -106,15 +107,12 @@ touchés, en parallèle du reviewer principal).
   `subscriptions.js` à la main (fichiers auto-générés, écrasés au prochain
   `amplify codegen`/`amplify push` ; un vrai bug a déjà eu cette cause exacte
   dans ce repo).
-- **i18n** : `$t()` est la norme (la grande majorité des vues/composants du
-  repo l'utilisent). `DashboardView.vue` a des chaînes françaises en dur — dette
-  connue et trackée, pas un modèle à suivre.
+- **i18n** : `$t()` est la norme, suivie dans toutes les vues/composants du
+  repo (`DashboardView.vue` avait des chaînes françaises en dur — corrigé,
+  roadmap Phase 7 section C).
 - **Enums** : les valeurs de statut/type viennent de `src/constants/enums.js`,
-  jamais de littéraux en dur — partiellement suivi seulement, dette existante
-  par endroits (des littéraux `'OPEN'`/`'EMERGENCY'`/etc. subsistent dans des
-  fichiers qui importent déjà l'enum correspondant pour d'autres comparaisons,
-  ex. `useClinicRequest.js`, `RequestsView.vue` — voir `docs/audit/BACKLOG.md`
-  R-14, pas encore traité).
+  jamais de littéraux en dur (R-14, `docs/audit/BACKLOG.md` — traité, roadmap
+  Phase 7 section C).
 - **Écriture Veterinarian scopée sur `Animal`/`Request`/`Mission`** : pattern
   utilisé cinq fois (ADR-0002, ADR-0003, ADR-0004, ADR-0005) — `@auth` au niveau
   champ (pas de mutation dédiée/Lambda) apparié à une mutation `*Simple`

@@ -190,6 +190,7 @@
       "password_placeholder": "Required after reload",
       "express_defaults_title": "Registration complete",
       "express_defaults_message": "To speed things up, we automatically filled in {animal}'s profile with default values: vaccinated, available as soon as possible, and a Saturday 9am-12pm availability slot. You can change these anytime from \"My Animals\" and \"Availability\".",
+      "express_defaults_message_no_animal": "We created a default Saturday 9am-12pm availability slot for you. You can change it anytime from \"Availability\".",
       "express_defaults_continue": "Go to my dashboard"
     },
     "forgot": {
