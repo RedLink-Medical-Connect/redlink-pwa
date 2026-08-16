@@ -99,7 +99,33 @@ type Animal @model @auth(rules: [
   sex: String
   birthDate: AWSDate
   weight: Float!
+
+  # @auth au niveau champ (remplace, pour ce champ, les règles de type ci-dessus —
+  # Transformer v1 ne les fusionne pas, voir lastDonationDate/isValidatedDonor
+  # ci-dessous). Choix DÉLIBÉRÉMENT différent du pattern ADR-0002/0003 (Owner:
+  # [read] seul) : contrairement à lastDonationDate/isValidatedDonor/
+  # validationExpiresAt (jamais écrits par l'Owner), bloodGroup EST déjà écrit par
+  # l'Owner à la création (AddAnimalView.vue/useAnimals.js createNewAnimal) et en
+  # édition (AnimalsView.vue/useAnimals.js updateAnimalDetails) — une règle Owner
+  # restreinte à [read] aurait cassé ces deux écritures existantes. La règle owner
+  # reste donc SANS restriction d'opérations (équivalent à la règle de type qu'elle
+  # remplace pour ce champ). Ajout : Veterinarians en read+update, pour permettre à
+  # un vétérinaire de corriger un bloodGroup à UNKNOWN saisi par erreur par l'Owner,
+  # avant validation (Phase 6 section B, ADR-0002 : un groupe sanguin connu est un
+  # prérequis à la validation, déjà vérifié côté client par
+  # useAnimalValidation.js/validateAnimal). Compromis assumé, comme ADR-0002/0003 :
+  # le Transformer v1 ne peut pas conditionner cette règle sur l'état
+  # isValidatedDonor de l'Animal — un Veterinarian pourrait en théorie aussi modifier
+  # le bloodGroup d'un Animal DÉJÀ validé sans déclencher de re-validation
+  # automatique. Acceptable pour ce pilote (Veterinarians de confiance, école
+  # vétérinaire partenaire, même hypothèse qu'ADR-0002/0003) ; côté UI,
+  # ValidationsView.vue n'expose la correction que pour les Animals de
+  # pendingAnimals (en attente de validation), pas pour un Animal déjà validé.
   bloodGroup: String!
+    @auth(rules: [
+      { allow: owner },
+      { allow: groups, groups: ["Veterinarians"], operations: [read, update] }
+    ])
   isVaccinated: Boolean!
   isSterilized: Boolean
 

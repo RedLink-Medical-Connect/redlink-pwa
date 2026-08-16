@@ -174,6 +174,24 @@ export const updateAnimalLastDonationDateSimple = /* GraphQL */ `
   }
 `
 
+// Phase 6, section B : correction vétérinaire d'un Animal.bloodGroup saisi par erreur par
+// l'Owner, avant validation (nouvelle règle @auth au niveau champ sur bloodGroup — voir
+// schema.graphql). Contrairement à lastDonationDate/isValidatedDonor/validationExpiresAt
+// ci-dessus, bloodGroup N'EST PAS un champ exclusivement Veterinarian (l'Owner y écrit
+// aussi, à la création et en édition, via updateAnimal/useAnimals.js) — mais l'input de
+// CETTE mutation *Simple reste volontairement restreint à id + bloodGroup, même
+// raisonnement que validateAnimalDonorSimple/updateAnimalLastDonationDateSimple : empêcher
+// qu'un futur appelant élargisse l'input par erreur (ex. en y glissant isValidatedDonor
+// depuis ce même composable) plutôt que de laisser @auth le rejeter tardivement.
+export const updateAnimalBloodGroupSimple = /* GraphQL */ `
+  mutation UpdateAnimalBloodGroup($input: UpdateAnimalInput!) {
+    updateAnimal(input: $input) {
+      id
+      bloodGroup
+    }
+  }
+`
+
 // Phase 3.1 : liaison Clinic <-> Owner (`ClinicOwnerRelation`) créée par useMissionClosure.js
 // quand une Mission passe COMPLETED (voir roadmap Phase 3, sous-tâche ajoutée le 2026-08-14).
 // `ClinicOwnerRelation` n'a pas de @auth au niveau champ (le groupe Veterinarians a un accès

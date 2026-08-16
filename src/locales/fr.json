@@ -653,7 +653,9 @@
       "toasts": {
         "success": "{name} est maintenant un donneur validé.",
         "blood_group_unknown": "Groupe sanguin inconnu — ne peut pas être validé.",
-        "generic_error": "Impossible de valider cet animal."
+        "generic_error": "Impossible de valider cet animal.",
+        "blood_group_corrected": "Groupe sanguin de {name} corrigé.",
+        "blood_group_correction_error": "Impossible de corriger le groupe sanguin de cet animal."
       }
     },
     "history": {
