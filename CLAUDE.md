@@ -116,9 +116,13 @@ touchés, en parallèle du reviewer principal).
   utilisé cinq fois (ADR-0002, ADR-0003, ADR-0004, ADR-0005) — `@auth` au niveau
   champ (pas de mutation dédiée/Lambda) apparié à une mutation `*Simple`
   n'envoyant que les champs autorisés. Référence pour tout futur champ
-  écrit par les Veterinarians seuls. Limite connue : le Transformer v1 ne
-  restreint jamais une valeur (seulement un ensemble d'opérations) — voir
-  ADR-0004/ADR-0005 pour les cas où ça laisse un résidu assumé.
+  écrit par les Veterinarians **seuls** (règle owner restreinte à `[read]`).
+  Limite connue : le Transformer v1 ne restreint jamais une valeur (seulement
+  un ensemble d'opérations) — voir ADR-0004/ADR-0005 pour les cas où ça laisse
+  un résidu assumé. **Variante** quand le champ est déjà écrit par l'Owner
+  (règle owner alors laissée sans restriction d'opérations) : voir ADR-0006
+  (`Animal.bloodGroup`) — ne pas copier `[read]` pour l'Owner dans ce cas, ça
+  casserait la création/édition existante.
 - **Écriture secondaire best-effort** : une écriture non critique qui suit une
   écriture critique déjà réussie (nettoyage de Mission orpheline dans
   `useOwnerMissions.js`, upsert `ClinicOwnerRelation` dans
