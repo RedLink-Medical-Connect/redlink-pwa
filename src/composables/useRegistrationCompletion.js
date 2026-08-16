@@ -50,6 +50,23 @@ import { Species, DonationFrequency } from '@/constants/enums'
  * vue à l'identique) — ne pas en inventer une ici serait une extension de périmètre non
  * demandée par la sous-tâche 7.7.
  */
+/**
+ * Phase 7 (revue Lead Dev) : `completeOwnerRegistration` crée TOUJOURS un
+ * `OwnerAvailability` par défaut (samedi 9h-12h), que `data.animal_name` soit
+ * renseigné ou non -- seul l'Animal (et ses valeurs par défaut isVaccinated/
+ * donationFrequency) dépend de `animal_name`. La condition initiale de
+ * `VerifyEmailView.vue` (`role === 'owner' && animal_name`) laissait donc un
+ * Owner sans animal recevoir ce créneau fantôme sans jamais voir l'écran de
+ * transparence. Fonction pure exportée pour rester testable sans monter de
+ * composant (`VerifyEmailView.vue` fait `t(...)`, jamais cette fonction).
+ *
+ * @param {object} data - `tempRegistrationData` (voir `completeRegistration`).
+ * @returns {boolean}
+ */
+export function shouldShowExpressDefaultsInfo(data) {
+  return data?.role === 'owner'
+}
+
 export function useRegistrationCompletion() {
   const client = generateClient()
 

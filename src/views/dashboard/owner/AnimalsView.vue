@@ -297,7 +297,7 @@ const onDelete = async () => {
                 <div
                   class="w-14 h-14 bg-zinc-50 dark:bg-zinc-800 rounded-full flex items-center justify-center text-3xl ring-4 ring-zinc-50 dark:ring-zinc-800 shadow-inner"
                 >
-                  {{ animal.species === 'DOG' ? '🐶' : '🐱' }}
+                  {{ animal.species === Species.DOG ? '🐶' : '🐱' }}
                 </div>
                 <div>
                   <h3 class="font-black text-xl leading-none text-zinc-900 dark:text-white mb-1">

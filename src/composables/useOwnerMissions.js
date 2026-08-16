@@ -141,6 +141,7 @@ export function useOwnerMissions() {
           flatList.push({
             ...mission,
             animalName: animal.name,
+            animalSpecies: animal.species,
           })
         })
       })
