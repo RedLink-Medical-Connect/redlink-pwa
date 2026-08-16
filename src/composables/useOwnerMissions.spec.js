@@ -208,6 +208,39 @@ describe('useOwnerMissions > loadError (fetchAvailableMissions / fetchMyMissions
     expect(myMissions.value).toEqual([])
   })
 
+  // Phase 7 section C / Phase 6.B: fetchMyMissions() now also flattens Animal.species onto
+  // each Mission as animalSpecies (alongside the pre-existing animalName), consumed by
+  // MissionsView.vue's getAnimalEmoji() to pick 🐶 vs 🐱 instead of a hardcoded 🐶 for every
+  // Mission regardless of the donor Animal's actual species.
+  it('fetchMyMissions: flattens Animal.species onto each Mission as animalSpecies', async () => {
+    mockGraphql.mockResolvedValueOnce({
+      data: {
+        listAnimals: {
+          items: [
+            {
+              id: 'animal-1',
+              name: 'Minou',
+              species: 'CAT',
+              missions: {
+                items: [{ id: 'mission-1', status: 'ACCEPTED', createdAt: '2025-01-01T00:00:00.000Z' }],
+              },
+            },
+          ],
+        },
+      },
+    })
+
+    const { fetchMyMissions, myMissions } = useOwnerMissions()
+    await fetchMyMissions()
+
+    expect(myMissions.value).toHaveLength(1)
+    expect(myMissions.value[0]).toMatchObject({
+      id: 'mission-1',
+      animalName: 'Minou',
+      animalSpecies: 'CAT',
+    })
+  })
+
   // Regression guard for the best-effort / secondary-write distinction documented in
   // CLAUDE.md: a failed orphan-Mission cleanup inside acceptMission() must keep swallowing
   // its own error (console.error only) and must NEVER flip the shared loadError — that ref
