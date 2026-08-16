@@ -113,12 +113,40 @@
     },
     "faq": {
       "title": "A question? You'll likely find the answer here!",
+      "label": "FAQ",
       "q1": "Does my pet need to fast?",
       "a1": "It is recommended that they haven't eaten a few hours before, but water is allowed.",
       "q2": "Is the donation painful?",
       "a2": "No, it's like a regular blood draw. A numbing cream can be applied.",
       "q3": "What does my pet receive in return?",
       "a3": "A free complete blood test, treats, and the pride of saving a life!"
+    }
+  },
+  "legal": {
+    "title": "Legal Notice & Privacy",
+    "placeholder_notice": "Legal notice to be completed with the partner veterinary school's information before going into production.",
+    "notice": {
+      "title": "Legal notice",
+      "body": "This application is a prototype developed as part of a pilot project with a partner veterinary school. The legal notice (publisher, host, publication director, registration number) will be completed before any real production launch."
+    },
+    "privacy": {
+      "title": "Privacy and data protection (GDPR)",
+      "intro": "As part of its operation, Redlink collects and processes personal data.",
+      "data_collected_title": "Personal data collected",
+      "data_identity": "Identity: last name, first name",
+      "data_contact": "Contact details: email address, phone number, postal address",
+      "data_geoloc": "Geolocation: GPS coordinates of the address provided, used to calculate the distance between a donor animal and a clinic",
+      "data_animals": "Animal-related data: species, breed, blood group, donation history, availability",
+      "usage": "This data is used exclusively to match veterinary clinics with donor animal owners.",
+      "rights": "In accordance with the General Data Protection Regulation (GDPR), you have the right to access, rectify, and delete your data, exercisable directly from your personal space (account deletion) or by contacting us via the Support page. This page will be completed with the full regulatory information (legal basis for processing, retention period, data protection officer contact details where applicable) before going into production."
+    }
+  },
+  "support": {
+    "title": "Support & Contact",
+    "intro": "A question, a technical issue, or need help using Redlink? Find answers to frequently asked questions below, or contact us directly.",
+    "contact": {
+      "title": "Contact us",
+      "body": "During the pilot phase, support is provided directly by the partner veterinary school. A dedicated contact address will be communicated before going into production — in the meantime, reach out to your on-site contact."
     }
   },
   "layout": {
@@ -503,8 +531,6 @@
       "phone": "Phone number",
       "address": "Address",
       "email": "Email",
-      "zip": "Zip code",
-      "city": "City",
       "rpps": "RPPS number",
       "emergency": "We have a 24/7 emergency service",
       "delete_account": "DELETE ACCOUNT",
