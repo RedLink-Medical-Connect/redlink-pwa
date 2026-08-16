@@ -160,6 +160,24 @@ describe('schema.graphql — Animal.bloodGroup (Phase 6, section B)', () => {
     expect(animalType.indexOf('bloodGroup:')).toBeLessThan(animalType.indexOf('isVaccinated:'))
     expect(animalType.indexOf('bloodGroup:')).toBeLessThan(animalType.indexOf('lastDonationDate:'))
   })
+
+  it(
+    'GAP RÉSIDUEL ASSUMÉ (documenté dans le commentaire au-dessus de bloodGroup, Phase 6 ' +
+      "section B) : la règle Veterinarians (read+update) sur bloodGroup ne référence PAS " +
+      "isValidatedDonor — Transformer v1 ne sait pas conditionner un @auth de champ sur la " +
+      "valeur d'un autre champ (même limite qu'ADR-0002/0003), donc un Veterinarian garde " +
+      "le droit d'écrire bloodGroup à l'identique, qu'Animal.isValidatedDonor soit true ou " +
+      "false. Ce test ne prouve pas qu'un tel garde-fou serait IMPOSSIBLE à ajouter plus " +
+      "tard (ex. via un resolver custom, hors scope du @auth déclaratif actuel) — juste que " +
+      "le schéma actuel ne le fait pas : la seule protection existante est côté UI " +
+      "(ValidationsView.vue n'expose la correction que pour pendingAnimals). Voir le test " +
+      "complémentaire dans useAnimalValidation.test.js qui démontre ce même gap côté " +
+      "composable (appel direct hors UI, sans passer par le rendu conditionnel de la vue).",
+    () => {
+      const block = extractFieldBlock('bloodGroup')
+      expect(block).not.toMatch(/isValidatedDonor/)
+    },
+  )
 })
 
 describe('schema.graphql — Animal.lastDonationDate (ADR-0003)', () => {

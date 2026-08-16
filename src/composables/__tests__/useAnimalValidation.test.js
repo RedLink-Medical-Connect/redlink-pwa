@@ -542,6 +542,49 @@ describe('useAnimalValidation.correctBloodGroup', () => {
     expect(isCorrectingBloodGroup).not.toBe(isLoading)
     expect(isCorrectingBloodGroup).not.toBe(isValidating)
   })
+
+  it(
+    'GAP RÉSIDUEL ASSUMÉ (Phase 6 section B, voir le commentaire au-dessus de bloodGroup ' +
+      'dans schema.graphql) : correctBloodGroup ne vérifie PAS isValidatedDonor — appelée ' +
+      "directement (comme le ferait n'importe quel appel GraphQL hors UI) sur un Animal " +
+      "DÉJÀ validé, la mutation part quand même et réussit, sans erreur ni déclenchement " +
+      "d'une re-validation. La seule protection existante contre ce cas est côté UI " +
+      "(ValidationsView.vue n'expose l'éditeur inline de bloodGroup que pour les lignes de " +
+      "pendingAnimals) — ce composable, lui, ne fait aucune différence entre un Animal en " +
+      "attente et un Animal déjà validé. Ce test documente le comportement actuel plutôt " +
+      "que de le supposer : s'il se met à échouer parce qu'un garde-fou a été ajouté, " +
+      "remplacer ce test par un test du nouveau comportement plutôt que le supprimer.",
+    async () => {
+      let capturedInput = null
+      graphqlMock.mockImplementation(async ({ variables }) => {
+        capturedInput = variables.input
+        return { data: { updateAnimal: { ...variables.input } } }
+      })
+
+      const { correctBloodGroup, pendingAnimals } = useAnimalValidation()
+      // Un Animal déjà validé ne devrait normalement jamais figurer dans pendingAnimals
+      // (fetchPendingValidations ne charge que les Animals en attente) — mais rien
+      // n'empêche techniquement un appelant d'invoquer correctBloodGroup(animalId, ...)
+      // avec l'id d'un Animal déjà validé, hors de ce flux UI.
+      pendingAnimals.value = [
+        buildAnimal({
+          id: 'animal-deja-valide',
+          bloodGroup: 'A',
+          isValidatedDonor: true,
+          validationExpiresAt: '2027-01-01T00:00:00.000Z',
+        }),
+      ]
+
+      await expect(correctBloodGroup('animal-deja-valide', 'DEA 1.1+')).resolves.toBeUndefined()
+
+      expect(capturedInput).toEqual({ id: 'animal-deja-valide', bloodGroup: 'DEA 1.1+' })
+      expect(pendingAnimals.value[0].bloodGroup).toBe('DEA 1.1+')
+      // isValidatedDonor n'est ni lu ni modifié par correctBloodGroup : le statut de
+      // validation reste inchangé alors que le bloodGroup qu'il avait validé a changé
+      // sous lui, sans déclencher de re-validation.
+      expect(pendingAnimals.value[0].isValidatedDonor).toBe(true)
+    },
+  )
 })
 
 // Même raisonnement que mapValidationErrorKey (voir sa doc ci-dessus) : fonction pure
