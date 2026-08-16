@@ -187,7 +187,10 @@
       "resend_success": "A new code has been sent!",
       "db_creation_error": "Account created but profile setup failed.",
       "password_label": "Confirm your password",
-      "password_placeholder": "Required after reload"
+      "password_placeholder": "Required after reload",
+      "express_defaults_title": "Registration complete",
+      "express_defaults_message": "To speed things up, we automatically filled in {animal}'s profile with default values: vaccinated, available as soon as possible, and a Saturday 9am-12pm availability slot. You can change these anytime from \"My Animals\" and \"Availability\".",
+      "express_defaults_continue": "Go to my dashboard"
     },
     "forgot": {
       "title": "FORGOT PASSWORD",
@@ -304,10 +307,23 @@
     "owner": {
       "overview": {
         "title": "Dashboard",
+        "subtitle": "Welcome to Redlink. Here are the emergencies around you.",
+        "searching": "Searching for nearby emergencies...",
         "known_clinic_badge": "Known clinic",
         "load_error_title": "Search unavailable",
         "load_error": "Unable to check for emergencies near you — try again.",
-        "retry": "Retry"
+        "retry": "Retry",
+        "empty_title": "No emergency detected",
+        "empty_message": "Everything is calm around you. Enjoy your day with your pets! 🐶🐱",
+        "refresh": "Refresh",
+        "urgent_badge": "EMERGENCY",
+        "clinic_fallback": "Veterinary clinic",
+        "search_line": "Looking for {species} (Blood type {bloodGroup})",
+        "compatible_animal": "Your compatible animal: {name}",
+        "distance_away": "{km} km away",
+        "accept_button": "I'll help",
+        "accept_hint": "Creates an immediate mission",
+        "accept_success": "Thank you! Mission accepted."
       },
       "tabs": {
         "dashboard": "DASHBOARD",

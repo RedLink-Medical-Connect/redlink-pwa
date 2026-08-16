@@ -6,7 +6,7 @@ import DashboardSidebar from '@/components/dashboard/DashboardSidebar.vue'
 import { useClinicRequests } from '@/composables/useClinicRequest.js'
 import { useMissionClosure } from '@/composables/useMissionClosure.js'
 import { useClinicStats } from '@/composables/useClinicStats.js'
-import { MissionStatus, RequestStatus } from '@/constants/enums'
+import { MissionStatus, RequestStatus, RequestType, Species } from '@/constants/enums'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -63,13 +63,13 @@ onMounted(() => {
 
 const getSeverity = (status) => {
   switch (status) {
-    case 'OPEN':
+    case RequestStatus.OPEN:
       return 'danger'
-    case 'IN_PROGRESS':
+    case RequestStatus.IN_PROGRESS:
       return 'warn'
-    case 'CLOSED':
+    case RequestStatus.CLOSED:
       return 'secondary'
-    case 'CANCELLED':
+    case RequestStatus.CANCELLED:
       return 'contrast'
     default:
       return 'info'
@@ -294,7 +294,7 @@ const handleCloseMission = async (outcome) => {
           <div class="grid grid-cols-2 gap-2 text-sm">
             <span class="text-zinc-500">{{ $t('dashboard.requests.dialog.type') }}</span>
             <span class="font-medium">{{
-              selectedRequest.requestType === 'EMERGENCY'
+              selectedRequest.requestType === RequestType.EMERGENCY
                 ? $t('dashboard.requests.dialog.type_emergency')
                 : $t('dashboard.requests.dialog.type_appointment')
             }}</span>
@@ -404,13 +404,11 @@ const handleCloseMission = async (outcome) => {
       <DashboardSidebar />
 
       <div class="flex-grow">
-        <div class="flex justify-between items-center mb-6">
-          <h1
-            class="text-2xl font-bold text-zinc-900 dark:text-white uppercase tracking-wider border-l-4 border-[#ff3b4e] pl-4"
-          >
-            {{ $t('dashboard.requests.title') }}
-          </h1>
-        </div>
+        <h1
+          class="text-2xl font-bold text-zinc-900 dark:text-white uppercase tracking-wider border-l-4 border-[#ff3b4e] pl-4 mb-6"
+        >
+          {{ $t('dashboard.requests.title') }}
+        </h1>
 
         <div class="grid grid-cols-2 gap-4 mb-6">
           <div
@@ -509,7 +507,7 @@ const handleCloseMission = async (outcome) => {
             >
               <template #body="slotProps">
                 <span
-                  v-if="slotProps.data.requestType === 'EMERGENCY'"
+                  v-if="slotProps.data.requestType === RequestType.EMERGENCY"
                   class="text-red-600 flex items-center gap-1 uppercase text-xs font-black"
                 >
                   <i class="pi pi-bolt"></i> {{ $t('dashboard.requests.type_emergency_short') }}
@@ -527,7 +525,7 @@ const handleCloseMission = async (outcome) => {
               <template #body="slotProps">
                 <span class="font-bold text-zinc-800 dark:text-white">
                   {{
-                    slotProps.data.requiredSpecies === 'DOG'
+                    slotProps.data.requiredSpecies === Species.DOG
                       ? $t('request.species.dog')
                       : $t('request.species.cat')
                   }}

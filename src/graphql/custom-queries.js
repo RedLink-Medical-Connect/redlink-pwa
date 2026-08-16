@@ -104,6 +104,7 @@ export const listMyAnimalsMissions = /* GraphQL */ `
       items {
         id
         name
+        species
         missions {
           items {
             id
