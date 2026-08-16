@@ -10,7 +10,10 @@ vi.mock('aws-amplify/api', () => ({
   generateClient: () => ({ graphql: graphqlMock }),
 }))
 
-import { useRegistrationCompletion } from '@/composables/useRegistrationCompletion'
+import {
+  useRegistrationCompletion,
+  shouldShowExpressDefaultsInfo,
+} from '@/composables/useRegistrationCompletion'
 
 const buildOwnerData = (overrides = {}) => ({
   role: 'owner',
@@ -247,5 +250,28 @@ describe('useRegistrationCompletion.completeRegistration — échec au milieu de
     expect(consoleErrorSpy).toHaveBeenCalled()
 
     consoleErrorSpy.mockRestore()
+  })
+})
+
+// Revue Lead Dev Phase 7 : la condition initiale de VerifyEmailView.vue
+// (role === 'owner' && animal_name) laissait un Owner sans animal recevoir le
+// créneau OwnerAvailability par défaut sans jamais voir l'écran de transparence
+// -- completeOwnerRegistration crée toujours ce créneau, avec ou sans animal.
+describe('shouldShowExpressDefaultsInfo', () => {
+  it('true pour un Owner avec animal (inscription express complète)', () => {
+    expect(shouldShowExpressDefaultsInfo(buildOwnerData())).toBe(true)
+  })
+
+  it('true pour un Owner SANS animal (le créneau de disponibilité est créé quand même)', () => {
+    expect(shouldShowExpressDefaultsInfo(buildOwnerData({ animal_name: '' }))).toBe(true)
+  })
+
+  it('false pour un Veterinarian', () => {
+    expect(shouldShowExpressDefaultsInfo(buildVetData())).toBe(false)
+  })
+
+  it('false si data est absent/null (garde défensive)', () => {
+    expect(shouldShowExpressDefaultsInfo(null)).toBe(false)
+    expect(shouldShowExpressDefaultsInfo(undefined)).toBe(false)
   })
 })

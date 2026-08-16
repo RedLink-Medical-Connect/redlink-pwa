@@ -97,10 +97,7 @@ const handleAccept = async (request) => {
           <!-- Phase 7.6 (R-09, roadmap Phase 6.2) : écran le plus critique de l'app -- avant ce
                fix, un échec réel de searchMatches() affichait le même message rassurant que
                "aucune urgence détectée", indistinguable pour l'Owner. État d'erreur distinct
-               (rouge/amber, jamais confondu avec le vert "tout va bien" ci-dessous). Contenu
-               NEUF de ce fichier : passe par $t() plutôt que de reproduire la dette de chaînes
-               françaises en dur déjà trackée sur ce fichier (CLAUDE.md) -- ne pas copier
-               l'exception dans du code nouveau. -->
+               (rouge/amber, jamais confondu avec le vert "tout va bien" ci-dessous). -->
           <div
             v-else-if="matchesLoadError"
             role="alert"

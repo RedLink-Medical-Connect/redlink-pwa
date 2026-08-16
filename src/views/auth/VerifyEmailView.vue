@@ -1,16 +1,20 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useI18n } from 'vue-i18n'
 import { resendSignUpCode, getCurrentUser } from 'aws-amplify/auth'
-import { useRegistrationCompletion } from '@/composables/useRegistrationCompletion'
+import {
+  useRegistrationCompletion,
+  shouldShowExpressDefaultsInfo,
+} from '@/composables/useRegistrationCompletion'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const { t } = useI18n()
 const { completeRegistration } = useRegistrationCompletion()
+const expressDefaultsHeadingRef = ref(null)
 
 const email = ref('')
 const code = ref('')
@@ -81,13 +85,15 @@ const handleVerify = async () => {
     auth.clearTempRegistrationData()
     localStorage.removeItem('temp_register_safe_data')
 
-    // N'affiche l'écran de transparence que quand l'inscription express a réellement
-    // fabriqué des valeurs par défaut pour un Animal (voir useRegistrationCompletion.js,
-    // completeOwnerRegistration -- seulement si data.animal_name est renseigné). Dans
-    // tous les autres cas (Veterinarian, ou Owner sans animal ajouté à l'inscription),
-    // comportement inchangé : redirection directe.
-    if (registrationData.role === 'owner' && registrationData.animal_name) {
+    // Affiche l'écran de transparence pour tout Owner (revue Lead Dev Phase 7 : un
+    // OwnerAvailability par défaut est TOUJOURS créé par completeOwnerRegistration,
+    // que animal_name soit renseigné ou non -- seul l'Animal en dépend, voir
+    // shouldShowExpressDefaultsInfo/useRegistrationCompletion.js). Le message affiché
+    // varie selon le cas (voir template). Inchangé pour un Veterinarian.
+    if (shouldShowExpressDefaultsInfo(registrationData)) {
       showExpressDefaultsInfo.value = true
+      await nextTick()
+      expressDefaultsHeadingRef.value?.focus()
     } else {
       await router.push('/dashboard')
     }
@@ -130,21 +136,25 @@ const handleResend = async () => {
          automatiquement à l'Animal créé pendant l'inscription express (voir
          useRegistrationCompletion.js). N'apparaît que dans ce cas précis (showExpressDefaultsInfo,
          voir handleVerify) -- comportement de tous les autres flux d'inscription inchangé. -->
-    <div v-if="showExpressDefaultsInfo">
+    <div v-if="showExpressDefaultsInfo" role="status" aria-live="polite">
       <div class="mb-8 relative inline-block">
         <div class="absolute inset-0 bg-green-500/20 blur-xl rounded-full"></div>
         <i class="pi pi-check-circle text-6xl text-green-500 relative z-10"></i>
       </div>
 
-      <h1 class="text-3xl font-bold text-zinc-900 dark:text-white uppercase tracking-wider mb-2">
+      <h1
+        ref="expressDefaultsHeadingRef"
+        tabindex="-1"
+        class="text-3xl font-bold text-zinc-900 dark:text-white uppercase tracking-wider mb-2 focus:outline-none"
+      >
         {{ $t('auth.verify.express_defaults_title') }}
       </h1>
 
       <Message severity="info" class="mb-6 text-left" icon="pi pi-info-circle">
         {{
-          $t('auth.verify.express_defaults_message', {
-            animal: registrationData?.animal_name,
-          })
+          registrationData?.animal_name
+            ? $t('auth.verify.express_defaults_message', { animal: registrationData.animal_name })
+            : $t('auth.verify.express_defaults_message_no_animal')
         }}
       </Message>
 
