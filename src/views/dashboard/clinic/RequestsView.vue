@@ -462,7 +462,9 @@ const handleCloseMission = async (outcome) => {
 
           <div
             v-if="!isLoading && loadError"
-            class="flex flex-col items-center justify-center h-64 text-zinc-400"
+            role="alert"
+            aria-live="polite"
+            class="flex flex-col items-center justify-center h-64 text-zinc-600 dark:text-zinc-300"
           >
             <i class="pi pi-exclamation-triangle text-5xl mb-4 text-amber-500 opacity-60"></i>
             <p>{{ $t('dashboard.requests.load_error') }}</p>

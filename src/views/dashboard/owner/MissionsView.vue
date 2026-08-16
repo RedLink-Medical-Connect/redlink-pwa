@@ -127,7 +127,9 @@ const getStatusSeverity = (status) => {
              même état vide qu'un Owner sans mission, cf. CLAUDE.md/roadmap Phase 6.2. -->
         <div
           v-else-if="loadError"
-          class="flex flex-col items-center justify-center py-12 text-zinc-400"
+          role="alert"
+          aria-live="polite"
+          class="flex flex-col items-center justify-center py-12 text-zinc-600 dark:text-zinc-300"
         >
           <i class="pi pi-exclamation-triangle text-5xl mb-4 text-amber-500 opacity-60"></i>
           <p>{{ $t('dashboard.owner.missions_list.load_error') }}</p>

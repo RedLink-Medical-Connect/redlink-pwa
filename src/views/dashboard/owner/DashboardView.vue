@@ -103,6 +103,8 @@ const handleAccept = async (request) => {
                l'exception dans du code nouveau. -->
           <div
             v-else-if="matchesLoadError"
+            role="alert"
+            aria-live="assertive"
             class="bg-red-50 border border-red-200 rounded-xl p-8 text-center"
           >
             <div class="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
