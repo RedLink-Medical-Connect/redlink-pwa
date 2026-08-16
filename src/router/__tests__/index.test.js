@@ -30,3 +30,20 @@ describe('router (Phase 6.3 - catch-all 404)', () => {
     expect(resolved.name).toBe('register-selection')
   })
 })
+
+// Phase 6.B (dette secondaire) : pages statiques Support/Contact/FAQ et Mentions
+// légales/Confidentialité, absentes malgré la collecte de PII sensible. Publiques
+// (pas de `meta.requiresAuth`/`role`) — accessibles avant/sans connexion, comme la home.
+describe('router (Phase 6.B - pages légales/support)', () => {
+  it('resolves /support to the support route, with no auth requirement', () => {
+    const resolved = router.resolve('/support')
+    expect(resolved.name).toBe('support')
+    expect(resolved.meta.requiresAuth).toBeUndefined()
+  })
+
+  it('resolves /legal to the legal route, with no auth requirement', () => {
+    const resolved = router.resolve('/legal')
+    expect(resolved.name).toBe('legal')
+    expect(resolved.meta.requiresAuth).toBeUndefined()
+  })
+})

@@ -122,6 +122,33 @@
       "a3": "Un bilan sanguin complet gratuit, des friandises et la fierté d'avoir sauvé une vie !"
     }
   },
+  "legal": {
+    "title": "Mentions légales & Confidentialité",
+    "placeholder_notice": "Mentions légales à compléter avec les informations de l'école vétérinaire partenaire avant mise en production.",
+    "notice": {
+      "title": "Mentions légales",
+      "body": "Cette application est un prototype développé dans le cadre d'un projet pilote avec une école vétérinaire partenaire. Les mentions légales (éditeur, hébergeur, directeur de publication, numéro d'immatriculation) seront complétées avant toute mise en production réelle."
+    },
+    "privacy": {
+      "title": "Confidentialité et protection des données (RGPD)",
+      "intro": "Dans le cadre de son fonctionnement, Redlink collecte et traite des données à caractère personnel.",
+      "data_collected_title": "Données personnelles collectées",
+      "data_identity": "Identité : nom, prénom",
+      "data_contact": "Coordonnées : adresse email, numéro de téléphone, adresse postale",
+      "data_geoloc": "Géolocalisation : coordonnées GPS de l'adresse renseignée, utilisées pour calculer la distance entre un animal donneur et une clinique",
+      "data_animals": "Données relatives aux animaux : espèce, race, groupe sanguin, historique de dons, disponibilités",
+      "usage": "Ces données sont utilisées exclusivement pour la mise en relation entre cliniques vétérinaires et propriétaires d'animaux donneurs.",
+      "rights": "Conformément au Règlement Général sur la Protection des Données (RGPD), vous disposez d'un droit d'accès, de rectification et de suppression de vos données, exerçable directement depuis votre espace personnel (suppression de compte) ou en nous contactant via la page Support. Cette page sera complétée avec les informations réglementaires complètes (base légale des traitements, durée de conservation, coordonnées du délégué à la protection des données le cas échéant) avant la mise en production."
+    }
+  },
+  "support": {
+    "title": "Support & Contact",
+    "intro": "Une question, un problème technique, ou besoin d'aide pour utiliser Redlink ? Retrouvez ci-dessous les réponses aux questions fréquentes, ou contactez-nous directement.",
+    "contact": {
+      "title": "Nous contacter",
+      "body": "Pendant la phase pilote, le support est assuré directement par l'école vétérinaire partenaire. Une adresse de contact dédiée sera communiquée avant la mise en production — en attendant, rapprochez-vous de votre référent sur place."
+    }
+  },
   "layout": {
     "header": {
       "donor_btn": "Devenir donneur",

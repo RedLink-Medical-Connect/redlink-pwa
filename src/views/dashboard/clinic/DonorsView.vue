@@ -93,40 +93,49 @@ const formatDate = (dateString) => {
             <p>{{ $t('dashboard.donors.no_search_results') }}</p>
           </div>
 
-          <DataTable v-else :value="filteredDonors" striped-rows class="p-datatable-sm" table-style="min-width: 50rem">
-            <Column field="animalName" :header="$t('dashboard.donors.columns.animal')" class="!text-zinc-900 dark:!text-white font-bold"></Column>
-            <Column :header="$t('dashboard.donors.columns.owner')" class="!text-zinc-600 dark:!text-zinc-400">
-              <template #body="slotProps">
-                {{ slotProps.data.ownerFirstname }} {{ slotProps.data.ownerLastname }}
-              </template>
-            </Column>
-            <Column field="bloodGroup" :header="$t('dashboard.donors.columns.blood')">
-              <template #body="slotProps">
-                <Tag :value="slotProps.data.bloodGroup" severity="warning" />
-              </template>
-            </Column>
-            <Column field="distanceKM" :header="$t('dashboard.donors.columns.distance')" class="!text-zinc-600 dark:!text-zinc-400">
-              <template #body="slotProps">
-                {{ slotProps.data.distanceKM !== null ? `${slotProps.data.distanceKM} ${$t('common.km')}` : $t('dashboard.donors.distance_unknown') }}
-              </template>
-            </Column>
-            <Column :header="$t('dashboard.donors.columns.last_donation')" class="!text-zinc-600 dark:!text-zinc-400">
-              <template #body="slotProps">
-                {{ slotProps.data.lastDonationDate ? formatDate(slotProps.data.lastDonationDate) : $t('dashboard.donors.never_donated') }}
-              </template>
-            </Column>
-            <Column :header="$t('dashboard.donors.columns.action')">
-              <template #body="slotProps">
-                <a
-                  v-if="slotProps.data.ownerPhone"
-                  :href="`tel:${slotProps.data.ownerPhone}`"
-                  class="inline-flex"
-                >
-                  <Button :label="$t('dashboard.donors.contact')" icon="pi pi-phone" size="small" class="!bg-[#ff3b4e] !border-[#ff3b4e]" />
-                </a>
-              </template>
-            </Column>
-          </DataTable>
+          <!-- Sous-tâche 6.B : le DataTable garde sa largeur minimale (colonnes lisibles sur
+          desktop) mais le débordement horizontal résultant sur mobile/tablette est confiné à
+          ce conteneur scrollable plutôt que de déborder toute la page. `tabindex="0"` +
+          `role="region"` (revue a11y) : sans ça, les colonnes hors champ sur petit viewport
+          ne sont atteignables qu'à la souris/au tactile (échec WCAG 2.1.1, technique SCR29) --
+          `Tab` seul n'aurait révélé que les cellules interactives (ex. lien tel:), jamais les
+          colonnes purement textuelles entre elles. -->
+          <div v-else class="overflow-x-auto" tabindex="0" role="region" :aria-label="$t('dashboard.donors.title')">
+            <DataTable :value="filteredDonors" striped-rows class="p-datatable-sm" table-style="min-width: 50rem">
+              <Column field="animalName" :header="$t('dashboard.donors.columns.animal')" class="!text-zinc-900 dark:!text-white font-bold"></Column>
+              <Column :header="$t('dashboard.donors.columns.owner')" class="!text-zinc-600 dark:!text-zinc-400">
+                <template #body="slotProps">
+                  {{ slotProps.data.ownerFirstname }} {{ slotProps.data.ownerLastname }}
+                </template>
+              </Column>
+              <Column field="bloodGroup" :header="$t('dashboard.donors.columns.blood')">
+                <template #body="slotProps">
+                  <Tag :value="slotProps.data.bloodGroup" severity="warning" />
+                </template>
+              </Column>
+              <Column field="distanceKM" :header="$t('dashboard.donors.columns.distance')" class="!text-zinc-600 dark:!text-zinc-400">
+                <template #body="slotProps">
+                  {{ slotProps.data.distanceKM !== null ? `${slotProps.data.distanceKM} ${$t('common.km')}` : $t('dashboard.donors.distance_unknown') }}
+                </template>
+              </Column>
+              <Column :header="$t('dashboard.donors.columns.last_donation')" class="!text-zinc-600 dark:!text-zinc-400">
+                <template #body="slotProps">
+                  {{ slotProps.data.lastDonationDate ? formatDate(slotProps.data.lastDonationDate) : $t('dashboard.donors.never_donated') }}
+                </template>
+              </Column>
+              <Column :header="$t('dashboard.donors.columns.action')">
+                <template #body="slotProps">
+                  <a
+                    v-if="slotProps.data.ownerPhone"
+                    :href="`tel:${slotProps.data.ownerPhone}`"
+                    class="inline-flex"
+                  >
+                    <Button :label="$t('dashboard.donors.contact')" icon="pi pi-phone" size="small" class="!bg-[#ff3b4e] !border-[#ff3b4e]" />
+                  </a>
+                </template>
+              </Column>
+            </DataTable>
+          </div>
         </div>
       </div>
     </div>

@@ -162,12 +162,14 @@ const handleRegister = async () => {
           <InputText
             v-model="form.lastname"
             :placeholder="$t('auth.register_owner.fields.lastname')"
+            :aria-label="$t('auth.register_owner.fields.lastname')"
             class="!bg-zinc-200 dark:!bg-zinc-800 !border-none !text-zinc-900 dark:!text-white !p-3 !rounded-md"
             required
           />
           <InputText
             v-model="form.firstname"
             :placeholder="$t('auth.register_owner.fields.firstname')"
+            :aria-label="$t('auth.register_owner.fields.firstname')"
             class="!bg-zinc-200 dark:!bg-zinc-800 !border-none !text-zinc-900 dark:!text-white !p-3 !rounded-md"
             required
           />
@@ -177,19 +179,28 @@ const handleRegister = async () => {
           v-model="form.email"
           type="email"
           :placeholder="$t('auth.register_owner.fields.email')"
+          :aria-label="$t('auth.register_owner.fields.email')"
           class="!bg-zinc-200 dark:!bg-zinc-800 !border-none !text-zinc-900 dark:!text-white !p-3 !rounded-md"
           required
         />
 
-        <PhoneInput v-model="form.phone" />
+        <PhoneInput
+          v-model="form.phone"
+          :aria-label="$t('auth.register_owner.fields.phone')"
+        />
 
-        <AddressAutocomplete :model-value="form.address" @select="onAddressSelect" />
+        <AddressAutocomplete
+          :model-value="form.address"
+          :aria-label="$t('auth.register_owner.fields.address')"
+          @select="onAddressSelect"
+        />
 
         <div class="grid grid-cols-2 gap-4 items-start">
           <div class="flex flex-col gap-1">
             <Password
               v-model="password"
               :placeholder="$t('auth.register_owner.fields.password')"
+              :aria-label="$t('auth.register_owner.fields.password')"
               toggle-mask
               :feedback="false"
               class="w-full"
@@ -207,6 +218,7 @@ const handleRegister = async () => {
           <Password
             v-model="confirmPassword"
             :placeholder="$t('auth.register_owner.fields.confirm_password')"
+            :aria-label="$t('auth.register_owner.fields.confirm_password')"
             :feedback="false"
             class="w-full"
             input-class="w-full !bg-zinc-200 dark:!bg-zinc-800 !border-none !text-zinc-900 dark:!text-white !p-3"
@@ -226,6 +238,7 @@ const handleRegister = async () => {
           <InputText
             v-model="form.animal_name"
             :placeholder="$t('auth.register_owner.fields.animal_name')"
+            :aria-label="$t('auth.register_owner.fields.animal_name')"
             class="!bg-zinc-200 dark:!bg-zinc-800 !border-none !text-zinc-900 dark:!text-white !p-3 !rounded-md w-full"
           />
 
@@ -233,6 +246,7 @@ const handleRegister = async () => {
             v-model="form.animal_birthDate"
             date-format="dd/mm/yy"
             :placeholder="$t('auth.register_owner.fields.animal_birth_date')"
+            :aria-label="$t('auth.register_owner.fields.animal_birth_date')"
             :manual-input="false"
             show-icon
             icon-display="input"
@@ -249,6 +263,7 @@ const handleRegister = async () => {
         <div class="grid grid-cols-2 gap-4">
           <select
             v-model="form.animal_species"
+            :aria-label="$t('auth.register_owner.fields.animal_species')"
             class="bg-zinc-200 dark:bg-zinc-800 border-none text-zinc-900 dark:text-white p-3 rounded-md w-full appearance-none"
           >
             <option :value="Species.DOG">{{ $t('request.species.dog') }}</option>
@@ -257,6 +272,7 @@ const handleRegister = async () => {
           <InputText
             v-model="form.animal_breed"
             :placeholder="$t('auth.register_owner.fields.animal_breed')"
+            :aria-label="$t('auth.register_owner.fields.animal_breed')"
             class="!bg-zinc-200 dark:!bg-zinc-800 !border-none !text-zinc-900 dark:!text-white !p-3 !rounded-md"
           />
         </div>
@@ -267,6 +283,7 @@ const handleRegister = async () => {
             type="number"
             step="0.1"
             :placeholder="$t('auth.register_owner.fields.animal_weight')"
+            :aria-label="$t('auth.register_owner.fields.animal_weight')"
             class="!bg-zinc-200 dark:!bg-zinc-800 !border-none !text-zinc-900 dark:!text-white !p-3 !rounded-md"
           />
           <Select
@@ -274,6 +291,7 @@ const handleRegister = async () => {
             :options="bloodOptions"
             :disabled="!form.animal_species"
             :placeholder="$t('auth.register_owner.fields.blood_group')"
+            :aria-label="$t('auth.register_owner.fields.blood_group')"
             required
             class="!bg-zinc-200 dark:!bg-zinc-800 !border-none !text-zinc-900 dark:!text-white !p-3 !rounded-md"
           />
@@ -285,6 +303,7 @@ const handleRegister = async () => {
           option-label="label"
           option-value="value"
           :placeholder="$t('auth.register_owner.fields.animal_sex')"
+          :aria-label="$t('auth.register_owner.fields.animal_sex')"
           show-clear
           class="!bg-zinc-200 dark:!bg-zinc-800 !border-none !text-zinc-900 dark:!text-white !p-3 !rounded-md w-full"
         />
