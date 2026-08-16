@@ -617,7 +617,9 @@
       "toasts": {
         "success": "{name} is now a validated donor.",
         "blood_group_unknown": "Unknown blood group — cannot be validated.",
-        "generic_error": "Unable to validate this animal."
+        "generic_error": "Unable to validate this animal.",
+        "blood_group_corrected": "{name}'s blood group has been corrected.",
+        "blood_group_correction_error": "Unable to correct this animal's blood group."
       }
     },
     "history": {

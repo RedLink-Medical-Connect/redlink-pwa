@@ -6,6 +6,9 @@ import { resolve } from 'node:path'
 // composable) des Animals en attente de validation vétérinaire, et l'action de
 // validation elle-même — écriture scopée à isValidatedDonor + validationExpiresAt
 // uniquement (validateAnimalDonorSimple).
+//
+// Phase 6 (section B) : `correctBloodGroup` + `mapBloodGroupCorrectionErrorKey`,
+// couverts par les describe() dédiés en bas de fichier.
 
 const graphqlMock = vi.fn()
 
@@ -13,7 +16,11 @@ vi.mock('aws-amplify/api', () => ({
   generateClient: () => ({ graphql: graphqlMock }),
 }))
 
-import { useAnimalValidation, mapValidationErrorKey } from '@/composables/useAnimalValidation'
+import {
+  useAnimalValidation,
+  mapValidationErrorKey,
+  mapBloodGroupCorrectionErrorKey,
+} from '@/composables/useAnimalValidation'
 import { listAnimalsForValidation } from '@/graphql/custom-queries'
 
 const buildAnimal = (overrides = {}) => ({
@@ -419,6 +426,154 @@ describe('mapValidationErrorKey', () => {
 
     for (const code of ['BLOOD_GROUP_UNKNOWN', 'SOME_UNKNOWN_CODE']) {
       const key = mapValidationErrorKey(code)
+      expect(resolveKey(fr, key)).toBeTypeOf('string')
+      expect(resolveKey(en, key)).toBeTypeOf('string')
+    }
+  })
+})
+
+// Phase 6 (section B) : useAnimalValidation.correctBloodGroup — corrige un
+// Animal.bloodGroup saisi par erreur par l'Owner (nouvelle règle @auth au niveau champ
+// sur bloodGroup, voir schema.graphql). N'écrit QUE bloodGroup
+// (updateAnimalBloodGroupSimple) — jamais isValidatedDonor/validationExpiresAt, qui
+// restent le rôle exclusif de validateAnimal (voir describe ci-dessus).
+describe('useAnimalValidation.correctBloodGroup', () => {
+  beforeEach(() => {
+    graphqlMock.mockReset()
+  })
+
+  it('appelle la mutation avec un input contenant EXACTEMENT id/bloodGroup (rien d’autre, surtout pas isValidatedDonor/validationExpiresAt)', async () => {
+    let capturedInput = null
+
+    graphqlMock.mockImplementation(async ({ query, variables }) => {
+      if (query.includes('UpdateAnimalBloodGroup')) {
+        capturedInput = variables.input
+        return { data: { updateAnimal: { ...variables.input } } }
+      }
+      throw new Error(`Unexpected graphql call in test: ${query.slice(0, 60)}`)
+    })
+
+    const { correctBloodGroup } = useAnimalValidation()
+    await correctBloodGroup('animal-1', 'DEA 1.1-')
+
+    expect(capturedInput).not.toBeNull()
+    expect(Object.keys(capturedInput).sort()).toEqual(['bloodGroup', 'id'].sort())
+    expect(capturedInput.id).toBe('animal-1')
+    expect(capturedInput.bloodGroup).toBe('DEA 1.1-')
+  })
+
+  it.each([
+    ['absent (chaîne vide)', ''],
+    ['non renseigné (null)', null],
+    ["littéral 'UNKNOWN'", 'UNKNOWN'],
+  ])(
+    'refuse la correction (BLOOD_GROUP_UNKNOWN) sans appeler la mutation quand la nouvelle valeur est %s',
+    async (_label, bloodGroup) => {
+      const { correctBloodGroup, isCorrectingBloodGroup } = useAnimalValidation()
+
+      await expect(correctBloodGroup('animal-1', bloodGroup)).rejects.toThrow(
+        'BLOOD_GROUP_UNKNOWN',
+      )
+
+      expect(graphqlMock).not.toHaveBeenCalled()
+      expect(isCorrectingBloodGroup.value).toBe(false)
+    },
+  )
+
+  it('met à jour pendingAnimals.value localement avec la nouvelle valeur au succès (les autres animaux restent inchangés)', async () => {
+    graphqlMock.mockImplementation(async ({ variables }) => ({
+      data: { updateAnimal: { ...variables.input } },
+    }))
+
+    const { correctBloodGroup, pendingAnimals } = useAnimalValidation()
+    pendingAnimals.value = [
+      buildAnimal({ id: 'animal-1', bloodGroup: 'UNKNOWN' }),
+      buildAnimal({ id: 'animal-2', bloodGroup: 'A' }),
+    ]
+
+    await correctBloodGroup('animal-1', 'DEA 1.1+')
+
+    expect(pendingAnimals.value.find((a) => a.id === 'animal-1').bloodGroup).toBe('DEA 1.1+')
+    expect(pendingAnimals.value.find((a) => a.id === 'animal-2').bloodGroup).toBe('A')
+  })
+
+  it('corrige un animalId absent de pendingAnimals.value sans planter : la mutation part quand même, le filtre local est un no-op', async () => {
+    let capturedInput = null
+    graphqlMock.mockImplementation(async ({ variables }) => {
+      capturedInput = variables.input
+      return { data: { updateAnimal: { ...variables.input } } }
+    })
+
+    const { correctBloodGroup, pendingAnimals } = useAnimalValidation()
+    pendingAnimals.value = [buildAnimal({ id: 'animal-2' })]
+
+    await expect(correctBloodGroup('animal-absent-ailleurs', 'B')).resolves.toBeUndefined()
+
+    expect(capturedInput.id).toBe('animal-absent-ailleurs')
+    expect(pendingAnimals.value.map((a) => a.id)).toEqual(['animal-2'])
+  })
+
+  it('authMode userPool, isCorrectingBloodGroup true pendant l’appel puis false, propage l’erreur sans modifier pendingAnimals au échec', async () => {
+    graphqlMock.mockImplementation(async ({ authMode }) => {
+      expect(authMode).toBe('userPool')
+      throw new Error('boom')
+    })
+
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const { correctBloodGroup, isCorrectingBloodGroup, pendingAnimals } = useAnimalValidation()
+    pendingAnimals.value = [buildAnimal({ id: 'animal-1', bloodGroup: 'UNKNOWN' })]
+
+    expect(isCorrectingBloodGroup.value).toBe(false)
+    const promise = correctBloodGroup('animal-1', 'DEA 1.1-')
+    expect(isCorrectingBloodGroup.value).toBe(true)
+
+    await expect(promise).rejects.toThrow('boom')
+
+    expect(isCorrectingBloodGroup.value).toBe(false)
+    expect(pendingAnimals.value.find((a) => a.id === 'animal-1').bloodGroup).toBe('UNKNOWN')
+    expect(consoleErrorSpy).toHaveBeenCalled()
+
+    consoleErrorSpy.mockRestore()
+  })
+
+  it('isCorrectingBloodGroup est un ref distinct de isLoading et isValidating', () => {
+    const { isCorrectingBloodGroup, isLoading, isValidating } = useAnimalValidation()
+    expect(isCorrectingBloodGroup).not.toBe(isLoading)
+    expect(isCorrectingBloodGroup).not.toBe(isValidating)
+  })
+})
+
+// Même raisonnement que mapValidationErrorKey (voir sa doc ci-dessus) : fonction pure
+// dédiée à correctBloodGroup, extraite de ValidationsView.vue pour rester testable sans
+// monter de composant.
+describe('mapBloodGroupCorrectionErrorKey', () => {
+  it('mappe BLOOD_GROUP_UNKNOWN vers la même clé i18n que mapValidationErrorKey (même garde-fou, même message)', () => {
+    expect(mapBloodGroupCorrectionErrorKey('BLOOD_GROUP_UNKNOWN')).toBe(
+      'dashboard.validations.toasts.blood_group_unknown',
+    )
+  })
+
+  it('retombe sur une clé générique DISTINCTE de celle de mapValidationErrorKey pour un code non reconnu (erreur réseau, @auth...) — la correction et la validation sont deux actions différentes', () => {
+    expect(mapBloodGroupCorrectionErrorKey('Network request failed')).toBe(
+      'dashboard.validations.toasts.blood_group_correction_error',
+    )
+    expect(mapBloodGroupCorrectionErrorKey(undefined)).toBe(
+      'dashboard.validations.toasts.blood_group_correction_error',
+    )
+    expect(mapBloodGroupCorrectionErrorKey('Network request failed')).not.toBe(
+      mapValidationErrorKey('Network request failed'),
+    )
+  })
+
+  it('les deux clés retournées existent réellement dans fr.json et en.json (pas une clé qui déclencherait le warning ESLint @intlify/vue-i18n/no-missing-keys)', () => {
+    const fr = JSON.parse(readFileSync(resolve(process.cwd(), 'src/locales/fr.json'), 'utf-8'))
+    const en = JSON.parse(readFileSync(resolve(process.cwd(), 'src/locales/en.json'), 'utf-8'))
+
+    const resolveKey = (obj, key) => key.split('.').reduce((acc, part) => acc?.[part], obj)
+
+    for (const code of ['BLOOD_GROUP_UNKNOWN', 'SOME_UNKNOWN_CODE']) {
+      const key = mapBloodGroupCorrectionErrorKey(code)
       expect(resolveKey(fr, key)).toBeTypeOf('string')
       expect(resolveKey(en, key)).toBeTypeOf('string')
     }

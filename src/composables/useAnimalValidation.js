@@ -1,7 +1,7 @@
 import { ref } from 'vue'
 import { generateClient } from 'aws-amplify/api'
 import { listAnimalsForValidation } from '@/graphql/custom-queries'
-import { validateAnimalDonorSimple } from '@/graphql/custom-mutations'
+import { validateAnimalDonorSimple, updateAnimalBloodGroupSimple } from '@/graphql/custom-mutations'
 import { isValidatedDonor } from '@/services/eligibility-service'
 
 // Durée d'une validation vétérinaire (CONTEXT.md, "Validated Donor") : 1 an, renouvelable
@@ -32,6 +32,32 @@ export function mapValidationErrorKey(errorMessage) {
   return VALIDATION_ERROR_KEYS[errorMessage] || 'dashboard.validations.toasts.generic_error'
 }
 
+// Clé i18n spécifique par code d'erreur levé par `correctBloodGroup` (voir sa doc
+// plus bas). Réutilise la même clé `blood_group_unknown` que `VALIDATION_ERROR_KEYS`
+// pour le code `BLOOD_GROUP_UNKNOWN` (même garde-fou, même message) — mais un
+// message d'erreur générique distinct pour tout le reste (réseau, @auth...) : celui de
+// `mapValidationErrorKey` ("Impossible de valider cet animal") parlerait de validation,
+// pas de correction de groupe sanguin, ce qui induirait le vétérinaire en erreur sur
+// l'action qui a réellement échoué.
+const BLOOD_GROUP_CORRECTION_ERROR_KEYS = {
+  BLOOD_GROUP_UNKNOWN: 'dashboard.validations.toasts.blood_group_unknown',
+}
+
+/**
+ * Traduit le `.message` d'une erreur levée par `correctBloodGroup` en clé i18n à afficher
+ * à l'utilisateur — même raisonnement que `mapValidationErrorKey` ci-dessus (fonction pure,
+ * hors contexte de composant, testable sans monter de composant Vue).
+ *
+ * @param {string} errorMessage
+ * @returns {string} une clé i18n, à passer à `t()`
+ */
+export function mapBloodGroupCorrectionErrorKey(errorMessage) {
+  return (
+    BLOOD_GROUP_CORRECTION_ERROR_KEYS[errorMessage] ||
+    'dashboard.validations.toasts.blood_group_correction_error'
+  )
+}
+
 /**
  * Phase 1.1 : composable Veterinarian-facing pour la liste des Animals en attente de
  * validation, et l'action de validation elle-même (ADR-0002).
@@ -55,14 +81,24 @@ export function mapValidationErrorKey(errorMessage) {
  * simplification pilote assumée), donc le statut réel se calcule toujours à la lecture
  * via cette fonction, jamais en faisant confiance au flag brut de la DB.
  *
- * `bloodGroup` n'est JAMAIS écrit ici : les Veterinarians n'ont aucun accès en écriture
- * dessus (seuls `isValidatedDonor` et `validationExpiresAt` sont ouverts en écriture par
- * @auth, cf. ADR-0002). En revanche, la règle "un groupe sanguin connu est un prérequis à
+ * `bloodGroup` n'est JAMAIS écrit par `validateAnimal` : cette action reste scopée à
+ * `isValidatedDonor`/`validationExpiresAt` uniquement (`validateAnimalDonorSimple`,
+ * ADR-0002). En revanche, la règle "un groupe sanguin connu est un prérequis à
  * la validation" (CONTEXT.md, "un Animal Validated Donor à groupe sanguin inconnu ne peut
  * pas exister") EST appliquée ici, comme l'assigne explicitement l'amendement de l'ADR-0002
  * à ce fichier précis — `validateAnimal` refuse la validation si le `bloodGroup` connu
  * localement (issu de `pendingAnimals`) est absent/`''`/`'UNKNOWN'`, même prédicat que celui
  * déjà utilisé par `isBloodCompatible` (eligibility-service.js) pour rester cohérent.
+ *
+ * Phase 6 (section B) : `correctBloodGroup` ci-dessous couvre le cas où ce `bloodGroup`
+ * connu localement EST `'UNKNOWN'`/vide (saisie erronée de l'Owner) — jusque-là un
+ * vétérinaire pouvait constater le problème (message `BLOOD_GROUP_UNKNOWN` ci-dessus) mais
+ * n'avait aucun moyen de le corriger : `Animal.bloodGroup` n'avait pas de règle `@auth` au
+ * niveau champ ouvrant l'écriture aux Veterinarians. Nouvelle règle de champ ajoutée
+ * (schema.graphql) : contrairement à `isValidatedDonor`/`validationExpiresAt`,
+ * `bloodGroup` reste aussi écrit par l'Owner (création/édition) — voir le commentaire dans
+ * schema.graphql pour le détail de cette règle @auth, volontairement différente du pattern
+ * ADR-0002/0003 (Owner `[read]` seul) pour ce champ précis.
  */
 export function useAnimalValidation() {
   const client = generateClient()
@@ -70,6 +106,11 @@ export function useAnimalValidation() {
   const pendingAnimals = ref([])
   const isLoading = ref(false)
   const isValidating = ref(false)
+  // Ref de chargement dédiée à `correctBloodGroup`, distincte de `isValidating` (même
+  // raisonnement que isLoading/isValidating déjà séparés : une correction de bloodGroup et
+  // une validation sont deux actions indépendantes, potentiellement déclenchées sur deux
+  // lignes différentes du tableau au même instant côté ValidationsView.vue).
+  const isCorrectingBloodGroup = ref(false)
   // Distingue "chargement en erreur" de "file d'attente réellement vide" — sans ce ref,
   // un échec réseau/@auth silencieux (attrapé ci-dessous, jamais rethrow, voir le test
   // dédié plus bas) rendait exactement le même état que 0 animal en attente : un
@@ -146,12 +187,65 @@ export function useAnimalValidation() {
     }
   }
 
+  /**
+   * Corrige le `bloodGroup` d'un Animal en attente de validation, saisi par erreur par
+   * l'Owner (Phase 6, section B — nouvelle règle `@auth` au niveau champ sur `bloodGroup`,
+   * voir schema.graphql). N'écrit QUE `bloodGroup` (`updateAnimalBloodGroupSimple`) —
+   * jamais `isValidatedDonor`/`validationExpiresAt`, qui restent le rôle exclusif de
+   * `validateAnimal` ci-dessus.
+   *
+   * Refuse (throw `BLOOD_GROUP_UNKNOWN`, même code que `validateAnimal`) si `bloodGroup`
+   * est absent/`''`/`'UNKNOWN'` — défense en profondeur : `ValidationsView.vue` alimente
+   * déjà son `Select` avec `BloodGroupsBySpecies` (constants/enums.js), qui ne liste jamais
+   * `'UNKNOWN'` comme option choisissable, mais cette fonction reste appelable
+   * indépendamment de ce composant.
+   *
+   * Met à jour `pendingAnimals.value` localement avec la nouvelle valeur au succès — pas de
+   * re-fetch complet : `validateAnimal` lit `bloodGroup` depuis cette même liste locale
+   * (voir plus haut), donc un vétérinaire qui corrige puis valide dans la foulée doit voir
+   * la correction reflétée immédiatement.
+   *
+   * @param {string} animalId
+   * @param {string} bloodGroup Nouvelle valeur, non vide et différente de 'UNKNOWN'.
+   */
+  const correctBloodGroup = async (animalId, bloodGroup) => {
+    isCorrectingBloodGroup.value = true
+    try {
+      if (!bloodGroup || bloodGroup === 'UNKNOWN') {
+        throw new Error('BLOOD_GROUP_UNKNOWN')
+      }
+
+      await client.graphql({
+        query: updateAnimalBloodGroupSimple,
+        variables: {
+          input: {
+            id: animalId,
+            bloodGroup,
+          },
+        },
+        authMode: 'userPool',
+      })
+
+      const target = pendingAnimals.value.find((animal) => animal.id === animalId)
+      if (target) {
+        target.bloodGroup = bloodGroup
+      }
+    } catch (e) {
+      console.error("Erreur correction du groupe sanguin de l'animal:", e)
+      throw e
+    } finally {
+      isCorrectingBloodGroup.value = false
+    }
+  }
+
   return {
     pendingAnimals,
     isLoading,
     isValidating,
+    isCorrectingBloodGroup,
     loadError,
     fetchPendingValidations,
     validateAnimal,
+    correctBloodGroup,
   }
 }

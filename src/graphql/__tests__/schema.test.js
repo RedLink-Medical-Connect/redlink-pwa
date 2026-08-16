@@ -84,38 +84,81 @@ describe('schema.graphql — Animal.isValidatedDonor / validationExpiresAt (ADR-
     }
   )
 
-  it("le reste du type Animal (avant ET après lastDonationDate/isValidatedDonor/validationExpiresAt, ex: name, weight, bloodGroup, ownerID, ownerProfile, missions) n'est pas concerné par ce scoping champ-par-champ", () => {
+  it("le reste du type Animal (avant ET après bloodGroup et lastDonationDate/isValidatedDonor/validationExpiresAt, ex: name, weight, isVaccinated, ownerID, ownerProfile, missions) n'est pas concerné par ce scoping champ-par-champ", () => {
     // Régression : si un @auth au niveau champ était accidentellement ajouté sur un
     // champ saisi par l'Owner (name, breed, weight...) OU sur un champ après
     // validationExpiresAt (ownerID, ownerProfile, missions...), ce test le
     // détecterait. Couvre tout le type, pas seulement le segment name->isValidatedDonor
     // (une revue précédente a signalé que la version initiale ne couvrait pas la
-    // fin du type) : on retire uniquement les blocs légitimes (lastDonationDate,
-    // ADR-0003, + isValidatedDonor/validationExpiresAt, ADR-0002) et on vérifie qu'aucun
-    // '@auth(' ne subsiste ailleurs.
+    // fin du type) : on retire uniquement les blocs légitimes (bloodGroup, Phase 6 section
+    // B ; lastDonationDate, ADR-0003 ; isValidatedDonor/validationExpiresAt, ADR-0002) et
+    // on vérifie qu'aucun '@auth(' ne subsiste ailleurs.
     // On part de `name:`, pas du début du type, pour exclure le bloc @auth
     // *au niveau type* sur `type Animal @model @auth(rules: [...])` lui-même
     // (légitime, ce n'est pas le scoping champ-par-champ qu'on vérifie ici).
     const nameFieldIdx = animalType.indexOf('name: String!')
+    const bloodGroupBlock = extractFieldBlock('bloodGroup')
     const lastDonationDateBlock = extractFieldBlock('lastDonationDate')
     const isValidatedDonorBlock = extractFieldBlock('isValidatedDonor')
     const validationExpiresAtBlock = extractFieldBlock('validationExpiresAt')
+    const bloodGroupBlockStart = animalType.indexOf(bloodGroupBlock)
+    const bloodGroupBlockEnd = bloodGroupBlockStart + bloodGroupBlock.length
     const validationBlocksStart = animalType.indexOf(lastDonationDateBlock)
     const validationBlocksEnd =
       animalType.indexOf(validationExpiresAtBlock) + validationExpiresAtBlock.length
-    // Les trois blocs légitimes sont contigus dans le schéma (lastDonationDate juste
-    // avant isValidatedDonor/validationExpiresAt) : on vérifie cette hypothèse plutôt que
-    // de la supposer silencieusement, sinon le slice ci-dessous retirerait plus/moins que
-    // prévu sans que ce test le détecte.
+    // bloodGroup précède weight->isVaccinated, PUIS lastDonationDate/isValidatedDonor/
+    // validationExpiresAt restent contigus entre eux (isVaccinated/isSterilized/
+    // donationFrequency s'intercalent entre les deux zones) : on vérifie ces deux
+    // hypothèses plutôt que de les supposer silencieusement, sinon le slice ci-dessous
+    // retirerait plus/moins que prévu sans que ce test le détecte.
+    expect(bloodGroupBlockStart).toBeGreaterThan(-1)
+    expect(bloodGroupBlockEnd).toBeLessThan(validationBlocksStart)
     expect(animalType.indexOf(isValidatedDonorBlock)).toBeGreaterThan(
       validationBlocksStart + lastDonationDateBlock.length - 1,
     )
     const restOfType =
-      animalType.slice(nameFieldIdx, validationBlocksStart) +
+      animalType.slice(nameFieldIdx, bloodGroupBlockStart) +
+      animalType.slice(bloodGroupBlockEnd, validationBlocksStart) +
       animalType.slice(validationBlocksEnd)
     // `@auth(` (avec parenthèse) plutôt que `@auth` seul : le commentaire qui précède
     // isValidatedDonor mentionne "@auth" en prose sans l'appliquer à un champ.
     expect(restOfType).not.toContain('@auth(')
+  })
+})
+
+describe('schema.graphql — Animal.bloodGroup (Phase 6, section B)', () => {
+  const animalType = extractType('Animal')
+
+  it('bloodGroup reste non-nullable (String!, pas String) — contrairement à lastDonationDate/isValidatedDonor/validationExpiresAt, ce champ est renseigné dès la création par l\'Owner', () => {
+    expect(schema).toMatch(/bloodGroup: String!\n/)
+  })
+
+  it(
+    "l'Owner N'A PAS 'operations: [read]' sur bloodGroup (contrairement au pattern " +
+      'ADR-0002/0003 sur isValidatedDonor/validationExpiresAt/lastDonationDate) — ' +
+      "bloodGroup EST écrit par l'Owner à la création (AddAnimalView.vue) et en édition " +
+      '(AnimalsView.vue/updateAnimalDetails) ; une règle owner restreinte à [read] ' +
+      "casserait ces deux écritures existantes. Pin test délibéré : si quelqu'un " +
+      "'aligne' un jour cette règle sur le pattern des trois autres champs sans " +
+      'vérifier cette différence, ce test le détecte avant un `amplify push` réel.',
+    () => {
+      const block = extractFieldBlock('bloodGroup')
+      expect(block).toContain('{ allow: owner }')
+      expect(block).not.toContain('{ allow: owner, operations: [read] }')
+    },
+  )
+
+  it('les Veterinarians ont read+update sur bloodGroup, scopé au groupe Veterinarians (permet de corriger un bloodGroup UNKNOWN saisi par erreur par l\'Owner, avant validation)', () => {
+    const block = extractFieldBlock('bloodGroup')
+    expect(block).toContain(
+      '{ allow: groups, groups: ["Veterinarians"], operations: [read, update] }',
+    )
+  })
+
+  it('bloodGroup précède bien weight->isVaccinated et reste avant lastDonationDate/isValidatedDonor/validationExpiresAt dans le type Animal (position documentaire, pas fonctionnelle)', () => {
+    expect(animalType.indexOf('weight: Float!')).toBeLessThan(animalType.indexOf('bloodGroup:'))
+    expect(animalType.indexOf('bloodGroup:')).toBeLessThan(animalType.indexOf('isVaccinated:'))
+    expect(animalType.indexOf('bloodGroup:')).toBeLessThan(animalType.indexOf('lastDonationDate:'))
   })
 })
 
