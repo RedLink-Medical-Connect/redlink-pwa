@@ -111,7 +111,10 @@ touchés, en parallèle du reviewer principal).
   connue et trackée, pas un modèle à suivre.
 - **Enums** : les valeurs de statut/type viennent de `src/constants/enums.js`,
   jamais de littéraux en dur — partiellement suivi seulement, dette existante
-  par endroits (ex. `MissionStatus` n'a pas d'entrée `CANCELLED`).
+  par endroits (des littéraux `'OPEN'`/`'EMERGENCY'`/etc. subsistent dans des
+  fichiers qui importent déjà l'enum correspondant pour d'autres comparaisons,
+  ex. `useClinicRequest.js`, `RequestsView.vue` — voir `docs/audit/BACKLOG.md`
+  R-14, pas encore traité).
 - **Écriture Veterinarian scopée sur `Animal`/`Request`/`Mission`** : pattern
   utilisé cinq fois (ADR-0002, ADR-0003, ADR-0004, ADR-0005) — `@auth` au niveau
   champ (pas de mutation dédiée/Lambda) apparié à une mutation `*Simple`
@@ -146,6 +149,17 @@ touchés, en parallèle du reviewer principal).
   réassigner sa ref sur échec — un tableau vide en sortie du composable suffit à
   produire `false` côté fonction pure, fail-closed par construction plutôt que
   par code de repli dupliqué.
+- **Résolution de contexte (`clinicID`/etc.) qui ne catch pas ses propres
+  erreurs** : un helper interne à un composable qui résout un identifiant
+  requis pour la suite du flux (ex. `fetchClinicContext()` dans
+  `useClinicDonors.js`, `fetchClinicId()` dans `useClinicRequest.js`) ne doit
+  PAS avaler ses erreurs réseau/`@auth` dans son propre `try/catch` — il ne
+  renvoie `null`/`undefined` QUE pour le cas légitime "cette ressource n'existe
+  pas encore" (ex. Veterinarian sans `clinicID`). Une vraie erreur remonte telle
+  quelle jusqu'au `try/catch` de la fonction appelante (celle qui pilote
+  `loadError`), seule à même de distinguer "en erreur" de "légitimement vide" —
+  sinon `loadError` ne se déclenche jamais sur ce chemin, quel que soit
+  l'échec (voir `docs/audit/BACKLOG.md` R-12).
 
 ## Tenir ce fichier à jour
 

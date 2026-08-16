@@ -43,7 +43,11 @@ exports.handler = async (event) => {
     try {
       await client.send(new GetGroupCommand(groupParams));
     } catch (e) {
-      console.log(`⚙️ Création du groupe '${groupName}'...`);
+      // R-04 (docs/audit/BACKLOG.md) demandait explicitement de logger `e.name` ici plutôt
+      // que de laisser la variable inutilisée (ex. AccessDeniedException masqué derrière un
+      // "not found" trompeur) -- CloudWatch garde ainsi la vraie cause de cette branche, pas
+      // seulement le fait qu'on tente une création de groupe.
+      console.log(`⚙️ Groupe '${groupName}' introuvable (${e.name}) — création...`);
       await client.send(new CreateGroupCommand(groupParams));
     }
 

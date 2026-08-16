@@ -5,7 +5,7 @@ import { getCurrentUser } from 'aws-amplify/auth'
 
 // 👇 On garde vos requêtes existantes
 import { getVeterinarian } from '@/graphql/queries'
-import { listRequestsByClinic, getVetWithClinic } from '@/graphql/custom-queries' // Ajout de getVetWithClinic ici
+import { listRequestsByClinic } from '@/graphql/custom-queries'
 
 // 👇 On importe les mutations SIMPLES pour éviter les erreurs de sous-champs
 import { createRequestSimple, updateRequestStatusSimple } from '@/graphql/custom-mutations'
