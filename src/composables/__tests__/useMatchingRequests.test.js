@@ -657,6 +657,114 @@ describe('useMatchingRequests', () => {
     })
   })
 
+  // Phase 7.6 (R-09) : loadError distingue "recherche en échec" d'une absence réelle
+  // d'urgence à proximité -- DashboardView.vue (radar d'urgence Owner, roadmap Phase 6.2)
+  // affichait auparavant le même message rassurant dans les deux cas.
+  describe('loadError (Phase 7.6, R-09)', () => {
+    it("un échec explicite (searchMatches() par défaut) du flux principal met loadError à true", async () => {
+      graphqlMock.mockImplementation(async ({ query }) => {
+        if (query.includes('GetOwner')) return { data: { getOwner: buildOwnerProfile() } }
+        if (query.includes('ListMyAnimalsByOwnerId')) {
+          return { data: { listAnimals: { items: [buildAnimal()] } } }
+        }
+        if (query.includes('MyClinicRelationsByOwnerID')) {
+          return { data: { clinicOwnerRelationsByOwnerID: { items: [] } } }
+        }
+        if (query.includes('ListOpenRequestsWithClinic')) {
+          throw new Error('réseau : timeout')
+        }
+        throw new Error(`Unexpected graphql call in test: ${query.slice(0, 60)}`)
+      })
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+      const { searchMatches, loadError, matches } = useMatchingRequests()
+      expect(loadError.value).toBe(false)
+
+      await searchMatches()
+
+      expect(loadError.value).toBe(true)
+      expect(matches.value).toEqual([])
+
+      consoleErrorSpy.mockRestore()
+    })
+
+    it("un échec silencieux (searchMatches({ silent: true }), polling/retour de focus) ne met JAMAIS loadError à true", async () => {
+      graphqlMock.mockImplementation(async ({ query }) => {
+        if (query.includes('GetOwner')) return { data: { getOwner: buildOwnerProfile() } }
+        if (query.includes('ListMyAnimalsByOwnerId')) {
+          return { data: { listAnimals: { items: [buildAnimal()] } } }
+        }
+        if (query.includes('MyClinicRelationsByOwnerID')) {
+          return { data: { clinicOwnerRelationsByOwnerID: { items: [] } } }
+        }
+        if (query.includes('ListOpenRequestsWithClinic')) {
+          throw new Error('réseau : timeout')
+        }
+        throw new Error(`Unexpected graphql call in test: ${query.slice(0, 60)}`)
+      })
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+      const { searchMatches, loadError } = useMatchingRequests()
+
+      await searchMatches({ silent: true })
+
+      expect(loadError.value).toBe(false)
+
+      consoleErrorSpy.mockRestore()
+    })
+
+    it('un rafraîchissement réussi (silencieux ou non) efface un loadError laissé par un appel explicite précédent', async () => {
+      mockGraphqlResponses({
+        profile: buildOwnerProfile(),
+        animals: [buildAnimal()],
+        requests: [buildRequest()],
+      })
+
+      const { searchMatches, loadError } = useMatchingRequests()
+
+      // 1er appel explicite : échec du flux principal.
+      graphqlMock.mockImplementationOnce(async () => {
+        throw new Error('réseau : timeout')
+      })
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+      await searchMatches()
+      expect(loadError.value).toBe(true)
+
+      // 2e appel, silencieux cette fois, qui réussit : doit effacer l'erreur précédente.
+      await searchMatches({ silent: true })
+      expect(loadError.value).toBe(false)
+
+      consoleErrorSpy.mockRestore()
+    })
+
+    it("un échec de la lecture secondaire Clinic Priority (MyClinicRelationsByOwnerID) ne met PAS loadError à true -- reste une dégradation isolée du tri", async () => {
+      const requestNear = buildRequest({ id: 'request-near', clinic: { latitude: 48.8567, longitude: 2.3522 } })
+
+      graphqlMock.mockImplementation(async ({ query }) => {
+        if (query.includes('GetOwner')) return { data: { getOwner: buildOwnerProfile() } }
+        if (query.includes('ListMyAnimalsByOwnerId')) {
+          return { data: { listAnimals: { items: [buildAnimal()] } } }
+        }
+        if (query.includes('MyClinicRelationsByOwnerID')) {
+          throw new Error('réseau : timeout')
+        }
+        if (query.includes('ListOpenRequestsWithClinic')) {
+          return { data: { listRequests: { items: [requestNear] } } }
+        }
+        throw new Error(`Unexpected graphql call in test: ${query.slice(0, 60)}`)
+      })
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+      const { searchMatches, matches, loadError } = useMatchingRequests()
+      await searchMatches()
+
+      expect(matches.value).toHaveLength(1)
+      expect(loadError.value).toBe(false)
+
+      consoleErrorSpy.mockRestore()
+    })
+  })
+
   // Phase 6.5 (ADR-0005) : filtre EXCLUSIF supplémentaire pour les Requests APPOINTMENT,
   // câblé dans useMatchingRequests.js en plus de checkEligibility() (jamais à sa place --
   // matchesAvailability() elle-même est testée en isolation dans

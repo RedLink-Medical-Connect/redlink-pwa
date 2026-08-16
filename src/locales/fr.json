@@ -305,7 +305,10 @@
     "owner": {
       "overview": {
         "title": "Tableau de bord",
-        "known_clinic_badge": "Clinique connue"
+        "known_clinic_badge": "Clinique connue",
+        "load_error_title": "Recherche impossible",
+        "load_error": "Impossible de vérifier les urgences autour de vous — réessayez.",
+        "retry": "Réessayer"
       },
       "tabs": {
         "dashboard": "TABLEAU DE BORD",
@@ -330,6 +333,8 @@
         "age": "ans",
         "title": "Mes Animaux",
         "subtitle": "Gérez les profils de vos compagnons donneurs.",
+        "load_error": "Impossible de charger la liste des animaux — réessayez.",
+        "retry": "Réessayer",
         "add_card": "Ajouter un animal",
         "unknown_breed": "Race inconnue",
         "weight_label": "Poids",
@@ -415,7 +420,8 @@
           "error": "Erreur",
           "end_date_after_start_date": "L'heure de fin doit être après le début.",
           "slot_added": "Créneau ajouté.",
-          "add_failed": "Impossible d'ajouter le créneau."
+          "add_failed": "Impossible d'ajouter le créneau.",
+          "remove_failed": "Impossible de supprimer le créneau."
         },
         "title": "Zone d'intervention",
         "distance_label": "Je suis prêt à me déplacer jusqu'à :",
@@ -451,6 +457,8 @@
           "history": "Aucun historique.",
           "go_to_board": "Voir les demandes disponibles"
         },
+        "load_error": "Impossible de charger vos missions — réessayez.",
+        "retry": "Réessayer",
         "status": {
           "pending_arrival": "En attente d'arrivée",
           "accepted": "Acceptée",
@@ -513,7 +521,7 @@
       },
       "dialog": {
         "title": "Attention !",
-        "confirm": "Êtes-vous sûr ? Cette action est irréversible.",
+        "confirm": "Êtes-vous sûr ? Cette action est irréversible. Si vous êtes le seul vétérinaire rattaché à cette clinique, elle sera supprimée avec votre compte ; sinon, seul votre compte sera supprimé.",
         "confirm_action": "Confirmer"
       }
     },
@@ -567,6 +575,8 @@
         "confirm_action": "Confirmer"
       },
       "empty": "Aucune demande en cours.",
+      "load_error": "Impossible de charger les demandes — réessayez.",
+      "retry": "Réessayer",
       "type_emergency_short": "Urgence",
       "type_appointment_short": "RDV",
       "toasts": {

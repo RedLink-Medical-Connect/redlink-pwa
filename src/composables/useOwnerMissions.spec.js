@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { generateClient } from 'aws-amplify/api'
 import { useOwnerMissions, mapAcceptMissionError } from '@/composables/useOwnerMissions'
 
@@ -138,5 +138,120 @@ describe('mapAcceptMissionError', () => {
     expect(mapAcceptMissionError('UNKNOWN_CODE', 'Erreur personnalisée.')).toBe(
       'Erreur personnalisée.',
     )
+  })
+})
+
+// Phase 7.6 (R-09): fetchAvailableMissions()/fetchMyMissions() used to only console.error on
+// failure, with no way for MissionsView.vue (fetchMyMissions) to distinguish a real fetch
+// failure from a genuinely empty mission list. loadError is shared between the two fetchers
+// (like isLoading already is), reset at the start of each call and set on failure.
+describe('useOwnerMissions > loadError (fetchAvailableMissions / fetchMyMissions)', () => {
+  let mockGraphql
+  let consoleErrorSpy
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockGraphql = vi.fn()
+    generateClient.mockReturnValue({ graphql: mockGraphql })
+    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    consoleErrorSpy.mockRestore()
+  })
+
+  it('fetchAvailableMissions: sets loadError to true on failure, keeps missions.value untouched', async () => {
+    mockGraphql.mockRejectedValueOnce(new Error('réseau : timeout'))
+
+    const { fetchAvailableMissions, missions, loadError } = useOwnerMissions()
+    expect(loadError.value).toBe(false)
+
+    await fetchAvailableMissions()
+
+    expect(loadError.value).toBe(true)
+    expect(missions.value).toEqual([])
+  })
+
+  it('fetchAvailableMissions: resets loadError to false on the next successful fetch', async () => {
+    mockGraphql.mockRejectedValueOnce(new Error('réseau : timeout'))
+
+    const { fetchAvailableMissions, loadError } = useOwnerMissions()
+    await fetchAvailableMissions()
+    expect(loadError.value).toBe(true)
+
+    mockGraphql.mockResolvedValueOnce({ data: { listRequests: { items: [] } } })
+    await fetchAvailableMissions()
+
+    expect(loadError.value).toBe(false)
+  })
+
+  it('fetchMyMissions: sets loadError to true on failure (real error, MissionsView.vue must not show the empty state)', async () => {
+    mockGraphql.mockRejectedValueOnce(new Error('réseau : timeout'))
+
+    const { fetchMyMissions, myMissions, loadError } = useOwnerMissions()
+    expect(loadError.value).toBe(false)
+
+    await fetchMyMissions()
+
+    expect(loadError.value).toBe(true)
+    expect(myMissions.value).toEqual([])
+    expect(consoleErrorSpy).toHaveBeenCalledWith('Erreur chargement mes missions:', expect.any(Error))
+  })
+
+  it('fetchMyMissions: keeps loadError false on a successful fetch, even with an empty mission list', async () => {
+    mockGraphql.mockResolvedValueOnce({ data: { listAnimals: { items: [] } } })
+
+    const { fetchMyMissions, myMissions, loadError } = useOwnerMissions()
+    await fetchMyMissions()
+
+    expect(loadError.value).toBe(false)
+    expect(myMissions.value).toEqual([])
+  })
+
+  // Regression guard for the best-effort / secondary-write distinction documented in
+  // CLAUDE.md: a failed orphan-Mission cleanup inside acceptMission() must keep swallowing
+  // its own error (console.error only) and must NEVER flip the shared loadError — that ref
+  // is reserved for the two list-fetching flows above, not for acceptMission()'s own
+  // best-effort cleanup.
+  it('acceptMission: a failed best-effort orphan-Mission cleanup does not touch loadError', async () => {
+    const request = {
+      id: 'request-1',
+      requiredSpecies: 'DOG',
+      requiredBloodGroup: 'DEA 1.1-',
+      requestType: 'EMERGENCY',
+      status: 'OPEN',
+    }
+    const animal = {
+      id: 'animal-1',
+      name: 'Rex',
+      species: 'DOG',
+      bloodGroup: 'DEA 1.1-',
+      isValidatedDonor: true,
+      validationExpiresAt: '2099-01-01T00:00:00.000Z',
+      lastDonationDate: null,
+      donationFrequency: 'ONCE_YEAR',
+    }
+    const conditionalCheckError = {
+      errors: [
+        { errorType: 'DynamoDB:ConditionalCheckFailedException', message: 'The conditional request failed' },
+      ],
+    }
+
+    mockGraphql.mockImplementation(async ({ query }) => {
+      if (query.includes('GetRequest')) return { data: { getRequest: request } }
+      if (query.includes('ListMyAnimals')) return { data: { listAnimals: { items: [animal] } } }
+      if (query.includes('CreateMission')) {
+        return { data: { createMission: { id: 'mission-1', status: 'PENDING_ARRIVAL' } } }
+      }
+      if (query.includes('LinkRequestToMission')) throw conditionalCheckError
+      if (query.includes('DeleteMission')) throw new Error('boom: cleanup also failed')
+      throw new Error(`Unexpected graphql call in test: ${query.slice(0, 60)}`)
+    })
+
+    const { acceptMission, loadError } = useOwnerMissions()
+
+    await expect(acceptMission('request-1', 'animal-1')).rejects.toThrow('REQUEST_ALREADY_TAKEN')
+
+    expect(loadError.value).toBe(false)
   })
 })

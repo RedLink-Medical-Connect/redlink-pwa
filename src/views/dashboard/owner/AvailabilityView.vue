@@ -69,6 +69,19 @@ const handleAdd = async () => {
     isSubmitting.value = false
   }
 }
+
+const handleRemove = async (id) => {
+  try {
+    await removeAvailability(id)
+  } catch {
+    toast.add({
+      severity: 'error',
+      summary: t('common.error'),
+      detail: t('dashboard.owner.availability.toasts.remove_failed'),
+      life: 3000,
+    })
+  }
+}
 </script>
 
 <template>
@@ -212,7 +225,7 @@ const handleAdd = async () => {
                   rounded
                   severity="danger"
                   class="opacity-50 group-hover:opacity-100 transition-opacity"
-                  @click="removeAvailability(slot.id)"
+                  @click="handleRemove(slot.id)"
                 />
               </div>
             </div>

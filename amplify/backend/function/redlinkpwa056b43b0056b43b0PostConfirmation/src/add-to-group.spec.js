@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest'
 import {
   CognitoIdentityProviderClient,
   GetGroupCommand,
+  CreateGroupCommand,
   AdminAddUserToGroupCommand,
 } from '@aws-sdk/client-cognito-identity-provider'
 import { handler } from './add-to-group.js'
@@ -88,5 +89,52 @@ describe('PostConfirmation add-to-group handler', () => {
     const event = buildEvent('not-a-real-profile')
     await expect(handler(event)).resolves.toBe(event)
     expect(sendSpy).not.toHaveBeenCalled()
+  })
+
+  // Phase 7.3 (R-04): regression coverage for the group-creation race window on a brand
+  // new environment -- two near-simultaneous signups can both fail GetGroupCommand ("not
+  // found") and then both attempt CreateGroupCommand; only one wins, the other receives
+  // GroupExistsException. That must not be treated as a real failure (the group now
+  // genuinely exists) -- the handler must resolve normally and still add the user to the
+  // group, rather than leaving them CONFIRMED but group-less.
+  it('treats GroupExistsException from CreateGroupCommand as benign, still adds the user, and resolves', async () => {
+    const groupExistsError = Object.assign(new Error('Group already exists'), {
+      name: 'GroupExistsException',
+    })
+
+    sendSpy.mockImplementation((command) => {
+      if (command instanceof GetGroupCommand) return Promise.reject(new Error('not found'))
+      if (command instanceof CreateGroupCommand) return Promise.reject(groupExistsError)
+      if (command instanceof AdminAddUserToGroupCommand) return Promise.resolve({})
+      return Promise.resolve({})
+    })
+
+    const event = buildEvent('vet')
+    await expect(handler(event)).resolves.toBe(event)
+
+    // The normal-path AdminAddUserToGroupCommand (step 4) is never reached here, since
+    // CreateGroupCommand rejects before getting there -- so the single call below must be
+    // the GroupExistsException recovery attempt.
+    const adminAddCalls = sendSpy.mock.calls.filter(
+      ([command]) => command instanceof AdminAddUserToGroupCommand,
+    )
+    expect(adminAddCalls).toHaveLength(1)
+  })
+
+  it('still re-throws when GroupExistsException recovery itself fails to add the user', async () => {
+    const groupExistsError = Object.assign(new Error('Group already exists'), {
+      name: 'GroupExistsException',
+    })
+
+    sendSpy.mockImplementation((command) => {
+      if (command instanceof GetGroupCommand) return Promise.reject(new Error('not found'))
+      if (command instanceof CreateGroupCommand) return Promise.reject(groupExistsError)
+      if (command instanceof AdminAddUserToGroupCommand) {
+        return Promise.reject(new Error('still broken on recovery'))
+      }
+      return Promise.resolve({})
+    })
+
+    await expect(handler(buildEvent('vet'))).rejects.toThrow('still broken on recovery')
   })
 })

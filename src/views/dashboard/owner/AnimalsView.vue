@@ -20,8 +20,15 @@ const { t } = useI18n()
 const router = useRouter()
 const toast = useToast()
 
-const { animals, isLoading, isSaving, fetchAnimals, updateAnimalDetails, deleteAnimalById } =
-  useAnimals()
+const {
+  animals,
+  isLoading,
+  isSaving,
+  loadError,
+  fetchAnimals,
+  updateAnimalDetails,
+  deleteAnimalById,
+} = useAnimals()
 
 const showEditModal = ref(false)
 const showDeleteModal = ref(false)
@@ -58,18 +65,14 @@ const formatDate = (dateString) => {
   })
 }
 
+// Phase 7.5 : `fetchAnimals()` ne relance jamais son erreur (convention `loadError`,
+// CLAUDE.md) -- le `.catch()` qui vivait ici auparavant ne se déclenchait donc jamais
+// (`err.message === 'SessionExpired'` n'a par ailleurs jamais été un cas réel émis
+// nulle part dans ce repo). L'échec de chargement est désormais visible via `loadError`
+// dans le template, avec un bouton "Réessayer" -- même pattern que ValidationsView.vue/
+// DonorsView.vue/HistoryView.vue.
 onMounted(() => {
-  fetchAnimals().catch((err) => {
-    if (err.message === 'SessionExpired') {
-      router.push('/login')
-    } else {
-      toast.add({
-        severity: 'error',
-        summary: t('common.error'),
-        detail: t('dashboard.owner.animals.toasts.load_failed'),
-      })
-    }
-  })
+  fetchAnimals()
 })
 
 const openEditModal = (animal) => {
@@ -247,6 +250,23 @@ const onDelete = async () => {
         <div v-if="isLoading" class="p-20 text-center flex flex-col items-center gap-4">
           <i class="pi pi-spin pi-spinner text-4xl text-[#ff3b4e]"></i>
           <span class="text-zinc-400 text-sm">{{ $t('common.loading') }}</span>
+        </div>
+
+        <div
+          v-else-if="loadError"
+          role="alert"
+          aria-live="polite"
+          class="flex flex-col items-center justify-center h-64 text-zinc-600 dark:text-zinc-300"
+        >
+          <i class="pi pi-exclamation-triangle text-5xl mb-4 text-amber-500 opacity-60"></i>
+          <p>{{ $t('dashboard.owner.animals.load_error') }}</p>
+          <Button
+            :label="$t('dashboard.owner.animals.retry')"
+            icon="pi pi-refresh"
+            text
+            class="mt-2"
+            @click="fetchAnimals"
+          />
         </div>
 
         <div v-else class="grid grid-cols-1 lg:grid-cols-2 gap-6 animate-fade-in">

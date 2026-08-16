@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useToast } from 'primevue/usetoast'
 import DashboardSidebar from '@/components/dashboard/DashboardSidebar.vue'
 import { useClinicRequests } from '@/composables/useClinicRequest.js'
+import { BloodGroupsBySpecies } from '@/constants/enums.js'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -28,11 +29,11 @@ const speciesOptions = computed(() => [
   { label: t('request.species.cat'), value: 'cat' },
 ])
 
-const bloodOptions = computed(() => {
-  if (form.value.species === 'cat') return ['A', 'B', 'AB']
-  if (form.value.species === 'dog') return ['DEA 1.1-', 'DEA 1.1+', 'Dal', 'Kai']
-  return []
-})
+// R-15 : source unique de vérité (constants/enums.js) au lieu d'une liste dupliquée en dur
+// ici. `form.value.species` reste en minuscules ('dog'/'cat', valeurs des `speciesOptions`
+// ci-dessus, hors périmètre de ce correctif) alors que `BloodGroupsBySpecies` est indexée
+// par `Species.DOG`/`Species.CAT` ('DOG'/'CAT') -- d'où le `toUpperCase()` pour faire le pont.
+const bloodOptions = computed(() => BloodGroupsBySpecies[form.value.species?.toUpperCase()] || [])
 
 const selectType = (type) => {
   requestType.value = type

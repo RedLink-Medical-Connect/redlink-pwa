@@ -33,6 +33,7 @@ export const MissionStatus = Object.freeze({
   PENDING_ARRIVAL: 'PENDING_ARRIVAL',
   COMPLETED: 'COMPLETED',
   NO_SHOW: 'NO_SHOW',
+  CANCELLED: 'CANCELLED',
 })
 
 export const RequestType = Object.freeze({

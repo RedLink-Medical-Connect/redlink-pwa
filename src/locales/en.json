@@ -304,7 +304,10 @@
     "owner": {
       "overview": {
         "title": "Dashboard",
-        "known_clinic_badge": "Known clinic"
+        "known_clinic_badge": "Known clinic",
+        "load_error_title": "Search unavailable",
+        "load_error": "Unable to check for emergencies near you — try again.",
+        "retry": "Retry"
       },
       "tabs": {
         "dashboard": "DASHBOARD",
@@ -329,6 +332,8 @@
         "age": "years",
         "title": "My Animals",
         "subtitle": "Manage your donor pets.",
+        "load_error": "Unable to load the animal list — try again.",
+        "retry": "Retry",
         "add_card": "Add an animal",
         "unknown_breed": "Unknown breed",
         "weight_label": "Weight",
@@ -432,7 +437,8 @@
           "error": "Error",
           "end_date_after_start_date": "End time must be after start time.",
           "slot_added": "Time slot added.",
-          "add_failed": "Unable to add the time slot."
+          "add_failed": "Unable to add the time slot.",
+          "remove_failed": "Unable to remove the time slot."
         },
         "empty": {
           "title": "Always available",
@@ -450,6 +456,8 @@
           "history": "No history yet.",
           "go_to_board": "View available requests"
         },
+        "load_error": "Unable to load your missions — try again.",
+        "retry": "Retry",
         "status": {
           "pending_arrival": "Pending arrival",
           "accepted": "Accepted",
@@ -514,7 +522,7 @@
       },
       "dialog": {
         "title": "Warning!",
-        "confirm": "Are you sure? This action is irreversible.",
+        "confirm": "Are you sure? This action is irreversible. If you are the only veterinarian attached to this clinic, it will be deleted along with your account; otherwise, only your account will be deleted.",
         "confirm_action": "Confirm"
       }
     },
@@ -568,6 +576,8 @@
         "confirm_action": "Confirm"
       },
       "empty": "No ongoing requests.",
+      "load_error": "Unable to load requests — try again.",
+      "retry": "Retry",
       "type_emergency_short": "Emergency",
       "type_appointment_short": "Appointment",
       "toasts": {

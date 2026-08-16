@@ -41,6 +41,22 @@ export function useMatchingRequests() {
   const client = generateClient()
   const matches = ref([])
   const isLoading = ref(false)
+  // Phase 7.6 (R-09) : distingue "recherche en erreur" d'une absence réelle d'urgence à
+  // proximité -- écran le plus critique de l'app (radar d'urgence Owner, DashboardView.vue,
+  // roadmap Phase 6.2). Ne couvre QUE l'échec du flux principal (résolution du profil/
+  // animaux/Requests OPEN), jamais la lecture Clinic Priority (ownerClinicIds) ni le filtre
+  // OwnerAvailability des Requests APPOINTMENT ci-dessous, qui ont chacun leur propre
+  // try/catch dédié et doivent continuer à dégrader silencieusement (repli neutre/fail-closed)
+  // sans jamais remonter jusqu'ici -- voir les commentaires sur ces deux blocs.
+  //
+  // Comme `isLoading`/`matches.value` (voir le commentaire juste au-dessus sur
+  // `searchMatches({ silent: true })`), un refresh silencieux (polling/retour de focus) ne
+  // doit jamais faire APPARAÎTRE une bannière d'erreur au-dessus de résultats déjà affichés
+  // pour un hoquet transitoire d'arrière-plan -- seul un appel explicite (montage, clic
+  // "Actualiser") peut poser `loadError = true`. Un succès, silencieux ou non, efface
+  // toujours un `loadError` précédent : un refresh d'arrière-plan qui aboutit doit pouvoir
+  // faire disparaître une bannière d'erreur laissée par un appel explicite antérieur.
+  const loadError = ref(false)
 
   // On réutilise vos composables existants pour avoir les données du user
   const { animals, fetchAnimals } = useAnimals()
@@ -70,6 +86,7 @@ export function useMatchingRequests() {
     if (!silent) {
       isLoading.value = true
       matches.value = []
+      loadError.value = false
     }
 
     try {
@@ -216,8 +233,20 @@ export function useMatchingRequests() {
         return a.distanceKM - b.distanceKM
       })
 
+      // Un succès complet (silencieux ou non) efface un `loadError` précédent : un refresh
+      // d'arrière-plan qui aboutit doit pouvoir faire disparaître une bannière d'erreur
+      // laissée par un appel explicite antérieur (voir le commentaire sur `loadError` plus haut).
+      loadError.value = false
     } catch (e) {
       console.error("Erreur matching:", e)
+      // Un échec silencieux (polling/retour de focus) ne doit jamais faire APPARAÎTRE une
+      // bannière d'erreur au-dessus de résultats déjà affichés pour un hoquet transitoire
+      // d'arrière-plan -- même logique que `isLoading`/`matches.value` ci-dessus, voir le
+      // commentaire sur `searchMatches({ silent: true })`. Seul un appel explicite peut poser
+      // loadError = true.
+      if (!silent) {
+        loadError.value = true
+      }
     } finally {
       isFetching = false
       if (!silent) {
@@ -280,6 +309,7 @@ export function useMatchingRequests() {
   return {
     matches,
     isLoading,
+    loadError,
     searchMatches,
     startAutoRefresh,
     stopAutoRefresh

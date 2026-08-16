@@ -6,7 +6,7 @@ import {
 } from '@/graphql/mutations'
 import { useAuthStore } from '@/stores/auth'
 import { useRouter } from 'vue-router'
-import { getVetWithClinic } from '@/graphql/custom-queries.js'
+import { getVetWithClinic, veterinariansByClinicIDSimple } from '@/graphql/custom-queries.js'
 import {
   deleteClinicSimple,
   deleteVeterinarianSimple,
@@ -131,28 +131,82 @@ export function useClinicSettings() {
     }
   }
 
+  /**
+   * Supprime le compte Veterinarian courant : nettoyage DB (Veterinarian, puis Clinic si
+   * plus aucun autre Veterinarian n'y est rattaché) puis suppression Cognito
+   * (`deleteUser()`), déconnexion et redirection. Flux irréversible.
+   *
+   * Garde-fou multi-vétérinaire (Phase 7.8, audit Phase 6.B) : `Clinic.veterinarians` est un
+   * `@hasMany` -- le schéma prévoit explicitement plusieurs Veterinarian par Clinic (contexte
+   * école). Supprimer la Clinic entière au départ du premier Veterinarian romprait l'accès
+   * des autres et laisserait des `Request`/`Mission` orphelins. On ne supprime donc la
+   * Clinic QUE si le Veterinarian courant est le dernier qui y est rattaché.
+   *
+   * Convention du repo (CLAUDE.md, "écriture secondaire best-effort") : comme
+   * `useOwnerProfile.deleteAccount`, le nettoyage DB (Veterinarian/Clinic) est une écriture
+   * secondaire qui précède l'action critique (`deleteUser()`) -- son échec est loggé mais
+   * jamais relancé, pour ne pas empêcher un Veterinarian de supprimer son compte Cognito à
+   * cause d'un résidu DB. Seul l'échec de `deleteUser()` (et de ce qui suit) doit remonter à
+   * l'appelant.
+   */
   const deleteAccount = async () => {
     isSaving.value = true
     try {
-      if (vetId.value) {
-        await client.graphql({
-          query: deleteVeterinarianSimple,
-          variables: { input: { id: vetId.value } },
-          authMode: 'userPool',
-        })
+      // Lecture du garde-fou, volontairement HORS du try/catch best-effort ci-dessous : un
+      // échec de CETTE lecture (réseau, @auth...) ne doit jamais entraîner la suppression de
+      // la Clinic par défaut. Fail-safe : on considère qu'il reste "peut-être" d'autres
+      // Veterinarian et on ne supprime pas la Clinic -- un résidu Clinic orphelin d'un
+      // Veterinarian supprimé (déjà un compromis assumé ailleurs dans ce repo, ex. ADR-0004)
+      // est un moindre mal face au risque de supprimer une Clinic encore utilisée par
+      // d'autres comptes suite à un simple hoquet transitoire de cette vérification.
+      let clinicHasOtherVets = false
+      if (clinicId.value) {
+        try {
+          const { data } = await client.graphql({
+            query: veterinariansByClinicIDSimple,
+            variables: { clinicID: clinicId.value },
+            authMode: 'userPool',
+          })
+          const items = data.veterinariansByClinicID?.items || []
+          clinicHasOtherVets = items.some((v) => v && v.id !== vetId.value)
+        } catch (guardError) {
+          clinicHasOtherVets = true
+          console.error(
+            "Erreur vérification des autres vétérinaires de la clinique (garde-fou suppression), la Clinic est conservée par prudence :",
+            guardError,
+          )
+        }
       }
 
-      if (clinicId.value) {
-        await client.graphql({
-          query: deleteClinicSimple,
-          variables: { input: { id: clinicId.value } },
-          authMode: 'userPool',
-        })
+      try {
+        if (vetId.value) {
+          await client.graphql({
+            query: deleteVeterinarianSimple,
+            variables: { input: { id: vetId.value } },
+            authMode: 'userPool',
+          })
+        }
+
+        if (clinicId.value && !clinicHasOtherVets) {
+          await client.graphql({
+            query: deleteClinicSimple,
+            variables: { input: { id: clinicId.value } },
+            authMode: 'userPool',
+          })
+        }
+      } catch (dbError) {
+        console.error(
+          'Erreur nettoyage DB (Veterinarian/Clinic) lors de la suppression du compte, ignorée (best-effort) :',
+          dbError,
+        )
       }
 
       await deleteUser()
       await auth.logout()
       await router.push('/')
+    } catch (authError) {
+      console.error('Erreur critique lors de la suppression du compte (Cognito) :', authError)
+      throw authError
     } finally {
       isSaving.value = false
     }
