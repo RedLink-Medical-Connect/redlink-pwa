@@ -95,8 +95,12 @@ const formatDate = (dateString) => {
 
           <!-- Sous-tâche 6.B : le DataTable garde sa largeur minimale (colonnes lisibles sur
           desktop) mais le débordement horizontal résultant sur mobile/tablette est confiné à
-          ce conteneur scrollable plutôt que de déborder toute la page. -->
-          <div v-else class="overflow-x-auto">
+          ce conteneur scrollable plutôt que de déborder toute la page. `tabindex="0"` +
+          `role="region"` (revue a11y) : sans ça, les colonnes hors champ sur petit viewport
+          ne sont atteignables qu'à la souris/au tactile (échec WCAG 2.1.1, technique SCR29) --
+          `Tab` seul n'aurait révélé que les cellules interactives (ex. lien tel:), jamais les
+          colonnes purement textuelles entre elles. -->
+          <div v-else class="overflow-x-auto" tabindex="0" role="region" :aria-label="$t('dashboard.donors.title')">
             <DataTable :value="filteredDonors" striped-rows class="p-datatable-sm" table-style="min-width: 50rem">
               <Column field="animalName" :header="$t('dashboard.donors.columns.animal')" class="!text-zinc-900 dark:!text-white font-bold"></Column>
               <Column :header="$t('dashboard.donors.columns.owner')" class="!text-zinc-600 dark:!text-zinc-400">
