@@ -523,6 +523,7 @@
         },
         "unknown_clinic": "Clinique inconnue",
         "planned_on": "Prévu le :",
+        "phone_label": "Tél. : {phone}",
         "actions": {
           "call": "Appeler",
           "go": "Y aller"

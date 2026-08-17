@@ -203,6 +203,9 @@ const getAnimalEmoji = (species) => (species === Species.DOG ? '🐶' : '🐱')
                           }}
                         </p>
                         <p class="text-zinc-500 text-sm">{{ mission.request?.clinic?.address }}</p>
+                        <p v-if="mission.request?.clinic?.phone" class="text-zinc-500 text-sm">
+                          {{ $t('dashboard.owner.missions_list.phone_label', { phone: mission.request.clinic.phone }) }}
+                        </p>
                       </div>
                     </div>
 
