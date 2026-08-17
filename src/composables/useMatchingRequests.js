@@ -158,11 +158,12 @@ export function useMatchingRequests() {
       // elle avale tout en interne dans un console.error et ne rethrow jamais. En cas
       // d'échec réseau, `ownerAvailabilities.value` retombe donc simplement sur son état par
       // défaut ([] au premier appel), jamais réassigné par le catch de ce composable-là.
-      // C'est le bon repli ici : matchesAvailability(..., []) renvoie toujours `false`, donc
-      // un échec de cette lecture exclut prudemment les Requests APPOINTMENT (fail-closed) au
-      // lieu de les inclure par défaut -- contrairement au repli neutre `[]` de Clinic
-      // Priority (critère non-exclusif, CLAUDE.md), où `[]` dégrade juste le tri sans jamais
-      // exclure de résultat.
+      // Depuis l'amendement ADR-0005 (2026-08-17), matchesAvailability(..., []) renvoie
+      // désormais `true` ("toujours disponible" par défaut, voir eligibility-service.js) :
+      // un échec de cette lecture inclut donc prudemment les Requests APPOINTMENT plutôt que
+      // de les exclure -- même repli que Clinic Priority en pratique, mais pour une raison
+      // différente (ici, c'est le comportement par défaut de "pas de créneau renseigné", pas
+      // une dégradation de critère non-exclusif).
       if (allRequests.some((req) => req.requestType === RequestType.APPOINTMENT)) {
         await fetchOwnerAvailabilities()
       }

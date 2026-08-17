@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useToast } from 'primevue/usetoast'
 import DashboardSidebar from '@/components/dashboard/DashboardSidebar.vue'
 import { useOwnerAvailability } from '@/composables/useOwnerAvailability'
@@ -8,13 +8,50 @@ import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
 const toast = useToast()
-const { availabilities, isLoading, fetchAvailabilities, addAvailability, removeAvailability } =
+const { availabilities, isLoading, fetchAvailabilities, addAvailabilityForDays, removeAvailability } =
   useOwnerAvailability()
 
-const selectedDay = ref(null)
+// Raccourcis "Semaine"/"Weekend" (demande produit 2026-08-17) : un simple OU logique
+// avec les presets horaires ci-dessous, pas des combos figés -- ce sont juste des
+// sélections groupées de `selectedDays`, au même titre qu'un clic individuel sur un
+// jour. `WEEK_DAYS`/`WEEKEND_DAYS` suivent la convention `Date.prototype.getDay()`
+// (0 = dimanche), identique à `DAYS_OF_WEEK`/`matchesAvailability()`.
+const WEEK_DAYS = [1, 2, 3, 4, 5]
+const WEEKEND_DAYS = [6, 0]
+
+// Bornes validées avec le repo owner (2026-08-17) : 8h-12h / 12h-18h / 18h-22h. Un clic
+// pré-remplit juste Début/Fin ci-dessous -- ce ne sont pas un mode séparé, les champs
+// restent éditables pour qui veut une heure exacte différente.
+const TIME_PRESETS = [
+  { key: 'morning', startHour: 8, endHour: 12 },
+  { key: 'afternoon', startHour: 12, endHour: 18 },
+  { key: 'evening', startHour: 18, endHour: 22 },
+]
+
+const selectedDays = ref([])
 const startTime = ref(null)
 const endTime = ref(null)
 const isSubmitting = ref(false)
+
+const sameDaySet = (a, b) => a.length === b.length && b.every((d) => a.includes(d))
+const isWeekSelected = computed(() => sameDaySet(selectedDays.value, WEEK_DAYS))
+const isWeekendSelected = computed(() => sameDaySet(selectedDays.value, WEEKEND_DAYS))
+
+const toggleDay = (value) => {
+  selectedDays.value = selectedDays.value.includes(value)
+    ? selectedDays.value.filter((d) => d !== value)
+    : [...selectedDays.value, value]
+}
+
+const selectDayGroup = (days) => {
+  selectedDays.value = [...days]
+}
+
+const applyTimePreset = (startHour, endHour) => {
+  const base = new Date()
+  startTime.value = new Date(base.getFullYear(), base.getMonth(), base.getDate(), startHour, 0)
+  endTime.value = new Date(base.getFullYear(), base.getMonth(), base.getDate(), endHour, 0)
+}
 
 onMounted(() => {
   fetchAvailabilities()
@@ -26,7 +63,7 @@ const formatTime = (date) => {
 }
 
 const handleAdd = async () => {
-  if (selectedDay.value === null || !startTime.value || !endTime.value) {
+  if (selectedDays.value.length === 0 || !startTime.value || !endTime.value) {
     toast.add({
       severity: 'warn',
       summary: t('dashboard.owner.availability.toasts.missing_fields'),
@@ -48,14 +85,39 @@ const handleAdd = async () => {
 
   isSubmitting.value = true
   try {
-    await addAvailability(selectedDay.value, formatTime(startTime.value), formatTime(endTime.value))
-    toast.add({
-      severity: 'success',
-      summary: t('common.success'),
-      detail: t('dashboard.owner.availability.toasts.slot_added'),
-      life: 3000,
-    })
+    const { succeeded, failed, total } = await addAvailabilityForDays(
+      selectedDays.value,
+      formatTime(startTime.value),
+      formatTime(endTime.value),
+    )
 
+    if (succeeded === 0) {
+      toast.add({
+        severity: 'error',
+        summary: t('common.error'),
+        detail: t('dashboard.owner.availability.toasts.add_failed'),
+        life: 3000,
+      })
+    } else if (failed > 0) {
+      toast.add({
+        severity: 'warn',
+        summary: t('dashboard.owner.availability.toasts.error'),
+        detail: t('dashboard.owner.availability.toasts.add_partial_failed', { succeeded, total }),
+        life: 4000,
+      })
+    } else {
+      toast.add({
+        severity: 'success',
+        summary: t('common.success'),
+        detail:
+          succeeded === 1
+            ? t('dashboard.owner.availability.toasts.slot_added')
+            : t('dashboard.owner.availability.toasts.slots_added', { count: succeeded }),
+        life: 3000,
+      })
+    }
+
+    selectedDays.value = []
     startTime.value = null
     endTime.value = null
   } catch {
@@ -111,49 +173,109 @@ const handleRemove = async (id) => {
 
               <div class="flex flex-col gap-4">
                 <div class="flex flex-col gap-2">
-                  <label class="text-xs font-bold uppercase text-zinc-500">
-                    {{ $t('dashboard.owner.availability.form.day_label') }}
-                  </label>
-                  <Select
-                    v-model="selectedDay"
-                    :options="DAYS_OF_WEEK"
-                    option-label="label"
-                    option-value="value"
-                    :placeholder="$t('dashboard.owner.availability.form.day_placeholder')"
-                    class="w-full"
-                  />
+                  <div class="flex items-center justify-between gap-2">
+                    <label class="text-xs font-bold uppercase text-zinc-500">
+                      {{ $t('dashboard.owner.availability.form.days_label') }}
+                    </label>
+                    <div class="flex gap-1.5">
+                      <button
+                        type="button"
+                        class="px-2.5 py-1 rounded-full text-xs font-bold border transition-colors"
+                        :class="
+                          isWeekSelected
+                            ? 'bg-[#ff3b4e] border-[#ff3b4e] text-white'
+                            : 'bg-transparent border-zinc-300 dark:border-zinc-700 text-zinc-500 hover:border-[#ff3b4e] hover:text-[#ff3b4e]'
+                        "
+                        @click="selectDayGroup(WEEK_DAYS)"
+                      >
+                        {{ $t('dashboard.owner.availability.form.days_shortcut_week') }}
+                      </button>
+                      <button
+                        type="button"
+                        class="px-2.5 py-1 rounded-full text-xs font-bold border transition-colors"
+                        :class="
+                          isWeekendSelected
+                            ? 'bg-[#ff3b4e] border-[#ff3b4e] text-white'
+                            : 'bg-transparent border-zinc-300 dark:border-zinc-700 text-zinc-500 hover:border-[#ff3b4e] hover:text-[#ff3b4e]'
+                        "
+                        @click="selectDayGroup(WEEKEND_DAYS)"
+                      >
+                        {{ $t('dashboard.owner.availability.form.days_shortcut_weekend') }}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div class="flex flex-wrap gap-1.5" role="group" :aria-label="$t('dashboard.owner.availability.form.days_label')">
+                    <button
+                      v-for="day in DAYS_OF_WEEK"
+                      :key="day.value"
+                      type="button"
+                      :aria-pressed="selectedDays.includes(day.value)"
+                      class="w-11 h-11 rounded-full text-xs font-bold uppercase border transition-colors"
+                      :class="
+                        selectedDays.includes(day.value)
+                          ? 'bg-[#ff3b4e] border-[#ff3b4e] text-white'
+                          : 'bg-zinc-50 dark:bg-zinc-950 border-zinc-300 dark:border-zinc-800 text-zinc-600 dark:text-zinc-300 hover:border-[#ff3b4e] hover:text-[#ff3b4e]'
+                      "
+                      @click="toggleDay(day.value)"
+                    >
+                      {{ day.label.substring(0, 3) }}
+                    </button>
+                  </div>
                 </div>
 
-                <div class="grid grid-cols-2 gap-3">
-                  <div class="flex flex-col gap-2">
-                    <label class="text-xs font-bold uppercase text-zinc-500">
-                      {{ $t('dashboard.owner.availability.form.start_label') }}
-                    </label>
-                    <Calendar
-                      v-model="startTime"
-                      time-only
-                      show-icon
-                      icon-display="input"
-                      step-minute="30"
-                      :placeholder="$t('dashboard.owner.availability.form.start_placeholder')"
-                      class="w-full"
-                      input-class="w-full !bg-zinc-50 dark:!bg-zinc-950 !border-zinc-300 dark:!border-zinc-800"
-                    />
+                <div class="flex flex-col gap-2">
+                  <label class="text-xs font-bold uppercase text-zinc-500">
+                    {{ $t('dashboard.owner.availability.form.time_presets_label') }}
+                  </label>
+                  <div class="flex flex-wrap gap-1.5">
+                    <button
+                      v-for="preset in TIME_PRESETS"
+                      :key="preset.key"
+                      type="button"
+                      class="px-3 py-1.5 rounded-full text-xs font-bold border border-zinc-300 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300 bg-transparent hover:border-[#ff3b4e] hover:text-[#ff3b4e] transition-colors"
+                      @click="applyTimePreset(preset.startHour, preset.endHour)"
+                    >
+                      {{ $t(`dashboard.owner.availability.form.time_preset_${preset.key}`) }}
+                    </button>
                   </div>
-                  <div class="flex flex-col gap-2">
-                    <label class="text-xs font-bold uppercase text-zinc-500">
-                      {{ $t('dashboard.owner.availability.form.end_label') }}
-                    </label>
-                    <Calendar
-                      v-model="endTime"
-                      time-only
-                      show-icon
-                      icon-display="input"
-                      step-minute="30"
-                      :placeholder="$t('dashboard.owner.availability.form.end_placeholder')"
-                      class="w-full"
-                      input-class="w-full !bg-zinc-50 dark:!bg-zinc-950 !border-zinc-300 dark:!border-zinc-800"
-                    />
+                </div>
+
+                <div class="flex flex-col gap-2">
+                  <label class="text-xs font-bold uppercase text-zinc-500">
+                    {{ $t('dashboard.owner.availability.form.exact_time_label') }}
+                  </label>
+                  <div class="grid grid-cols-2 gap-3">
+                    <div class="flex flex-col gap-1">
+                      <span class="text-[11px] font-semibold text-zinc-400">
+                        {{ $t('dashboard.owner.availability.form.start_label') }}
+                      </span>
+                      <Calendar
+                        v-model="startTime"
+                        time-only
+                        show-icon
+                        icon-display="input"
+                        step-minute="30"
+                        :placeholder="$t('dashboard.owner.availability.form.start_placeholder')"
+                        class="w-full"
+                        input-class="w-full !bg-zinc-50 dark:!bg-zinc-950 !border-zinc-300 dark:!border-zinc-800"
+                      />
+                    </div>
+                    <div class="flex flex-col gap-1">
+                      <span class="text-[11px] font-semibold text-zinc-400">
+                        {{ $t('dashboard.owner.availability.form.end_label') }}
+                      </span>
+                      <Calendar
+                        v-model="endTime"
+                        time-only
+                        show-icon
+                        icon-display="input"
+                        step-minute="30"
+                        :placeholder="$t('dashboard.owner.availability.form.end_placeholder')"
+                        class="w-full"
+                        input-class="w-full !bg-zinc-50 dark:!bg-zinc-950 !border-zinc-300 dark:!border-zinc-800"
+                      />
+                    </div>
                   </div>
                 </div>
 

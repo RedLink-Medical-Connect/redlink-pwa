@@ -25,10 +25,10 @@ describe('matchesAvailability', () => {
     expect(matchesAvailability(availabilities, 'pas-une-date')).toBe(false)
   })
 
-  it("renvoie false (fail-closed) si availabilities est vide, absent ou n'est pas un tableau", () => {
-    expect(matchesAvailability([], WEDNESDAY_10_30)).toBe(false)
-    expect(matchesAvailability(undefined, WEDNESDAY_10_30)).toBe(false)
-    expect(matchesAvailability(null, WEDNESDAY_10_30)).toBe(false)
+  it("renvoie true (\"toujours disponible\" par défaut, amendement ADR-0005 2026-08-17) si availabilities est vide, absent ou n'est pas un tableau", () => {
+    expect(matchesAvailability([], WEDNESDAY_10_30)).toBe(true)
+    expect(matchesAvailability(undefined, WEDNESDAY_10_30)).toBe(true)
+    expect(matchesAvailability(null, WEDNESDAY_10_30)).toBe(true)
   })
 
   it("renvoie true si le rendez-vous tombe dans un créneau du bon jour", () => {
