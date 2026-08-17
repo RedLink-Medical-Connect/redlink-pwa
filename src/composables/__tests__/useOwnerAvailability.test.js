@@ -63,6 +63,68 @@ describe('useOwnerAvailability.removeAvailability', () => {
   })
 })
 
+describe('useOwnerAvailability.addAvailabilityForDays', () => {
+  beforeEach(() => {
+    graphqlMock.mockReset()
+  })
+
+  it('crée un créneau par jour et ne rafraîchit la liste qu’une seule fois (succès total)', async () => {
+    let createCalls = 0
+    graphqlMock.mockImplementation(async ({ query }) => {
+      if (query.includes('CreateOwnerAvailability')) {
+        createCalls += 1
+        return { data: { createOwnerAvailability: { id: `slot-${createCalls}` } } }
+      }
+      if (query.includes('ListMyAvailabilities')) {
+        return { data: { listOwnerAvailabilities: { items: [] } } }
+      }
+      throw new Error(`Unexpected graphql call in test: ${query.slice(0, 60)}`)
+    })
+
+    const { addAvailabilityForDays } = useOwnerAvailability()
+    const result = await addAvailabilityForDays([1, 2, 3, 4, 5], '08:00', '12:00')
+
+    expect(createCalls).toBe(5)
+    expect(result).toEqual({ succeeded: 5, failed: 0, total: 5 })
+    expect(graphqlMock.mock.calls.filter(([{ query }]) => query.includes('ListMyAvailabilities'))).toHaveLength(1)
+  })
+
+  it("n'annule pas les jours qui réussissent quand un autre jour échoue (best-effort par jour)", async () => {
+    graphqlMock.mockImplementation(async ({ query, variables }) => {
+      if (query.includes('CreateOwnerAvailability')) {
+        if (variables.input.dayOfWeek === 6) {
+          throw new Error('Not Authorized to access createOwnerAvailability')
+        }
+        return { data: { createOwnerAvailability: { id: 'slot-ok' } } }
+      }
+      if (query.includes('ListMyAvailabilities')) {
+        return { data: { listOwnerAvailabilities: { items: [] } } }
+      }
+      throw new Error(`Unexpected graphql call in test: ${query.slice(0, 60)}`)
+    })
+
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const { addAvailabilityForDays } = useOwnerAvailability()
+    const result = await addAvailabilityForDays([6, 0], '09:00', '18:00')
+
+    expect(result).toEqual({ succeeded: 1, failed: 1, total: 2 })
+    expect(consoleErrorSpy).toHaveBeenCalledTimes(1)
+
+    consoleErrorSpy.mockRestore()
+  })
+
+  it("relance (propage) l'erreur si getCurrentUser() échoue, sans appeler la mutation de création", async () => {
+    const { getCurrentUser } = await import('aws-amplify/auth')
+    getCurrentUser.mockRejectedValueOnce(new Error('session expirée'))
+
+    const { addAvailabilityForDays } = useOwnerAvailability()
+
+    await expect(addAvailabilityForDays([1], '09:00', '12:00')).rejects.toThrow('session expirée')
+    expect(graphqlMock).not.toHaveBeenCalled()
+  })
+})
+
 describe('useOwnerAvailability.fetchAvailabilities (tri par dayOfWeek)', () => {
   beforeEach(() => {
     graphqlMock.mockReset()

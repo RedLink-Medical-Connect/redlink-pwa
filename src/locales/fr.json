@@ -461,10 +461,12 @@
       "availability": {
         "toasts": {
           "missing_fields": "Champs manquants",
-          "fill": "Veuillez tout remplir.",
+          "fill": "Sélectionnez au moins un jour et une plage horaire.",
           "error": "Erreur",
           "end_date_after_start_date": "L'heure de fin doit être après le début.",
           "slot_added": "Créneau ajouté.",
+          "slots_added": "{count} créneaux ajoutés.",
+          "add_partial_failed": "{succeeded} créneau(x) sur {total} ajouté(s) — les autres ont échoué.",
           "add_failed": "Impossible d'ajouter le créneau.",
           "remove_failed": "Impossible de supprimer le créneau."
         },
@@ -478,8 +480,14 @@
         "max_distance": "100 km",
         "form": {
           "add_title": "Ajouter",
-          "day_label": "Jour",
-          "day_placeholder": "Choisir un jour",
+          "days_label": "Jours",
+          "days_shortcut_week": "Semaine",
+          "days_shortcut_weekend": "Weekend",
+          "time_presets_label": "Plage horaire",
+          "time_preset_morning": "Matin",
+          "time_preset_afternoon": "Après-midi",
+          "time_preset_evening": "Soir",
+          "exact_time_label": "Heure exacte",
           "start_label": "Début",
           "start_placeholder": "09:00",
           "end_label": "Fin",

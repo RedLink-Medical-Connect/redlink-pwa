@@ -34,30 +34,41 @@ export function useOwnerAvailability() {
     }
   }
 
-  const addAvailability = async (day, start, end) => {
-    try {
-      const { userId } = await getCurrentUser()
+  /**
+   * Crée un créneau `OwnerAvailability` par jour de `days` (même heure de début/fin pour
+   * tous), pour couvrir aussi bien l'ajout d'un seul jour (`days: [1]`, formulaire "Heure
+   * exacte") que les raccourcis "Semaine"/"Weekend" de `AvailabilityView.vue` (plusieurs
+   * jours en un clic). Best-effort par jour (`Promise.allSettled`) : un jour qui échoue
+   * (réseau, `@auth`...) n'annule pas les autres -- chacun est une écriture indépendante,
+   * pas une transaction. `getCurrentUser()` reste hors du `allSettled` : son échec (pas de
+   * session) doit faire échouer tout l'appel, pas être traité comme "0 jour créé sur N".
+   *
+   * @param {number[]} days Valeurs `dayOfWeek` (convention `Date.prototype.getDay()`).
+   * @param {string} start `HH:mm`.
+   * @param {string} end `HH:mm`.
+   * @returns {Promise<{succeeded: number, failed: number, total: number}>}
+   */
+  const addAvailabilityForDays = async (days, start, end) => {
+    const { userId } = await getCurrentUser()
 
-      const input = {
-        ownerID: userId,
-        dayOfWeek: day,
-        startTime: start,
-        endTime: end,
-      }
+    const results = await Promise.allSettled(
+      days.map((day) =>
+        client.graphql({
+          query: createOwnerAvailabilitySimple,
+          variables: { input: { ownerID: userId, dayOfWeek: day, startTime: start, endTime: end } },
+          authMode: 'userPool',
+        }),
+      ),
+    )
 
-      // 👇 2. On utilise la mutation SIMPLE
-      await client.graphql({
-        query: createOwnerAvailabilitySimple,
-        variables: { input },
-        authMode: 'userPool',
-      })
+    results
+      .filter((r) => r.status === 'rejected')
+      .forEach((r) => console.error('Erreur ajout availability (jour ignoré) :', r.reason))
 
-      await fetchAvailabilities()
-      return true
-    } catch (e) {
-      console.error('Erreur ajout availability:', e)
-      throw e
-    }
+    await fetchAvailabilities()
+
+    const succeeded = results.filter((r) => r.status === 'fulfilled').length
+    return { succeeded, failed: results.length - succeeded, total: results.length }
   }
 
   const removeAvailability = async (id) => {
@@ -80,7 +91,7 @@ export function useOwnerAvailability() {
     availabilities,
     isLoading,
     fetchAvailabilities,
-    addAvailability,
+    addAvailabilityForDays,
     removeAvailability,
   }
 }
