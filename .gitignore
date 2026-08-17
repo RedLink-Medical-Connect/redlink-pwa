@@ -72,3 +72,6 @@ amplifytools.xcconfig
 # Fichiers sensibles Amplify
 amplify/team-provider-info.json
 *.backup
+
+# Serena MCP (config/cache locale par machine, comme amplify-docs)
+.serena/

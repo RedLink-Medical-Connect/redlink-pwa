@@ -16,6 +16,7 @@
     "test:run": "vitest run",
     "test:e2e": "playwright test",
     "test:ui": "playwright test --ui",
+    "check:duplication": "jscpd src/",
     "prepare": "husky"
   },
   "dependencies": {
@@ -54,6 +55,7 @@
     "eslint-plugin-vue": "~10.5.1",
     "globals": "^16.5.0",
     "husky": "^9.1.7",
+    "jscpd": "^5.0.15",
     "jsdom": "^27.2.0",
     "lint-staged": "^16.2.7",
     "prettier": "3.6.2",

@@ -1,0 +1,10 @@
+{
+  "$schema": "https://raw.githubusercontent.com/kucherenko/jscpd/master/packages/jscpd/schema.json",
+  "threshold": 5,
+  "minLines": 15,
+  "minTokens": 50,
+  "format": ["javascript", "vue"],
+  "ignore": ["**/src/graphql/**", "**/node_modules/**", "**/*.test.js", "**/*.spec.js"],
+  "reporters": ["console"],
+  "gitignore": true
+}
