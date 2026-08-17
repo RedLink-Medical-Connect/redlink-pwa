@@ -346,12 +346,15 @@
         "empty_message": "Everything is calm around you. Enjoy your day with your pets! 🐶🐱",
         "refresh": "Refresh",
         "urgent_badge": "EMERGENCY",
+        "appointment_badge": "APPOINTMENT",
         "clinic_fallback": "Veterinary clinic",
         "search_line": "Looking for {species} (Blood type {bloodGroup})",
+        "appointment_at": "Appointment scheduled for {date}",
         "compatible_animal": "Your compatible animal: {name}",
         "distance_away": "{km} km away",
         "accept_button": "I'll help",
         "accept_hint": "Creates an immediate mission",
+        "accept_hint_appointment": "Confirms your presence at the appointment",
         "accept_success": "Thank you! Mission accepted."
       },
       "tabs": {

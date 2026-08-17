@@ -346,12 +346,15 @@
         "empty_message": "Tout est calme autour de vous. Profitez de votre journée avec vos animaux ! 🐶🐱",
         "refresh": "Actualiser",
         "urgent_badge": "URGENCE",
+        "appointment_badge": "RENDEZ-VOUS",
         "clinic_fallback": "Clinique vétérinaire",
         "search_line": "Recherche {species} (Groupe {bloodGroup})",
+        "appointment_at": "Rendez-vous prévu le {date}",
         "compatible_animal": "Votre animal compatible : {name}",
         "distance_away": "à {km} km",
         "accept_button": "J'accepte d'aider",
         "accept_hint": "Crée une mission immédiate",
+        "accept_hint_appointment": "Confirme votre présence au rendez-vous",
         "accept_success": "Merci ! Mission acceptée."
       },
       "tabs": {

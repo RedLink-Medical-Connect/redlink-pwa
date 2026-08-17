@@ -8,6 +8,7 @@ import DashboardSidebar from '@/components/dashboard/DashboardSidebar.vue'
 // Nos Logiques
 import { useMatchingRequests } from '@/composables/useMatchingRequests'
 import { useOwnerMissions, mapAcceptMissionError } from '@/composables/useOwnerMissions'
+import { RequestType } from '@/constants/enums'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -38,6 +39,19 @@ onUnmounted(() => {
   // Évite un interval/listener orphelin après une navigation SPA hors du dashboard.
   stopAutoRefresh()
 })
+
+// Formate `req.appointmentDatetime` pour l'affichage sur la carte d'une Request
+// APPOINTMENT -- même format que MissionsView.vue (formatDate), pour rester cohérent
+// avec ce que l'Owner voit déjà une fois la mission acceptée.
+const formatAppointmentDate = (dateString) => {
+  if (!dateString) return ''
+  return new Date(dateString).toLocaleDateString('fr-FR', {
+    day: 'numeric',
+    month: 'long',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
 
 const handleAccept = async (request) => {
   try {
@@ -147,7 +161,17 @@ const handleAccept = async (request) => {
                 <div class="flex-grow">
                   <div class="flex items-center gap-2 mb-2">
                     <Tag
+                      v-if="req.requestType === RequestType.APPOINTMENT"
+                      severity="warn"
+                      icon="pi pi-calendar"
+                      :value="$t('dashboard.owner.overview.appointment_badge')"
+                      rounded
+                      class="font-bold"
+                    />
+                    <Tag
+                      v-else
                       severity="danger"
+                      icon="pi pi-bolt"
                       :value="$t('dashboard.owner.overview.urgent_badge')"
                       rounded
                       class="font-bold"
@@ -166,11 +190,23 @@ const handleAccept = async (request) => {
                     {{ req.clinic?.name || $t('dashboard.owner.overview.clinic_fallback') }}
                   </h3>
 
-                  <p class="text-zinc-600 dark:text-zinc-300 mb-4 font-medium">
+                  <p class="text-zinc-600 dark:text-zinc-300 mb-1 font-medium">
                     {{
                       $t('dashboard.owner.overview.search_line', {
                         species: req.requiredSpecies,
                         bloodGroup: req.requiredBloodGroup,
+                      })
+                    }}
+                  </p>
+
+                  <p
+                    v-if="req.requestType === RequestType.APPOINTMENT"
+                    class="text-sm text-zinc-500 dark:text-zinc-400 mb-4 flex items-center gap-1.5"
+                  >
+                    <i class="pi pi-calendar text-xs"></i>
+                    {{
+                      $t('dashboard.owner.overview.appointment_at', {
+                        date: formatAppointmentDate(req.appointmentDatetime),
                       })
                     }}
                   </p>
@@ -196,7 +232,11 @@ const handleAccept = async (request) => {
                     @click="handleAccept(req)"
                   />
                   <small class="text-xs text-zinc-400 text-center block">
-                    {{ $t('dashboard.owner.overview.accept_hint') }}
+                    {{
+                      req.requestType === RequestType.APPOINTMENT
+                        ? $t('dashboard.owner.overview.accept_hint_appointment')
+                        : $t('dashboard.owner.overview.accept_hint')
+                    }}
                   </small>
                 </div>
               </div>
