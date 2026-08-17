@@ -178,12 +178,15 @@ const normalizeTimeOfDay = (awsTime) => {
  * `Date.prototype.getDay()` (0 = dimanche ... 6 = samedi), déjà utilisée telle quelle par
  * `src/constants/date-constants.js`/`AvailabilityView.vue` — aucune conversion nécessaire ici.
  *
- * Fail-closed par construction : sans `appointmentDatetime` connue, sans disponibilité
- * renseignée, ou sur une date invalide, renvoie `false` plutôt que `true`. Contrairement à
- * Clinic Priority (critère non-exclusif, CLAUDE.md, replie sur `[]`/"aucune priorité connue"),
- * une Request de RDV que l'Owner ne peut structurellement pas honorer ne doit jamais
- * apparaître comme un match valide — le repli neutre serait ici un faux positif, pas une
- * simple dégradation de tri.
+ * Décision produit révisée (amendement ADR-0005, 2026-08-17) : une `OwnerAvailability`
+ * absente (l'Owner n'a renseigné AUCUN créneau) est traitée comme "toujours disponible",
+ * pas comme "jamais disponible" — objectif : inciter l'Owner à renseigner ses disponibilités
+ * réelles plutôt que de le faire disparaître silencieusement de tout matching RDV tant qu'il
+ * ne l'a pas fait. Remplace le fail-closed d'origine (Phase 6.5) sur ce seul cas ; dès qu'AU
+ * MOINS un créneau existe, le filtre redevient exclusif comme avant : un rendez-vous hors des
+ * créneaux réellement déclarés reste exclu, seule l'absence totale de créneaux bascule
+ * désormais vers `true`. `appointmentDatetime` absent/invalide reste `false` (ce n'est pas
+ * une question de disponibilité de l'Owner, la Request elle-même est inexploitable).
  *
  * ⚠️ Limite assumée pour ce pilote (voir ADR-0005) : compare heure/minute en fuseau horaire
  * LOCAL du navigateur des deux côtés (celui qui saisit ses disponibilités et celui qui fait
@@ -198,7 +201,9 @@ const normalizeTimeOfDay = (awsTime) => {
  */
 export const matchesAvailability = (availabilities, appointmentDatetime) => {
   if (!appointmentDatetime) return false
-  if (!Array.isArray(availabilities) || availabilities.length === 0) return false
+  // Aucun créneau renseigné (ou lecture indisponible) : "toujours disponible" par défaut,
+  // voir amendement ADR-0005 ci-dessus.
+  if (!Array.isArray(availabilities) || availabilities.length === 0) return true
 
   const date = new Date(appointmentDatetime)
   if (Number.isNaN(date.getTime())) return false

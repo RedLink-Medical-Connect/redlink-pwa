@@ -488,7 +488,7 @@
         },
         "empty": {
           "title": "Always available",
-          "description": "Without defined time slots, you appear as available 24/7 for emergencies."
+          "description": "Without defined time slots, you appear as available 24/7 — for emergencies and scheduled appointments alike. Add your real availability to only receive requests you can actually make."
         }
       },
       "missions_list": {

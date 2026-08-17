@@ -845,21 +845,22 @@ describe('useMatchingRequests', () => {
       expect(matches.value).toHaveLength(0)
     })
 
-    it("exclut une Request APPOINTMENT si l'Owner n'a renseigné AUCUNE OwnerAvailability (fail-closed, pas de repli neutre)", async () => {
+    it("inclut une Request APPOINTMENT si l'Owner n'a renseigné AUCUNE OwnerAvailability (\"toujours disponible\" par défaut, amendement ADR-0005 2026-08-17)", async () => {
+      const appointmentReq = buildAppointmentRequest()
       mockGraphqlResponses({
         profile: buildOwnerProfile(),
         animals: [buildAnimal()],
-        requests: [buildAppointmentRequest()],
+        requests: [appointmentReq],
         availabilities: [],
       })
 
       const { matches, searchMatches } = useMatchingRequests()
       await searchMatches()
 
-      expect(matches.value).toHaveLength(0)
+      expect(matches.value.map((m) => m.id)).toEqual([appointmentReq.id])
     })
 
-    it("exclut une Request APPOINTMENT (fail-closed) si ListMyAvailabilities échoue en réseau, sans faire planter searchMatches() ni vider le reste de matches.value", async () => {
+    it("inclut une Request APPOINTMENT (\"toujours disponible\" par défaut) si ListMyAvailabilities échoue en réseau, sans faire planter searchMatches() ni vider le reste de matches.value", async () => {
       const appointmentReq = buildAppointmentRequest()
       const emergencyReq = buildRequest({ id: 'request-emergency' })
 
@@ -888,8 +889,13 @@ describe('useMatchingRequests', () => {
       await searchMatches()
 
       // La Request EMERGENCY n'est jamais concernée par matchesAvailability() -- son match
-      // survit intact à l'échec de ListMyAvailabilities.
-      expect(matches.value.map((m) => m.id)).toEqual(['request-emergency'])
+      // survit intact à l'échec de ListMyAvailabilities. La Request APPOINTMENT survit elle
+      // aussi désormais : ownerAvailabilities.value retombe sur [] (défaut de
+      // useOwnerAvailability.js après l'échec réseau), et matchesAvailability(..., [])
+      // renvoie `true` depuis l'amendement ADR-0005 (2026-08-17).
+      expect(matches.value.map((m) => m.id).sort()).toEqual(
+        [appointmentReq.id, 'request-emergency'].sort(),
+      )
       expect(consoleErrorSpy).toHaveBeenCalled()
 
       consoleErrorSpy.mockRestore()

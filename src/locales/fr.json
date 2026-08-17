@@ -488,7 +488,7 @@
         },
         "empty": {
           "title": "Toujours disponible",
-          "description": "Sans créneaux définis, vous apparaissez comme disponible 24h/24 pour les urgences."
+          "description": "Sans créneaux définis, vous apparaissez comme disponible 24h/24 — pour les urgences comme pour les rendez-vous planifiés. Ajoutez vos disponibilités réelles pour ne recevoir que des propositions que vous pouvez honorer."
         }
       },
       "missions_list": {

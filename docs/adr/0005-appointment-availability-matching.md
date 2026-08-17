@@ -155,3 +155,40 @@ ne voient que des urgences (cas le plus fréquent pour ce pilote).
    ne casse pas le matching ; `Request.appointmentDatetime` n'est jamais affiché brut à
    l'Owner. Même modèle "pilote à utilisateurs de confiance" qu'ADR-0002/0003/0004,
    pas une régression propre à ce lot.
+
+## Décision révisée (amendement, 2026-08-17)
+
+Retour d'usage manuel (test pilote) : un Owner ayant validé son animal, avec une
+Request `APPOINTMENT` compatible en tous points (espèce, groupe, distance), n'obtenait
+aucun match — cause identifiée en confrontant directement les données DynamoDB à
+`checkEligibility()`/`matchesAvailability()` : `OwnerAvailability` vide pour ce compte,
+et le fail-closed d'origine (section 3 ci-dessus) excluait donc silencieusement toute
+Request `APPOINTMENT`, sans aucune indication à l'écran de la raison (le radar Owner,
+`DashboardView.vue`, affiche le même état "rien à proximité" qu'une absence réelle de
+demande).
+
+Décision produit (repo owner) : inverser le repli par défaut. Une `OwnerAvailability`
+absente est désormais traitée comme **"toujours disponible"**, pas "jamais
+disponible" — cohérent avec le message déjà affiché sur `AvailabilityView.vue`
+(`dashboard.owner.availability.empty`, jusqu'ici scopé aux seules Requests
+`EMERGENCY`, qui n'appellent de toute façon jamais `matchesAvailability()`). Objectif
+explicite : un Owner qui ne remplit rien reste visible dans le matching RDV (pas
+d'exclusion silencieuse), et c'est le fait de recevoir des propositions à des horaires
+qu'il ne peut pas honorer qui l'incite à renseigner ses disponibilités réelles —
+plutôt que l'inverse (rester invisible tant qu'il n'a rien renseigné).
+
+Ce que ça change concrètement (`matchesAvailability()`, `eligibility-service.js`) :
+seul le cas `availabilities` vide/absent bascule de `false` à `true`. Dès qu'AU MOINS
+un créneau est déclaré, le filtre reste exclusif comme avant l'amendement — un
+rendez-vous hors des créneaux réellement déclarés continue d'exclure la Request. Le
+compromis accepté à la section 3 (pas de repli neutre, lecture non isolée dans un
+try/catch dédié) devient sans objet : un échec de lecture d'`OwnerAvailability` tombe
+maintenant sur le même défaut "toujours disponible" qu'une absence légitime de
+créneaux, ce qui est désormais le comportement recherché plutôt qu'un compromis
+accepté à contrecœur.
+
+Limite assumée, actée avec le repo owner : un Owner n'ayant jamais renseigné ses
+disponibilités peut désormais se voir proposer — et accepter — un rendez-vous à un
+horaire qu'il ne peut pas honorer. Pas de garde-fou supplémentaire à l'acceptation
+(`acceptMission()` ne re-valide déjà pas la disponibilité, voir limite 3 ci-dessus,
+inchangée par cet amendement).
