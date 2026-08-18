@@ -57,6 +57,12 @@ amplifytools.xcconfig
 **.sample
 #amplify-do-not-edit-end
 
+# Amplify Gen2 (Phase 8 migration) — état local du sandbox et config générée,
+# même logique que les entrées Gen1 ci-dessus (amplifyconfiguration.json etc.)
+.amplify/
+amplify_outputs.json
+amplify_outputs.d.ts
+
 # Playwright
 /test-results/
 /playwright-report/
