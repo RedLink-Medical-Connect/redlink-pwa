@@ -12,7 +12,9 @@ architecturales) et `.cursorrules` (conventions détaillées pour l'éditeur).
 - vue-router, vue-i18n, Pinia
 - PrimeVue (composants UI), Tailwind CSS
 - vite-plugin-pwa (PWA)
-- Pas de TypeScript — JS pur, avec JSDoc ponctuel pour le typage des fonctions
+- Pas de TypeScript — JS pur, avec JSDoc ponctuel pour le typage des fonctions.
+  Exception scopée : `amplify/**/*.ts` (backend Gen2 uniquement, `src/` reste JS
+  pur) — voir ADR-0007.
 
 **Backend / Infra**
 - **Migration Gen1 → Gen2 en cours (Phase 8, depuis le 2026-08-18)** — voir
@@ -29,10 +31,14 @@ architecturales) et `.cursorrules` (conventions détaillées pour l'éditeur).
 - AppSync/GraphQL, Transformer v1 (`@model`, `@auth` — y compris au niveau
   champ), résolveurs VTL auto-générés — **legacy Gen1**, remplacé
   progressivement par `defineData` (Gen2) pendant la Phase 8
-- Cognito (user pools, groupes `Veterinarians`/`Owners`) — migration vers
-  `defineAuth` (Gen2) en cours (Phase 8)
-- Lambda (Node.js, un trigger PostConfirmation, CommonJS/`require`) —
-  migration vers le modèle de fonctions Gen2 en cours (Phase 8)
+- Cognito (user pools, groupes `Veterinarians`/`Owners`) — migré vers
+  `defineAuth` (Gen2, `amplify/auth/resource.ts`), Phase 8 sous-tâche 3.
+  Groupes déclarés statiquement (`groups: [...]`), contrairement à Gen1 où ils
+  étaient créés paresseusement au premier signup — voir ADR-0008.
+- Lambda (Node.js, un trigger PostConfirmation) — migré vers le modèle de
+  fonctions Gen2 (`amplify/functions/post-confirmation/`, TypeScript), Phase 8
+  sous-tâche 3 ; l'équivalent Gen1 CommonJS reste en place le temps de la
+  migration (voir ADR-0008)
 - DynamoDB (via les modèles `@model` Gen1, puis `defineData` Gen2)
 
 **Tests**
@@ -186,6 +192,18 @@ touchés, en parallèle du reviewer principal).
   `loadError`), seule à même de distinguer "en erreur" de "légitimement vide" —
   sinon `loadError` ne se déclenche jamais sur ce chemin, quel que soit
   l'échec (voir `docs/audit/BACKLOG.md` R-12).
+
+- **Backend Gen2 (`amplify/**/*.ts`)** : un seul `tsconfig.json` à la racine,
+  scopé via `include: ["amplify/**/*.ts"]` (aucun effet sur le lint/build
+  frontend, voir ADR-0007) ; vérification par `npx tsc --noEmit -p
+  tsconfig.json` (aucun appel réseau/AWS), jamais `ampx sandbox`/`pipeline-
+  deploy` en dehors d'un déploiement réel décidé par le repo owner. Un trigger
+  Cognito suit `amplify/functions/<nom>/{resource.ts,handler.ts}`
+  (`defineFunction`), référencé depuis `amplify/auth/resource.ts` ; une
+  permission IAM à accorder à une fonction se fait dans `amplify/backend.ts`
+  via l'échappatoire CDK (`backend.<fn>.resources.lambda.addToRolePolicy(...)`),
+  toujours scopée à la ressource exacte (jamais de wildcard) — voir ADR-0008
+  pour un exemple complet.
 
 ## Tenir ce fichier à jour
 
