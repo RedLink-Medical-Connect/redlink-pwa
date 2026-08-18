@@ -47,10 +47,14 @@ Read, in this order:
 - **amplify-docs** — verify any claim about Amplify/GraphQL Transformer
   behavior (`@auth` semantics — including field-level `@auth` replacing, not
   merging with, type-level rules, per ADR-0002's amendment — generated mutation
-  shapes, conditional-write support) against this MCP rather than assumption.
-  This project is Amplify **Gen1** (amplify-cli) — a finding reasoning from
-  Gen2 patterns (`defineAuth`, `defineData`, `backend.ts`) is itself a bug in
-  the review, not a real finding.
+  shapes, conditional-write support) against this MCP rather than assumption,
+  for code that's still Gen1. **Phase 8 migration in progress (Gen1 → Gen2,
+  since 2026-08-18)**: Gen1 and Gen2 patterns temporarily coexist on
+  `feat/phase8-gen2-migration` — a diff using `defineAuth`/`defineData`/
+  `backend.ts` is not automatically a finding anymore; check `CLAUDE.md`'s
+  Backend/Infra section and the sub-task's stated scope before flagging it.
+  `amplify-docs`' index only covers Gen1 — don't trust it to verify a Gen2
+  claim, use `context7`/web search instead for those.
 - **playwright** — do NOT launch this without explicit confirmation from the
   coordinator first. The one e2e test in this repo runs against a real,
   unmocked backend (Cognito/DynamoDB) — it can create or modify real data.

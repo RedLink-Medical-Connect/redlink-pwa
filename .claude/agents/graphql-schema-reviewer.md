@@ -27,8 +27,11 @@ généré, pas seulement le texte du schéma.
 ## Ground yourself first
 
 Lis, dans cet ordre :
-- `CLAUDE.md` — Amplify **Gen1** uniquement, jamais de pattern Gen2 (`defineAuth`,
-  `defineData`, `backend.ts`).
+- `CLAUDE.md` — **migration Gen1 → Gen2 en cours (Phase 8, depuis
+  2026-08-18)** : le schéma Gen1 (`schema.graphql`, Transformer v1) et le
+  nouveau schéma Gen2 (`defineData`) coexistent temporairement dans le repo.
+  Ne pas rejeter un pattern `defineData`/`defineAuth` par principe — vérifier
+  d'abord s'il correspond à la sous-tâche de migration en cours.
 - `docs/adr/0001-conditional-write-on-mission-accept.md`,
   `docs/adr/0002-dedicated-mutation-for-vet-validation.md` (lire l'amendement en bas
   de fichier, qui remplace la mutation dédiée initialement prévue par du `@auth`

@@ -36,9 +36,13 @@ Read, in this order, before writing any code:
 ## MCP tools available — use them instead of guessing or reading node_modules cold
 
 - **amplify-docs** — consult before writing any Amplify/GraphQL code (auth, API,
-  schema, functions). This project is Amplify **Gen1** (amplify-cli) — never reach
-  for a Gen2 pattern (`defineAuth`, `defineData`, `backend.ts`); if the MCP's answer
-  looks Gen2-shaped, that's the wrong answer for this repo.
+  schema, functions) that's still Gen1. **Phase 8 migration in progress (Gen1 →
+  Gen2, since 2026-08-18)**: if your sub-task's brief says to write Gen2 code
+  (`defineAuth`, `defineData`, `backend.ts`, `client.models.X`), that's the
+  right answer, not a mistake — `amplify-docs`' index only covers Gen1 and
+  can't confirm a Gen2 pattern either way, use `context7`/web search for those
+  instead. Check `CLAUDE.md`'s Backend/Infra section for what's migrated vs.
+  still legacy before assuming either way.
 - **context7** — verify the exact Vue 3 / Pinia / PrimeVue / vue-router / vue-i18n API
   before using it. No TypeScript here to catch a wrong call at compile time — a
   plausible-looking but wrong API name will only surface at runtime, or worse, silently

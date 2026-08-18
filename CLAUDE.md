@@ -15,13 +15,25 @@ architecturales) et `.cursorrules` (conventions détaillées pour l'éditeur).
 - Pas de TypeScript — JS pur, avec JSDoc ponctuel pour le typage des fonctions
 
 **Backend / Infra**
-- AWS Amplify **Gen1** (amplify-cli) — **jamais** de pattern Gen2 (`defineAuth`,
-  `defineData`, `backend.ts`, etc.), ce repo ne les utilise pas
+- **Migration Gen1 → Gen2 en cours (Phase 8, depuis le 2026-08-18)** — voir
+  `docs/adr/` et le plan de roadmap. Amplify Gen1 est en *maintenance mode*
+  depuis le 1er mai 2026 (fin de vie le 1er mai 2027) ; la Phase 8 réécrit le
+  backend en Gen2 (`ampx`, `defineAuth`, `defineData`, `backend.ts`) à la main
+  (pas l'outil CLI beta de migration), sous-tâche par sous-tâche, dans une
+  seule branche/PR exceptionnellement (migration, pas une feature incrémentale).
+  **Pendant la durée de la migration, ne plus rejeter un pattern Gen2 par
+  principe** — un agent doit distinguer "résidu Gen1 pas encore migré" de
+  "code Gen2 conforme à la sous-tâche en cours". Une fois la Phase 8 terminée
+  et vérifiée de bout en bout, ce bloc redevient "Gen2 uniquement" et les
+  lignes ci-dessous (Transformer v1, VTL, modèles `@model` Gen1) sont retirées.
 - AppSync/GraphQL, Transformer v1 (`@model`, `@auth` — y compris au niveau
-  champ), résolveurs VTL auto-générés
-- Cognito (user pools, groupes `Veterinarians`/`Owners`)
-- Lambda (Node.js, un trigger PostConfirmation, CommonJS/`require`)
-- DynamoDB (via les modèles `@model`)
+  champ), résolveurs VTL auto-générés — **legacy Gen1**, remplacé
+  progressivement par `defineData` (Gen2) pendant la Phase 8
+- Cognito (user pools, groupes `Veterinarians`/`Owners`) — migration vers
+  `defineAuth` (Gen2) en cours (Phase 8)
+- Lambda (Node.js, un trigger PostConfirmation, CommonJS/`require`) —
+  migration vers le modèle de fonctions Gen2 en cours (Phase 8)
+- DynamoDB (via les modèles `@model` Gen1, puis `defineData` Gen2)
 
 **Tests**
 - Vitest (unitaire — le seul réellement utilisé)
@@ -51,8 +63,13 @@ configuré en dehors (global, par machine) — son binaire pointe vers un chemin
 local, pas encore packagé pour être partageable en l'état.
 
 - **amplify-docs** — à consulter avant tout code touchant Amplify (auth, API,
-  schema, functions). Confirme systématiquement que la réponse concerne Gen1,
-  pas Gen2.
+  schema, functions). **Limitation connue depuis la Phase 8** : son index
+  local ne couvre que la doc Gen1 — inutilisable pour vérifier un pattern Gen2
+  (`defineAuth`, `defineData`, fonctions). Pour la durée de la migration,
+  s'appuyer sur `context7`/recherche web pour tout ce qui est Gen2, et
+  continuer à confirmer via `amplify-docs` uniquement les points encore Gen1
+  (code legacy pas encore migré). Repointer l'index vers la doc Gen2 dès qu'un
+  binaire à jour est disponible (pas fait à ce jour, pas bloquant).
 - **context7** — vérifie l'API exacte de Vue 3 / Pinia / PrimeVue / vue-router /
   vue-i18n avant d'écrire du code (pas de TypeScript ici pour rattraper les
   erreurs à la compilation).

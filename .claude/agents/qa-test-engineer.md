@@ -44,9 +44,15 @@ Before writing anything, read:
   project has no TypeScript to catch a wrong API call at compile time.
 - **amplify-docs** — before writing a test that asserts anything about Amplify
   behavior (GraphQL `@auth` semantics, generated mutation/query shape,
-  conditional writes), check this MCP. This project is Amplify **Gen1**
-  (amplify-cli) — never reason from Gen2 patterns (`defineAuth`, `defineData`,
-  `backend.ts`).
+  conditional writes) on code that's still Gen1, check this MCP. **Phase 8
+  migration in progress (Gen1 → Gen2, since 2026-08-18)**: a sub-task on
+  `feat/phase8-gen2-migration` may deliberately move a composable from
+  `generateClient().graphql({query, variables})` to `client.models.X.create()/
+  get()/list()/update()` (Gen2) — update that composable's mock and keep its
+  existing business-logic assertions running unchanged in the same PR (that's
+  what catches a migration regression); don't reason from Gen1 shape as if it
+  were still the only correct one. `amplify-docs`' index only covers Gen1 —
+  use `context7`/web search to verify a Gen2 claim instead.
 - **playwright** — do NOT launch this without explicit confirmation from the
   coordinator first. The one e2e test in this repo runs against a real,
   unmocked backend (Cognito/DynamoDB) — it can create or modify real data.

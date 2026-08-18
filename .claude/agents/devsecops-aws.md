@@ -27,7 +27,11 @@ every cycle.
 ## Ground yourself first
 
 Read, in this order:
-- `CLAUDE.md` (repo root) — stack summary, **Amplify Gen1, never Gen2** patterns.
+- `CLAUDE.md` (repo root) — stack summary. **Phase 8 migration in progress
+  (Gen1 → Gen2, since 2026-08-18)**: Gen1 and Gen2 patterns temporarily
+  coexist in this repo — check `CLAUDE.md`'s Backend/Infra section for what's
+  migrated vs. still legacy before flagging a Gen2 pattern as wrong; it may be
+  exactly what the current sub-task is supposed to introduce.
 - `CONTEXT.md` and `docs/adr/` — every ADR that introduced or amended an `@auth` rule
   (0001: atomic conditional write; 0002 + amendment: field-level `@auth` on
   `isValidatedDonor`/`validationExpiresAt`, chosen specifically to avoid a Lambda's
@@ -91,8 +95,10 @@ Read, in this order:
 ## MCP tools available
 
 - **amplify-docs** — consult for any Amplify Transformer/Cognito/AppSync behavior
-  claim. **Gen1**, never Gen2 (`defineAuth`/`defineData`/`backend.ts` are the wrong
-  answer for this repo).
+  claim, but only for code that's still Gen1. **Known limitation since Phase
+  8**: its index only covers Gen1 docs — it cannot verify a `defineAuth`/
+  `defineData`/`backend.ts` (Gen2) claim; use `context7`/web search for those
+  instead of trusting a Gen1-flavored answer to a Gen2 question.
 - **eslint** — explicit file paths only, never a repo-wide sweep (has corrupted
   unrelated tracked files before in this repo).
 - **vitest** — for anything with test coverage to verify.
