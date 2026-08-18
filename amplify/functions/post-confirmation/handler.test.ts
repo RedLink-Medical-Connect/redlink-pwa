@@ -36,14 +36,17 @@ afterAll(() => {
   sendSpy.mockRestore()
 })
 
-function buildEvent(profile = 'vet') {
+// `profile` optionnel (pas de valeur par défaut) : reflète que Cognito peut
+// réellement envoyer `userAttributes` sans la clé `profile` (jamais
+// renseignée au signup) -- un paramètre par défaut JS masquerait ce cas
+// (`buildEvent(undefined)` retomberait silencieusement sur une valeur par
+// défaut plutôt que d'omettre la clé).
+function buildEvent(profile?: string) {
   return {
     userPoolId: 'pool-123',
     userName: 'user-abc',
     request: {
-      userAttributes: {
-        profile,
-      },
+      userAttributes: profile !== undefined ? { profile } : {},
     },
   }
 }
@@ -88,10 +91,28 @@ describe('PostConfirmation post-confirmation handler (Gen2)', () => {
     expect(sendSpy).not.toHaveBeenCalled()
   })
 
-  it('re-throws (does not swallow) when AdminAddUserToGroupCommand rejects', async () => {
-    sendSpy.mockRejectedValue(new Error('AccessDenied: cannot add user to group'))
+  it('does not call the SDK and returns the event untouched when profile is absent (not just unrecognized)', async () => {
+    // Distinct de "profil non reconnu" : ici `profile` lui-même est falsy, ce
+    // qui emprunte la branche `profile ? PROFILE_TO_GROUP[profile] : undefined`
+    // côté condition (pas un lookup qui échoue), plutôt qu'un accès
+    // `PROFILE_TO_GROUP['not-a-real-profile']` qui renvoie `undefined`. Même
+    // comportement observable, mais un branchement de code distinct -- vaut
+    // son propre cas plutôt que d'être supposé couvert par le cas précédent.
+    const event = buildEvent()
+    await expect(handler(event)).resolves.toBe(event)
+    expect(sendSpy).not.toHaveBeenCalled()
+  })
+
+  it('re-throws (does not swallow) when AdminAddUserToGroupCommand rejects, without a silent retry or fallback success', async () => {
+    const rejection = new Error('AccessDenied: cannot add user to group')
+    sendSpy.mockRejectedValue(rejection)
 
     const event = buildEvent('vet')
-    await expect(handler(event)).rejects.toThrow('AccessDenied: cannot add user to group')
+    // Le point central de la Phase 7.3 (fail-loud) : pas de deuxième tentative
+    // silencieuse, pas de retour "normal" (`resolves.toBe(event)`) qui
+    // masquerait l'échec à Cognito -- seul un rejet avec l'erreur d'origine,
+    // intacte, est acceptable ici.
+    await expect(handler(event)).rejects.toBe(rejection)
+    expect(sendSpy).toHaveBeenCalledTimes(1)
   })
 })
