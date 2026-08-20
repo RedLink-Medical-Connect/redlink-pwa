@@ -77,7 +77,7 @@ describe('amplify/data/resource.ts — ClinicOwnerRelation.ownerDefinedIn("owner
   it('compile bien avec ownerField: "ownerID", pas le champ caché par défaut "owner"', () => {
     const clinicOwnerRelationType = extractType('ClinicOwnerRelation')
     expect(clinicOwnerRelationType).toContain('ownerField: "ownerID"')
-    expect(clinicOwnerRelationType).not.toContain('ownerField: "owner"}')
+    expect(clinicOwnerRelationType).not.toContain('ownerField: "owner"')
   })
 
   it('conserve la seconde règle Veterinarians sans restriction d\'opérations (fidèle à Gen1)', () => {

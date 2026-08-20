@@ -33,6 +33,22 @@ import { type ClientSchema, a, defineData } from '@aws-amplify/backend'
  * modifier `Request`/`Mission` ci-dessous).
  */
 
+// Revue Lead Dev (cycle Phase 8 sous-tâche 4) : deux motifs `.authorization()` de champ
+// répétés mot pour mot (7 fois pour le premier, sur Request ; 8 fois pour le second, sur
+// Animal/Mission) -- extraits ici pour qu'un futur resserrage/élargissement d'un de ces
+// motifs sur un sous-ensemble de champs ne dépende pas d'un copier-coller identique
+// partout (risque réel : un champ oublié lors d'une future édition passerait inaperçu).
+// Owner lecture seule, écriture réservée aux Veterinarians (create+read) -- Request.
+const authenticatedReadOnlyVetCreateRead = (allow: any) => [
+  allow.authenticated().to(['read']),
+  allow.group('Veterinarians').to(['create', 'read']),
+]
+// Owner lecture seule, écriture réservée aux Veterinarians (read+update) -- Animal/Mission.
+const ownerReadOnlyVetReadUpdate = (allow: any) => [
+  allow.owner().to(['read']),
+  allow.group('Veterinarians').to(['read', 'update']),
+]
+
 export const schema = a.schema({
   // ==========================================================
   // ENUMS -- valeurs identiques à Gen1 (schema.graphql, section 4)
@@ -186,7 +202,7 @@ export const schema = a.schema({
       // l'Owner -- nom, race, poids...). Voir docs/adr/0003.
       lastDonationDate: a
         .date()
-        .authorization((allow) => [allow.owner().to(['read']), allow.group('Veterinarians').to(['read', 'update'])]),
+        .authorization(ownerReadOnlyVetReadUpdate),
       donationFrequency: a.ref('DonationFrequency'),
 
       // `.authorization()` de champ (REMPLACE, pour ces deux champs uniquement, les règles de
@@ -194,10 +210,10 @@ export const schema = a.schema({
       // docs/adr/0002 (amendement 2026-08-12).
       isValidatedDonor: a
         .boolean()
-        .authorization((allow) => [allow.owner().to(['read']), allow.group('Veterinarians').to(['read', 'update'])]),
+        .authorization(ownerReadOnlyVetReadUpdate),
       validationExpiresAt: a
         .datetime()
-        .authorization((allow) => [allow.owner().to(['read']), allow.group('Veterinarians').to(['read', 'update'])]),
+        .authorization(ownerReadOnlyVetReadUpdate),
 
       ownerID: a.id().required(),
       ownerProfile: a.belongsTo('Owner', 'ownerID'),
@@ -239,31 +255,19 @@ export const schema = a.schema({
       requestType: a
         .ref('RequestType')
         .required()
-        .authorization((allow) => [
-          allow.authenticated().to(['read']),
-          allow.group('Veterinarians').to(['create', 'read']),
-        ]),
+        .authorization(authenticatedReadOnlyVetCreateRead),
       requiredSpecies: a
         .ref('Species')
         .required()
-        .authorization((allow) => [
-          allow.authenticated().to(['read']),
-          allow.group('Veterinarians').to(['create', 'read']),
-        ]),
+        .authorization(authenticatedReadOnlyVetCreateRead),
       requiredBloodGroup: a
         .string()
         .required()
-        .authorization((allow) => [
-          allow.authenticated().to(['read']),
-          allow.group('Veterinarians').to(['create', 'read']),
-        ]),
+        .authorization(authenticatedReadOnlyVetCreateRead),
       quantity: a
         .integer()
         .required()
-        .authorization((allow) => [
-          allow.authenticated().to(['read']),
-          allow.group('Veterinarians').to(['create', 'read']),
-        ]),
+        .authorization(authenticatedReadOnlyVetCreateRead),
       // Phase 6.5 (ADR-0005) : date/heure de RDV souhaitée par la clinique pour une Request
       // APPOINTMENT (null/absent pour EMERGENCY). Même `.authorization()` que ses voisins
       // ci-dessus. ⚠️ Nommage identique à Mission.appointmentDatetime (existant, non lié) : ce
@@ -272,10 +276,7 @@ export const schema = a.schema({
       // Request -- deux champs distincts, sur deux types distincts, sémantiques différentes.
       appointmentDatetime: a
         .datetime()
-        .authorization((allow) => [
-          allow.authenticated().to(['read']),
-          allow.group('Veterinarians').to(['create', 'read']),
-        ]),
+        .authorization(authenticatedReadOnlyVetCreateRead),
       // Hors scoping champ, délibérément : ce sont les deux seuls champs (avec activeMissionID
       // plus bas) que `linkRequestToMission` doit pouvoir écrire côté Owner. Sans `update` sur la
       // règle `allow.authenticated()` de niveau modèle, l'acceptation d'une Mission par un Owner
@@ -285,18 +286,12 @@ export const schema = a.schema({
       status: a.ref('RequestStatus').required(),
       createdAt: a
         .datetime()
-        .authorization((allow) => [
-          allow.authenticated().to(['read']),
-          allow.group('Veterinarians').to(['create', 'read']),
-        ]),
+        .authorization(authenticatedReadOnlyVetCreateRead),
 
       clinicID: a
         .id()
         .required()
-        .authorization((allow) => [
-          allow.authenticated().to(['read']),
-          allow.group('Veterinarians').to(['create', 'read']),
-        ]),
+        .authorization(authenticatedReadOnlyVetCreateRead),
       clinic: a.belongsTo('Clinic', 'clinicID'),
 
       // Hors scoping champ (voir `status` ci-dessus, même raison).
@@ -358,22 +353,22 @@ export const schema = a.schema({
       // (hors UI) -- voir ADR-0004 pour l'analyse complète de ce résidu, inchangée en Gen2.
       validationCode: a
         .string()
-        .authorization((allow) => [allow.owner().to(['read']), allow.group('Veterinarians').to(['read', 'update'])]),
+        .authorization(ownerReadOnlyVetReadUpdate),
       scannedAt: a
         .datetime()
-        .authorization((allow) => [allow.owner().to(['read']), allow.group('Veterinarians').to(['read', 'update'])]),
+        .authorization(ownerReadOnlyVetReadUpdate),
 
       validatedByVeterinarianID: a
         .id()
-        .authorization((allow) => [allow.owner().to(['read']), allow.group('Veterinarians').to(['read', 'update'])]),
+        .authorization(ownerReadOnlyVetReadUpdate),
       validatedBy: a.belongsTo('Veterinarian', 'validatedByVeterinarianID'),
 
       stripePaymentIntentId: a
         .string()
-        .authorization((allow) => [allow.owner().to(['read']), allow.group('Veterinarians').to(['read', 'update'])]),
+        .authorization(ownerReadOnlyVetReadUpdate),
       stripePaymentStatus: a
         .string()
-        .authorization((allow) => [allow.owner().to(['read']), allow.group('Veterinarians').to(['read', 'update'])]),
+        .authorization(ownerReadOnlyVetReadUpdate),
 
       // Contrepartie obligatoire de `Request.mission` (`belongsTo` ci-dessus) -- voir le
       // commentaire détaillé sur `Request.mission`. Jamais consommé par un composable applicatif
