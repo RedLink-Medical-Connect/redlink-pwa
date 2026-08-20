@@ -1,19 +1,18 @@
 import { defineBackend } from '@aws-amplify/backend'
 import { auth } from './auth/resource'
+import { data } from './data/resource'
 import { postConfirmation } from './functions/post-confirmation/resource'
 
 /**
- * Phase 8, sous-tâche 3 (migration Gen1 -> Gen2) : Cognito + Lambda
- * PostConfirmation seulement. `data` (defineData, sous-tâche 4) est
- * volontairement absent de cet objet -- `defineBackend` ne l'exige pas
- * (les constructs passés ici sont un simple regroupement de "backend
- * resources", pas un tuple figé) et ajouter un schéma de données factice
- * juste pour faire nombre aurait été plus de code à réécrire/jeter à la
- * sous-tâche suivante qu'à en laisser l'absence.
+ * Phase 8, sous-tâche 4 (migration Gen1 -> Gen2) : `data` (defineData,
+ * `amplify/data/resource.ts`) rejoint `auth`/`postConfirmation` (sous-tâche 3)
+ * dans le regroupement de "backend resources" -- voir `amplify/data/resource.ts`
+ * pour le détail de la traduction des 8 types `@model`/règles `@auth`.
  */
 const backend = defineBackend({
   auth,
   postConfirmation,
+  data,
 })
 
 // Permission IAM de la Lambda PostConfirmation (scopée à `cognito-idp:AdminAddUserToGroup`

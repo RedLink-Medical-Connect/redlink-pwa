@@ -39,7 +39,20 @@ architecturales) et `.cursorrules` (conventions détaillées pour l'éditeur).
   fonctions Gen2 (`amplify/functions/post-confirmation/`, TypeScript), Phase 8
   sous-tâche 3 ; l'équivalent Gen1 CommonJS reste en place le temps de la
   migration (voir ADR-0008)
-- DynamoDB (via les modèles `@model` Gen1, puis `defineData` Gen2)
+- DynamoDB (via les modèles `@model` Gen1, puis `defineData` Gen2) — schéma de
+  données migré vers `defineData` (Gen2, `amplify/data/resource.ts`), Phase 8
+  sous-tâche 4 : les 8 types `@model` et leurs règles `@auth` (type et champ,
+  ADR-0002 à 0006) sont traduits en `.authorization()` (voir ADR-0009 — en
+  particulier `ClinicOwnerRelation.ownerDefinedIn("ownerID")`, la traduction
+  Gen2 du pattern qui évite de reproduire le bug `d27f204`). Un piège Gen2
+  découvert pendant cette sous-tâche, pas présent en Gen1 : `hasOne`/`hasMany`
+  exige toujours un `belongsTo` apparié sur le modèle ciblé, avec un champ de
+  référence identique des deux côtés — le processeur de schéma lève une
+  erreur bloquante sinon (voir ADR-0010, `Request.mission`/`Mission.request`).
+  Composables/services (`src/composables/*`, `src/services/*-service.js`)
+  restent sur le client Gen1 (`generateClient().graphql(...)`) jusqu'à la
+  sous-tâche 5 — ne pas supposer `client.models.X` disponible côté frontend
+  avant cette bascule.
 
 **Tests**
 - Vitest (unitaire — le seul réellement utilisé)
