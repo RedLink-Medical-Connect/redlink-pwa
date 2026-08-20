@@ -1,5 +1,4 @@
 import { defineBackend } from '@aws-amplify/backend'
-import { Effect, PolicyStatement } from 'aws-cdk-lib/aws-iam'
 import { auth } from './auth/resource'
 import { postConfirmation } from './functions/post-confirmation/resource'
 
@@ -17,23 +16,13 @@ const backend = defineBackend({
   postConfirmation,
 })
 
-/**
- * IAM scopé à ce seul user pool, jamais de wildcard (voir ADR-0008).
- * Gen1 scopait la policy de la même façon (`!GetAtt UserPool Arn` dans
- * `redlinkpwa056b43b0056b43b0PostConfirmation-cloudformation-template.json`)
- * mais avec 3 actions (`AdminAddUserToGroup`, `GetGroup`, `CreateGroup`),
- * nécessaires à la création paresseuse des groupes. En Gen2, les groupes
- * sont créés statiquement par `defineAuth({ groups: [...] })` --
- * `GetGroup`/`CreateGroup` ne sont donc plus nécessaires : la policy Gen2
- * est plus restreinte que son équivalent Gen1, pas seulement équivalente.
- */
-backend.postConfirmation.resources.lambda.addToRolePolicy(
-  new PolicyStatement({
-    effect: Effect.ALLOW,
-    actions: ['cognito-idp:AdminAddUserToGroup'],
-    resources: [backend.auth.resources.userPool.userPoolArn],
-  }),
-)
+// Permission IAM de la Lambda PostConfirmation (scopée à `cognito-idp:AdminAddUserToGroup`
+// sur ce seul user pool, jamais de wildcard -- voir ADR-0008) : accordée de façon
+// déclarative via `access` dans `amplify/auth/resource.ts`, pas ici. Gen1 scopait la
+// policy de la même façon (`!GetAtt UserPool Arn` dans
+// `redlinkpwa056b43b0056b43b0PostConfirmation-cloudformation-template.json`) mais avec 3
+// actions (`AdminAddUserToGroup`, `GetGroup`, `CreateGroup`), nécessaires à la création
+// paresseuse des groupes -- devenues inutiles en Gen2 (groupes statiques).
 
 /**
  * Politique de mot de passe reproduite à l'identique de Gen1 (voir ADR-0008,

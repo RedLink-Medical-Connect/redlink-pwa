@@ -11,6 +11,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "lint": "eslint . --fix --cache",
+    "type-check": "tsc --noEmit -p tsconfig.json",
     "format": "prettier --write --experimental-cli src/",
     "test": "vitest",
     "test:run": "vitest run",

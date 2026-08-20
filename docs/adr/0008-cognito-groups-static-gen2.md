@@ -44,9 +44,8 @@ Conséquences :
 
 - Policy IAM de la Lambda encore plus restreinte qu'en Gen1 : une seule action
   (`cognito-idp:AdminAddUserToGroup`), toujours scopée au seul user pool de cet
-  environnement (`backend.auth.resources.userPool.userPoolArn`, pas de wildcard) —
-  `GetGroup`/`CreateGroup` disparaissent entièrement du besoin fonctionnel de cette
-  fonction.
+  environnement, pas de wildcard — `GetGroup`/`CreateGroup` disparaissent entièrement
+  du besoin fonctionnel de cette fonction.
 - Le comportement fail-loud (rethrow si `AdminAddUserToGroupCommand` échoue, pas de
   `console.error` silencieux) est conservé à l'identique — c'est un choix orthogonal à
   la création statique des groupes, toujours valable : un utilisateur CONFIRMED sans
@@ -56,6 +55,39 @@ Conséquences :
   la fenêtre de course `GroupExistsException` ni la création paresseuse — ces cas
   n'existent structurellement plus côté Gen2. Seuls restent : mapping profil → groupe,
   no-op sur profil non reconnu, propagation de l'échec `AdminAddUserToGroupCommand`.
+
+### Amendement (revue Lead Dev, cycle Phase 8 sous-tâche 3) : `access` déclaratif plutôt que l'échappatoire CDK manuel
+
+Version initialement livrée : la permission IAM ci-dessus était accordée dans
+`amplify/backend.ts` via `backend.postConfirmation.resources.lambda.addToRolePolicy(new
+PolicyStatement({ actions: ['cognito-idp:AdminAddUserToGroup'], resources:
+[backend.auth.resources.userPool.userPoolArn] }))` — un échappatoire CDK manuel, au
+même niveau d'abstraction que celui utilisé pour la politique de mot de passe
+ci-dessous (pour laquelle `defineAuth` n'expose effectivement aucune alternative
+déclarative).
+
+Revue Lead Dev : `defineAuth` expose en réalité une prop `access` de première classe
+pour exactement ce cas d'usage (`AuthAccessGenerator`,
+`node_modules/@aws-amplify/backend-auth/lib/types.d.ts`), avec `'addUserToGroup'` comme
+`ActionIam` documentée — le JSDoc du package (`lib/factory.d.ts`) donne littéralement
+`access: (allow) => [allow.resource(postConfirmation).to(["addUserToGroup"])]` comme
+exemple. Remplacé en conséquence dans `amplify/auth/resource.ts`.
+
+**Ce n'était pas un bug de sécurité** : le scope obtenu par l'échappatoire manuel était
+déjà correct (vérifié en lisant l'implémentation de
+`UserPoolAccessPolicyFactory`/`iamActionMap` dans
+`node_modules/@aws-amplify/backend-auth/lib/userpool_access_policy_factory.js` — la
+classe est explicitement documentée "Generates IAM policies scoped to a single
+userpool", `addUserToGroup` s'y résout en la seule action
+`cognito-idp:AdminAddUserToGroup`, sur `[this.userpool.userPoolArn]` exclusivement,
+soit exactement le scope écrit à la main). C'est une question de maintenabilité et
+d'idiome Gen2 : `access` est le chemin déclaratif de première classe du framework pour
+accorder une permission entre deux resources Amplify, plus documenté et plus éprouvé
+que de redescendre manuellement au niveau CDK — même raisonnement que celui tenu dans
+ADR-0007 pour rester sur le chemin le plus battu du framework pendant une migration
+déjà risquée par nature. L'échappatoire CDK manuel reste néanmoins la bonne réponse
+quand `defineAuth` n'expose vraiment rien de déclaratif pour le réglage visé (voir la
+politique de mot de passe ci-dessous, qui n'a pas d'équivalent dans `access`).
 
 ## Politique de mot de passe
 

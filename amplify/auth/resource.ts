@@ -49,4 +49,14 @@ export const auth = defineAuth({
   triggers: {
     postConfirmation,
   },
+  // Revue Lead Dev (cycle Phase 8 sous-tâche 3) : préférer l'API déclarative `access`
+  // de defineAuth à l'échappatoire CDK manuel (`addToRolePolicy` dans backend.ts, tel
+  // qu'initialement écrit) -- même scope obtenu (une seule action IAM,
+  // `cognito-idp:AdminAddUserToGroup`, une seule ressource, ce user pool, jamais de
+  // wildcard : voir ADR-0008, section "Groupes statiques", pour la vérification faite
+  // dans `UserPoolAccessPolicyFactory`/`iamActionMap` de `@aws-amplify/backend-auth`).
+  // Pas un correctif de sécurité -- le scope manuel était déjà correct -- mais le
+  // chemin le plus documenté/éprouvé du framework (même raisonnement que ADR-0007 sur
+  // le fait de rester sur le chemin battu pendant une migration déjà risquée).
+  access: (allow) => [allow.resource(postConfirmation).to(['addUserToGroup'])],
 })

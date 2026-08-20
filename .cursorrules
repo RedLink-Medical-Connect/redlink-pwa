@@ -1,9 +1,12 @@
 # redlink-pwa — editor rules
 
-Vue 3 (`<script setup>`) + Vite PWA, plain JavaScript (no TypeScript in this repo —
-don't introduce `.ts`/`tsconfig.json` or TS-only syntax; there is no `any` to ban
-because there is no type system here). AWS Amplify (GraphQL) backend. Tailwind for
-styling, PrimeVue for UI components, vue-i18n for copy.
+Vue 3 (`<script setup>`) + Vite PWA, plain JavaScript (no TypeScript in `src/` —
+don't introduce `.ts` or TS-only syntax there; there is no `any` to ban because
+there is no type system in the frontend). Scoped exception: `amplify/**/*.ts`
+(Gen2 backend definition only, required by the Amplify Gen2 framework — see
+ADR-0007) — this doesn't reopen the "no TypeScript" rule for `src/`. AWS Amplify
+(GraphQL) backend. Tailwind for styling, PrimeVue for UI components, vue-i18n for
+copy.
 
 ## Naming
 
