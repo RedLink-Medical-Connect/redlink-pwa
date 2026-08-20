@@ -33,7 +33,7 @@ import { type ClientSchema, a, defineData } from '@aws-amplify/backend'
  * modifier `Request`/`Mission` ci-dessous).
  */
 
-const schema = a.schema({
+export const schema = a.schema({
   // ==========================================================
   // ENUMS -- valeurs identiques à Gen1 (schema.graphql, section 4)
   // ==========================================================
