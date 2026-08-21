@@ -63,6 +63,16 @@ architecturales) et `.cursorrules` (conventions détaillées pour l'éditeur).
   `Veterinarians`/`Owners` déclarés statiquement (`groups: [...]`),
   contrairement à Gen1 où ils étaient créés paresseusement au premier signup —
   voir ADR-0008.
+- Geo (Amazon Location Service, place index) : pas de première-classe Gen2
+  (pas de `defineGeo()`) — échappatoire CDK dans `amplify/backend.ts`
+  (`backend.createStack('geo-stack')`, `CfnPlaceIndex` d'`aws-cdk-lib/
+  aws-location`, policy IAM scopée à l'ARN de l'index sur les DEUX rôles
+  `authenticatedUserIamRole`/`unauthenticatedUserIamRole`, `backend.addOutput({
+  geo: {...} })`) — même famille de pattern que la mutation custom
+  conditionnelle (ADR-0011) et la politique de mot de passe (ADR-0008).
+  Référence pour toute future ressource AWS hors périmètre `auth`/`data`. Voir
+  ADR-0012 (accès invité déjà couvert par le défaut Gen2 de `defineAuth`, rien
+  à faire côté `amplify/auth/resource.ts`).
 - Lambda : trigger PostConfirmation sur le modèle de fonctions Gen2
   (`amplify/functions/post-confirmation/`, TypeScript, `defineFunction`),
   référencé depuis `amplify/auth/resource.ts` — voir ADR-0008.
