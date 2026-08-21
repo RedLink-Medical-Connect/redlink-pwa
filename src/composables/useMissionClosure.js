@@ -1,13 +1,27 @@
 import { ref } from 'vue'
-import { generateClient } from 'aws-amplify/api'
-import {
-  closeMissionSimple,
-  updateAnimalLastDonationDateSimple,
-  createClinicOwnerRelationSimple,
-  updateClinicStatsSimple,
-} from '@/graphql/custom-mutations'
-import { clinicOwnerRelationsByOwnerID, getClinic } from '@/graphql/queries'
+import { generateClient } from 'aws-amplify/data'
 import { MissionStatus } from '@/constants/enums'
+import { throwIfGraphqlError } from '@/services/graphql-error-service'
+
+// Phase 8, sous-tâche 5 (lot 3/3) : migré sur le client Gen2 (`aws-amplify/data`,
+// `client.models.Mission.*`/`client.models.Animal.*`/`client.models.ClinicOwnerRelation.*`/
+// `client.models.Clinic.*`). Les mutations `*Simple`/queries Gen1 (`closeMissionSimple`,
+// `updateAnimalLastDonationDateSimple`, `createClinicOwnerRelationSimple`,
+// `updateClinicStatsSimple`, `clinicOwnerRelationsByOwnerID`, `getClinic`) n'ont plus lieu
+// d'être ici -- voir CLAUDE.md / roadmap Phase 8 pour la méthodologie de migration.
+//
+// Sur le changement de comportement d'erreur Gen1 -> Gen2 et `throwIfGraphqlError` : voir le
+// JSDoc de `src/services/graphql-error-service.js`. Les cinq appels de ce composable
+// reprennent tous `throwIfGraphqlError` : le Gen1 d'origine faisait un simple
+// `await client.graphql(...)` sans jamais destructurer/inspecter la réponse, donc aucun
+// n'avait de notion de succès partiel à préserver.
+//
+// Pas de `selectionSet` dédié sur `Clinic.get()`/`ClinicOwnerRelation.list()` ci-dessous
+// (contrairement à useClinicDonors.js/useMatchingRequests.js) : ce sont des lectures PLATES
+// (aucune relation imbriquée traversée), donc le sur-fetch potentiel du selectionSet par
+// défaut (scalaires du modèle) reste négligeable -- la discipline "champs réellement
+// consommés" documentée dans CLAUDE.md/lot 2 vise spécifiquement le coût d'une traversée de
+// relation, pas un `get()`/`list()` à plat.
 
 // Les deux seules issues valides pour la clôture d'une Mission côté Veterinarian (roadmap
 // Phase 2, sous-tâche 1) : le donneur s'est présenté (COMPLETED) ou pas (NO_SHOW). Toute
@@ -141,23 +155,20 @@ export function useMissionClosure() {
     }
 
     try {
-      const { data } = await client.graphql({
-        query: clinicOwnerRelationsByOwnerID,
-        variables: { ownerID },
-        authMode: 'userPool',
+      const { data, errors } = await client.models.ClinicOwnerRelation.list({
+        filter: { ownerID: { eq: ownerID } },
       })
+      throwIfGraphqlError(errors, 'clinicOwnerRelationsByOwnerID')
 
-      const toCreate = resolveClinicOwnerRelationUpsert(
-        data.clinicOwnerRelationsByOwnerID.items,
-        clinicID,
-      )
+      const toCreate = resolveClinicOwnerRelationUpsert(data || [], clinicID)
       if (!toCreate) return false
 
-      await client.graphql({
-        query: createClinicOwnerRelationSimple,
-        variables: { input: { clinicID: toCreate.clinicID, ownerID, isPrimaryClinic: toCreate.isPrimaryClinic } },
-        authMode: 'userPool',
+      const { errors: createErrors } = await client.models.ClinicOwnerRelation.create({
+        clinicID: toCreate.clinicID,
+        ownerID,
+        isPrimaryClinic: toCreate.isPrimaryClinic,
       })
+      throwIfGraphqlError(createErrors, 'createClinicOwnerRelation')
       return true
     } catch (e) {
       console.error('Erreur liaison clinique/propriétaire (ClinicOwnerRelation) :', e)
@@ -192,25 +203,18 @@ export function useMissionClosure() {
     }
 
     try {
-      const { data } = await client.graphql({
-        query: getClinic,
-        variables: { id: clinicID },
-        authMode: 'userPool',
-      })
-      const current = data.getClinic
+      const { data, errors } = await client.models.Clinic.get({ id: clinicID })
+      throwIfGraphqlError(errors, 'getClinic')
+
+      const current = data
       if (!current) return
 
-      await client.graphql({
-        query: updateClinicStatsSimple,
-        variables: {
-          input: {
-            id: clinicID,
-            transfusionsDone: (current.transfusionsDone ?? 0) + 1,
-            donorOwnersCount: (current.donorOwnersCount ?? 0) + (isNewDonorOwner ? 1 : 0),
-          },
-        },
-        authMode: 'userPool',
+      const { errors: updateErrors } = await client.models.Clinic.update({
+        id: clinicID,
+        transfusionsDone: (current.transfusionsDone ?? 0) + 1,
+        donorOwnersCount: (current.donorOwnersCount ?? 0) + (isNewDonorOwner ? 1 : 0),
       })
+      throwIfGraphqlError(updateErrors, 'updateClinic')
     } catch (e) {
       console.error('Erreur incrément des indicateurs clinique (transfusionsDone/donorOwnersCount) :', e)
       // Volontairement avalée, pas relancée — voir le commentaire de fonction ci-dessus.
@@ -243,11 +247,8 @@ export function useMissionClosure() {
 
     isClosing.value = true
     try {
-      await client.graphql({
-        query: closeMissionSimple,
-        variables: { input: { id: missionId, status: outcome } },
-        authMode: 'userPool',
-      })
+      const { errors } = await client.models.Mission.update({ id: missionId, status: outcome })
+      throwIfGraphqlError(errors, 'updateMission')
 
       if (outcome === MissionStatus.COMPLETED) {
         // AWSDate attend `YYYY-MM-DD` (pas d'heure) — contrairement à `appointmentDatetime`/
@@ -255,11 +256,11 @@ export function useMissionClosure() {
         // complet. Date LOCALE (todayAsAWSDate), pas UTC — voir son commentaire.
         const today = todayAsAWSDate()
 
-        await client.graphql({
-          query: updateAnimalLastDonationDateSimple,
-          variables: { input: { id: animalId, lastDonationDate: today } },
-          authMode: 'userPool',
+        const { errors: animalErrors } = await client.models.Animal.update({
+          id: animalId,
+          lastDonationDate: today,
         })
+        throwIfGraphqlError(animalErrors, 'updateAnimal')
 
         const isNewDonorOwner = await upsertClinicOwnerRelation(clinicID, ownerID)
         await incrementClinicStats(clinicID, isNewDonorOwner)

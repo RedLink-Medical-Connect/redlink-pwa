@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { generateClient } from 'aws-amplify/api'
 import { useOwnerMissions, mapAcceptMissionError } from '@/composables/useOwnerMissions'
 
 // Regression coverage for fix #2 on branch fix/data-model-risks: schema.graphql's Request
@@ -7,31 +6,69 @@ import { useOwnerMissions, mapAcceptMissionError } from '@/composables/useOwnerM
 // from acceptMission as the last step of accepting a Mission) would 403 for an Owner. The @auth
 // rule itself isn't exercisable from Vitest against a mock client — that's covered by the
 // schema diff review — but this test proves the composable's call path: it issues the
-// updateRequest-backed linkRequestToMission mutation with authMode: 'userPool' (the Owner's own
-// session, not a group-elevated call), with no client-side gate/role-check that would itself
-// block an Owner from reaching it.
+// linkRequestToMission call as the Owner's own authenticated session (no client-side gate/role-
+// check that would itself block an Owner from reaching it).
 //
 // Updated for Phase 0.3 (ADR-0001): acceptMission(request) -> acceptMission(requestId,
-// animalId). It now reloads the Request (getRequest) and the Animal (listMyAnimalsSimple)
+// animalId). It reloads the Request (getRequest) and the Animal (listMyAnimalsSimple)
 // itself instead of trusting objects already in memory client-side, hence the extra
 // getRequest call in the mock sequence below.
+//
+// Phase 8, sous-tâche 5 (lot 3/3, le dernier) : mocks migrés vers le client Gen2
+// (`aws-amplify/data`, `client.models.{Request,Animal,Mission}.*` + `client.mutations.
+// linkRequestToMission`, ADR-0011) -- un mock dédié par méthode plutôt qu'un unique
+// `mockGraphql` discriminé par le texte de la query, même convention que
+// `__tests__/useOwnerMissions.test.js` (déjà migré dans ce même lot). Le test qui vérifiait
+// littéralement le texte de la query GraphQL (`linkCall.query.toContain('condition')`, etc.)
+// est retiré : ADR-0011 documente déjà, côté schéma (`amplify/data/resource.ts` +
+// `amplify/data/resolvers/link-request-to-mission.js`), que la condition `status = OPEN` est
+// reproduite par le resolver JS custom -- ce n'est plus un texte de document GraphQL que ce
+// composable construit lui-même, donc plus rien à pinner à ce niveau ici. Ce que ce fichier
+// peut encore prouver utilement -- et prouve toujours ci-dessous -- : `acceptMission` appelle
+// bien `client.mutations.linkRequestToMission(...)` avec les bons arguments, sans garde
+// côté client qui bloquerait un Owner d'y arriver.
 
-vi.mock('aws-amplify/api', () => ({
-  generateClient: vi.fn(),
+const requestGetMock = vi.fn()
+const animalListMock = vi.fn()
+const missionCreateMock = vi.fn()
+const missionDeleteMock = vi.fn()
+const linkRequestToMissionMock = vi.fn()
+const requestListMock = vi.fn()
+
+vi.mock('aws-amplify/data', () => ({
+  generateClient: () => ({
+    models: {
+      Request: {
+        get: (...args) => requestGetMock(...args),
+        list: (...args) => requestListMock(...args),
+      },
+      Animal: { list: (...args) => animalListMock(...args) },
+      Mission: {
+        create: (...args) => missionCreateMock(...args),
+        delete: (...args) => missionDeleteMock(...args),
+      },
+    },
+    mutations: {
+      linkRequestToMission: (...args) => linkRequestToMissionMock(...args),
+    },
+  }),
 }))
 
 vi.mock('aws-amplify/auth', () => ({
   getCurrentUser: vi.fn().mockResolvedValue({ userId: 'owner-cognito-id' }),
 }))
 
-describe('useOwnerMissions > acceptMission', () => {
-  let mockGraphql
+const resetAllMocks = () => {
+  requestGetMock.mockReset()
+  animalListMock.mockReset()
+  missionCreateMock.mockReset()
+  missionDeleteMock.mockReset()
+  linkRequestToMissionMock.mockReset()
+  requestListMock.mockReset()
+}
 
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mockGraphql = vi.fn()
-    generateClient.mockReturnValue({ graphql: mockGraphql })
-  })
+describe('useOwnerMissions > acceptMission', () => {
+  beforeEach(resetAllMocks)
 
   const request = {
     id: 'request-1',
@@ -52,56 +89,53 @@ describe('useOwnerMissions > acceptMission', () => {
     donationFrequency: 'ONCE_YEAR',
   }
 
-  it('calls linkRequestToMission (updateRequest under the hood) as the Owner via authMode userPool, with no client-side gate blocking it', async () => {
-    mockGraphql
-      .mockResolvedValueOnce({ data: { getRequest: request } }) // getRequest
-      .mockResolvedValueOnce({ data: { listAnimals: { items: [matchingAnimal] } } }) // listMyAnimalsSimple
-      .mockResolvedValueOnce({ data: { createMission: { id: 'mission-1' } } }) // createMissionSimple
-      .mockResolvedValueOnce({ data: { updateRequest: { id: 'request-1', status: 'IN_PROGRESS' } } }) // linkRequestToMission
+  it('calls client.mutations.linkRequestToMission as the Owner, with no client-side gate blocking it', async () => {
+    requestGetMock.mockResolvedValue({ data: request, errors: undefined })
+    animalListMock.mockResolvedValue({ data: [matchingAnimal], errors: undefined })
+    missionCreateMock.mockResolvedValue({ data: { id: 'mission-1', status: 'ACCEPTED' }, errors: undefined })
+    linkRequestToMissionMock.mockResolvedValue({
+      data: { id: 'request-1', status: 'IN_PROGRESS', activeMissionID: 'mission-1' },
+      errors: undefined,
+    })
 
     const { acceptMission } = useOwnerMissions()
     const donorName = await acceptMission('request-1', 'animal-1')
 
     expect(donorName).toBe('Rex')
-    expect(mockGraphql).toHaveBeenCalledTimes(4)
-
-    const linkCall = mockGraphql.mock.calls[3][0]
-    expect(linkCall.query).toContain('LinkRequestToMission')
-    expect(linkCall.query).toContain('updateRequest')
-    expect(linkCall.query).toContain('IN_PROGRESS')
-    // ADR-0001 : l'écriture est conditionnée sur Request.status = OPEN.
-    expect(linkCall.query).toContain('condition')
-    expect(linkCall.variables).toEqual({ id: 'request-1', activeMissionID: 'mission-1' })
-    // This is the Owner's own authenticated session — not a group-elevated/admin call — which is
-    // exactly the case the restored "update" @auth rule on the private/Owner rule exists for.
-    expect(linkCall.authMode).toBe('userPool')
+    expect(requestGetMock).toHaveBeenCalledTimes(1)
+    expect(animalListMock).toHaveBeenCalledTimes(1)
+    expect(missionCreateMock).toHaveBeenCalledTimes(1)
+    expect(linkRequestToMissionMock).toHaveBeenCalledTimes(1)
+    expect(linkRequestToMissionMock).toHaveBeenCalledWith({ id: 'request-1', activeMissionID: 'mission-1' })
   })
 
-  it('propagates (does not swallow) an auth failure from linkRequestToMission, so a missing @auth rule would surface as a thrown error, not a silently-lost accept', async () => {
-    const authError = new Error('Not Authorized to access updateRequest on type Request')
-    mockGraphql
-      .mockResolvedValueOnce({ data: { getRequest: request } })
-      .mockResolvedValueOnce({ data: { listAnimals: { items: [matchingAnimal] } } })
-      .mockResolvedValueOnce({ data: { createMission: { id: 'mission-1' } } })
-      .mockRejectedValueOnce(authError)
+  it('propagates (does not swallow) an auth failure resolved as `{ errors }` from linkRequestToMission, so a missing @auth rule would surface as a thrown error, not a silently-lost accept', async () => {
+    requestGetMock.mockResolvedValue({ data: request, errors: undefined })
+    animalListMock.mockResolvedValue({ data: [matchingAnimal], errors: undefined })
+    missionCreateMock.mockResolvedValue({ data: { id: 'mission-1', status: 'ACCEPTED' }, errors: undefined })
+    linkRequestToMissionMock.mockResolvedValue({
+      data: null,
+      errors: [{ message: 'Not Authorized to access linkRequestToMission' }],
+    })
 
     const { acceptMission, isAccepting } = useOwnerMissions()
 
     await expect(acceptMission('request-1', 'animal-1')).rejects.toThrow(
-      'Not Authorized to access updateRequest on type Request',
+      'Erreur GraphQL linkRequestToMission',
     )
     expect(isAccepting.value).toBe(false)
   })
 
   it('throws ANIMAL_NOT_FOUND before attempting any mutation when the Owner has no matching animal', async () => {
-    mockGraphql
-      .mockResolvedValueOnce({ data: { getRequest: request } })
-      .mockResolvedValueOnce({ data: { listAnimals: { items: [] } } })
+    requestGetMock.mockResolvedValue({ data: request, errors: undefined })
+    animalListMock.mockResolvedValue({ data: [], errors: undefined })
 
     const { acceptMission } = useOwnerMissions()
 
     await expect(acceptMission('request-1', 'animal-1')).rejects.toThrow('ANIMAL_NOT_FOUND')
-    expect(mockGraphql).toHaveBeenCalledTimes(2)
+    expect(requestGetMock).toHaveBeenCalledTimes(1)
+    expect(animalListMock).toHaveBeenCalledTimes(1)
+    expect(missionCreateMock).not.toHaveBeenCalled()
   })
 })
 
@@ -146,13 +180,10 @@ describe('mapAcceptMissionError', () => {
 // failure from a genuinely empty mission list. loadError is shared between the two fetchers
 // (like isLoading already is), reset at the start of each call and set on failure.
 describe('useOwnerMissions > loadError (fetchAvailableMissions / fetchMyMissions)', () => {
-  let mockGraphql
   let consoleErrorSpy
 
   beforeEach(() => {
-    vi.clearAllMocks()
-    mockGraphql = vi.fn()
-    generateClient.mockReturnValue({ graphql: mockGraphql })
+    resetAllMocks()
     consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
   })
 
@@ -161,7 +192,7 @@ describe('useOwnerMissions > loadError (fetchAvailableMissions / fetchMyMissions
   })
 
   it('fetchAvailableMissions: sets loadError to true on failure, keeps missions.value untouched', async () => {
-    mockGraphql.mockRejectedValueOnce(new Error('réseau : timeout'))
+    requestListMock.mockRejectedValueOnce(new Error('réseau : timeout'))
 
     const { fetchAvailableMissions, missions, loadError } = useOwnerMissions()
     expect(loadError.value).toBe(false)
@@ -173,20 +204,20 @@ describe('useOwnerMissions > loadError (fetchAvailableMissions / fetchMyMissions
   })
 
   it('fetchAvailableMissions: resets loadError to false on the next successful fetch', async () => {
-    mockGraphql.mockRejectedValueOnce(new Error('réseau : timeout'))
+    requestListMock.mockRejectedValueOnce(new Error('réseau : timeout'))
 
     const { fetchAvailableMissions, loadError } = useOwnerMissions()
     await fetchAvailableMissions()
     expect(loadError.value).toBe(true)
 
-    mockGraphql.mockResolvedValueOnce({ data: { listRequests: { items: [] } } })
+    requestListMock.mockResolvedValueOnce({ data: [], errors: undefined })
     await fetchAvailableMissions()
 
     expect(loadError.value).toBe(false)
   })
 
   it('fetchMyMissions: sets loadError to true on failure (real error, MissionsView.vue must not show the empty state)', async () => {
-    mockGraphql.mockRejectedValueOnce(new Error('réseau : timeout'))
+    animalListMock.mockRejectedValueOnce(new Error('réseau : timeout'))
 
     const { fetchMyMissions, myMissions, loadError } = useOwnerMissions()
     expect(loadError.value).toBe(false)
@@ -199,7 +230,7 @@ describe('useOwnerMissions > loadError (fetchAvailableMissions / fetchMyMissions
   })
 
   it('fetchMyMissions: keeps loadError false on a successful fetch, even with an empty mission list', async () => {
-    mockGraphql.mockResolvedValueOnce({ data: { listAnimals: { items: [] } } })
+    animalListMock.mockResolvedValueOnce({ data: [], errors: undefined })
 
     const { fetchMyMissions, myMissions, loadError } = useOwnerMissions()
     await fetchMyMissions()
@@ -213,21 +244,16 @@ describe('useOwnerMissions > loadError (fetchAvailableMissions / fetchMyMissions
   // MissionsView.vue's getAnimalEmoji() to pick 🐶 vs 🐱 instead of a hardcoded 🐶 for every
   // Mission regardless of the donor Animal's actual species.
   it('fetchMyMissions: flattens Animal.species onto each Mission as animalSpecies', async () => {
-    mockGraphql.mockResolvedValueOnce({
-      data: {
-        listAnimals: {
-          items: [
-            {
-              id: 'animal-1',
-              name: 'Minou',
-              species: 'CAT',
-              missions: {
-                items: [{ id: 'mission-1', status: 'ACCEPTED', createdAt: '2025-01-01T00:00:00.000Z' }],
-              },
-            },
-          ],
+    animalListMock.mockResolvedValueOnce({
+      data: [
+        {
+          id: 'animal-1',
+          name: 'Minou',
+          species: 'CAT',
+          missions: [{ id: 'mission-1', status: 'ACCEPTED', createdAt: '2025-01-01T00:00:00.000Z' }],
         },
-      },
+      ],
+      errors: undefined,
     })
 
     const { fetchMyMissions, myMissions } = useOwnerMissions()
@@ -264,22 +290,17 @@ describe('useOwnerMissions > loadError (fetchAvailableMissions / fetchMyMissions
       lastDonationDate: null,
       donationFrequency: 'ONCE_YEAR',
     }
-    const conditionalCheckError = {
+
+    requestGetMock.mockResolvedValue({ data: request, errors: undefined })
+    animalListMock.mockResolvedValue({ data: [animal], errors: undefined })
+    missionCreateMock.mockResolvedValue({ data: { id: 'mission-1', status: 'PENDING_ARRIVAL' }, errors: undefined })
+    linkRequestToMissionMock.mockResolvedValue({
+      data: null,
       errors: [
         { errorType: 'DynamoDB:ConditionalCheckFailedException', message: 'The conditional request failed' },
       ],
-    }
-
-    mockGraphql.mockImplementation(async ({ query }) => {
-      if (query.includes('GetRequest')) return { data: { getRequest: request } }
-      if (query.includes('ListMyAnimals')) return { data: { listAnimals: { items: [animal] } } }
-      if (query.includes('CreateMission')) {
-        return { data: { createMission: { id: 'mission-1', status: 'PENDING_ARRIVAL' } } }
-      }
-      if (query.includes('LinkRequestToMission')) throw conditionalCheckError
-      if (query.includes('DeleteMission')) throw new Error('boom: cleanup also failed')
-      throw new Error(`Unexpected graphql call in test: ${query.slice(0, 60)}`)
     })
+    missionDeleteMock.mockRejectedValue(new Error('boom: cleanup also failed'))
 
     const { acceptMission, loadError } = useOwnerMissions()
 

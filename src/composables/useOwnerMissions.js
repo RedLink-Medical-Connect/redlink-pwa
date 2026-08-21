@@ -1,19 +1,36 @@
 import { computed, ref } from 'vue'
-import { generateClient } from 'aws-amplify/api'
-import { listRequests, getRequest } from '@/graphql/queries'
-import { listMyAnimalsMissions, listMyAnimalsSimple } from '@/graphql/custom-queries'
-import {
-  createMissionSimple,
-  linkRequestToMission,
-  deleteMissionSimple,
-} from '@/graphql/custom-mutations'
+import { generateClient } from 'aws-amplify/data'
 import { getCurrentUser } from 'aws-amplify/auth'
 import {
   isValidatedDonor,
   isBloodCompatible,
   satisfiesFrequencyRule,
 } from '@/services/eligibility-service'
+import { throwIfGraphqlError } from '@/services/graphql-error-service'
 import { RequestStatus, RequestType, MissionStatus } from '@/constants/enums'
+
+// Phase 8, sous-tâche 5 (lot 3/3, le dernier) : migré sur le client Gen2 (`aws-amplify/data`,
+// `client.models.Request.*`/`client.models.Animal.*`/`client.models.Mission.*`/
+// `client.mutations.linkRequestToMission`). Les documents Gen1 (`listRequests`/`getRequest`
+// -- `@/graphql/queries` --, `listMyAnimalsMissions`/`listMyAnimalsSimple`/
+// `createMissionSimple`/`linkRequestToMission`/`deleteMissionSimple` -- custom-queries.js/
+// custom-mutations.js) n'ont plus lieu d'être ici -- voir CLAUDE.md / roadmap Phase 8 pour la
+// méthodologie de migration.
+//
+// Sur le changement de comportement d'erreur Gen1 -> Gen2 et `throwIfGraphqlError` : voir le
+// JSDoc de `src/services/graphql-error-service.js`. Tous les appels de `fetchAvailableMissions`/
+// `fetchMyMissions`/`acceptMission` reprennent `throwIfGraphqlError` (jamais
+// `resolveOrThrowOnFailure`) : le Gen1 d'origine faisait toujours un simple `await
+// client.graphql(...)` sans destructurer/inspecter la réponse (aucune notion de succès
+// partiel), y compris pour `linkRequestToMission` -- voir le commentaire dédié sur l'étape 5
+// d'`acceptMission` ci-dessous pour le détail spécifique à l'écriture atomique conditionnelle
+// (ADR-0001/ADR-0011).
+//
+// `listMyAnimalsMissions`/`listMyAnimalsSimple` (Gen2 : `client.models.Animal.list()` avec
+// `selectionSet`) : selectionSet construits en reprenant EXACTEMENT les champs sélectionnés
+// par leurs équivalents Gen1 (custom-queries.js), vérifiés un par un contre ce que ce
+// composable ET ses vues consommatrices (MissionsView.vue, DashboardView.vue) lisent
+// réellement -- voir les commentaires posés directement sur chaque appel ci-dessous.
 
 // Messages spécifiques par code d'erreur levé par `acceptMission` (voir sa doc
 // ci-dessous pour le détail de chaque étape qui peut lever ces erreurs). Fonction
@@ -99,15 +116,18 @@ export function useOwnerMissions() {
     isLoading.value = true
     loadError.value = false
     try {
-      const { data } = await client.graphql({
-        query: listRequests,
-        variables: {
-          filter: { status: { eq: RequestStatus.OPEN } },
-        },
-        authMode: 'userPool',
+      // Pas de `selectionSet` dédié : lecture PLATE (aucune relation imbriquée), tous les
+      // champs consommés ci-dessous (requestType, createdAt) sont des scalaires de Request
+      // déjà couverts par le selectionSet par défaut du client Gen2 -- même raisonnement que
+      // useMissionClosure.js (Clinic.get()/ClinicOwnerRelation.list()).
+      const { data, errors } = await client.models.Request.list({
+        filter: { status: { eq: RequestStatus.OPEN } },
       })
 
-      missions.value = data.listRequests.items.sort((a, b) => {
+      throwIfGraphqlError(errors, 'listRequests')
+
+      const requests = data || []
+      missions.value = requests.sort((a, b) => {
         if (a.requestType === RequestType.EMERGENCY && b.requestType !== RequestType.EMERGENCY) return -1
         if (a.requestType !== RequestType.EMERGENCY && b.requestType === RequestType.EMERGENCY) return 1
         return new Date(b.createdAt) - new Date(a.createdAt)
@@ -126,17 +146,43 @@ export function useOwnerMissions() {
     try {
       const { userId } = await getCurrentUser()
 
-      const { data } = await client.graphql({
-        query: listMyAnimalsMissions,
-        variables: { ownerID: userId },
-        authMode: 'userPool',
+      // selectionSet reprenant EXACTEMENT les champs sélectionnés par `listMyAnimalsMissions`
+      // (Gen1, custom-queries.js) -- vérifiés un par un contre ce que ce composable ET
+      // MissionsView.vue consomment réellement (animalName/animalSpecies flattenés
+      // ci-dessous ; mission.status/appointmentDatetime ; mission.request.clinic.name/
+      // address/phone/latitude/longitude, affichés/ouverts dans Maps par MissionsView.vue --
+      // `mission.request.id`/`requestType` eux-mêmes ne sont consommés par aucune vue, mais
+      // reproduits tels quels : traduction mécanique de la query Gen1, pas une occasion de
+      // resserrer davantage ici). `animal.missions`/`mission.request` sont des tableaux/objets
+      // directs (relation `selectionSet` Gen2), jamais enveloppés dans `{ items: [...] }`
+      // comme le faisait Gen1 -- voir useClinicDonors.js pour ce même comportement déjà
+      // rencontré en lot 2.
+      const { data, errors } = await client.models.Animal.list({
+        filter: { ownerID: { eq: userId } },
+        selectionSet: [
+          'id',
+          'name',
+          'species',
+          'missions.id',
+          'missions.status',
+          'missions.appointmentDatetime',
+          'missions.request.id',
+          'missions.request.requestType',
+          'missions.request.clinic.name',
+          'missions.request.clinic.address',
+          'missions.request.clinic.phone',
+          'missions.request.clinic.latitude',
+          'missions.request.clinic.longitude',
+        ],
       })
+
+      throwIfGraphqlError(errors, 'listAnimals')
 
       const flatList = []
 
-      const animals = data.listAnimals.items || []
+      const animals = data || []
       animals.forEach((animal) => {
-        const animalMissions = animal.missions?.items || []
+        const animalMissions = animal.missions || []
         animalMissions.forEach((mission) => {
           flatList.push({
             ...mission,
@@ -184,25 +230,44 @@ export function useOwnerMissions() {
   const acceptMission = async (requestId, animalId) => {
     isAccepting.value = true
     try {
-      // 1. Fast client-side check (pas la garde faisant autorité, voir étape 5).
-      const { data: requestData } = await client.graphql({
-        query: getRequest,
-        variables: { id: requestId },
-        authMode: 'userPool',
+      // 1. Fast client-side check (pas la garde faisant autorité, voir étape 5). Pas de
+      // `selectionSet` : lecture PLATE, tous les champs consommés plus bas (status, id,
+      // requiredSpecies, requiredBloodGroup, requestType) sont des scalaires de Request
+      // couverts par le selectionSet par défaut.
+      const { data: request, errors: requestErrors } = await client.models.Request.get({
+        id: requestId,
       })
-      const request = requestData.getRequest
+      throwIfGraphqlError(requestErrors, 'getRequest')
       if (!request || request.status !== RequestStatus.OPEN) {
         throw new Error('REQUEST_NOT_OPEN')
       }
 
-      // 2. Retrouve l'Animal désigné parmi ceux de l'Owner courant (scoping owner via @auth :
-      // absent de la liste couvre aussi bien "n'existe pas" que "pas le vôtre").
-      const { data: animalsData } = await client.graphql({
-        query: listMyAnimalsSimple,
-        authMode: 'userPool',
+      // 2. Retrouve l'Animal désigné parmi ceux de l'Owner courant (scoping owner via
+      // `allow.owner()`, schema.graphql/resource.ts : absent de la liste couvre aussi bien
+      // "n'existe pas" que "pas le vôtre"). Pas de `filter: { ownerID: { eq } }` ici --
+      // traduction mécanique de `listMyAnimalsSimple` (Gen1, custom-queries.js), qui
+      // n'envoyait déjà aucun filtre/variable et s'appuyait uniquement sur le scoping @auth
+      // owner pour restreindre `listAnimals` aux animaux de l'Owner courant (contrairement à
+      // `listMyAnimalsByOwnerId`/`useAnimals.fetchAnimals()`, qui filtre explicitement par
+      // `ownerID` -- deux queries Gen1 distinctes, reproduites telles quelles).
+      // selectionSet reprenant EXACTEMENT les champs de `listMyAnimalsSimple` (Gen1) --
+      // tous consommés par les 3 gates d'Eligibility et le retour de la fonction ci-dessous
+      // (species/bloodGroup, isValidatedDonor/validationExpiresAt, lastDonationDate/
+      // donationFrequency, name).
+      const { data: myAnimals, errors: animalsErrors } = await client.models.Animal.list({
+        selectionSet: [
+          'id',
+          'name',
+          'species',
+          'bloodGroup',
+          'isValidatedDonor',
+          'validationExpiresAt',
+          'lastDonationDate',
+          'donationFrequency',
+        ],
       })
-      const myAnimals = animalsData.listAnimals.items
-      const animal = myAnimals.find((a) => a.id === animalId)
+      throwIfGraphqlError(animalsErrors, 'listAnimals')
+      const animal = (myAnimals || []).find((a) => a.id === animalId)
       if (!animal) throw new Error('ANIMAL_NOT_FOUND')
 
       // 3. Eligibility (CONTEXT.md), critères 1 à 3, dans l'ordre hiérarchisé imposé.
@@ -230,35 +295,41 @@ export function useOwnerMissions() {
         appointmentDatetime: new Date().toISOString(),
       }
 
-      const missionResult = await client.graphql({
-        query: createMissionSimple,
-        variables: { input: missionInput },
-        authMode: 'userPool',
-      })
+      const { data: createdMission, errors: createMissionErrors } =
+        await client.models.Mission.create(missionInput)
+      throwIfGraphqlError(createMissionErrors, 'createMission')
 
-      const newMissionId = missionResult.data.createMission.id
+      const newMissionId = createdMission.id
 
-      // 5. Écriture atomique conditionnelle (ADR-0001) : garde faisant autorité contre la
-      // course concurrente entre Owners.
+      // 5. Écriture atomique conditionnelle (ADR-0001/ADR-0011) : garde faisant autorité
+      // contre la course concurrente entre Owners. `client.mutations.linkRequestToMission(...)`
+      // (mutation custom Gen2, resolver JS `amplify/data/resolvers/link-request-to-mission.js`,
+      // voir ADR-0011) a EXACTEMENT le même contrat `Promise<{ data, errors }>` que
+      // `client.models.X.*` -- confirmé (Lead Dev, lecture directe des types installés
+      // `@aws-amplify/data-schema-types`) -- donc aucun traitement spécial requis pour cette
+      // raison. Routé via `throwIfGraphqlError` (PAS `resolveOrThrowOnFailure`) : un échec de
+      // condition ne renvoie jamais de `data` exploitable, et `throwIfGraphqlError` correspond
+      // au comportement Gen1 d'origine -- toujours lever, jamais de succès partiel. L'exception
+      // synthétisée porte `.errors` (même tableau `GraphQLFormattedError[]` que la réponse
+      // d'origine), donc `isConditionalCheckFailure(linkError)` ci-dessous continue de
+      // s'appliquer SANS AUCUNE modification -- seul CE point d'appel change (un
+      // `client.graphql()` qui n'existe plus), pas la fonction `isConditionalCheckFailure`
+      // elle-même (voir son JSDoc, inchangé).
       try {
-        await client.graphql({
-          query: linkRequestToMission,
-          variables: {
-            id: request.id,
-            activeMissionID: newMissionId,
-          },
-          authMode: 'userPool',
+        const { errors: linkErrors } = await client.mutations.linkRequestToMission({
+          id: request.id,
+          activeMissionID: newMissionId,
         })
+        throwIfGraphqlError(linkErrors, 'linkRequestToMission')
       } catch (linkError) {
         if (isConditionalCheckFailure(linkError)) {
           // Best-effort : évite de laisser une Mission orpheline (sans Request liée) si la
           // condition a échoué. Un échec de ce nettoyage ne doit pas masquer l'erreur d'origine.
           try {
-            await client.graphql({
-              query: deleteMissionSimple,
-              variables: { input: { id: newMissionId } },
-              authMode: 'userPool',
+            const { errors: deleteErrors } = await client.models.Mission.delete({
+              id: newMissionId,
             })
+            throwIfGraphqlError(deleteErrors, 'deleteMission')
           } catch (cleanupError) {
             console.error(
               'Erreur nettoyage Mission orpheline après échec acceptation concurrente:',

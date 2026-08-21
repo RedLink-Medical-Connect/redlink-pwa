@@ -9,11 +9,28 @@ import { resolve } from 'node:path'
 //
 // Phase 6 (section B) : `correctBloodGroup` + `mapBloodGroupCorrectionErrorKey`,
 // couverts par les describe() dédiés en bas de fichier.
+//
+// Phase 8, sous-tâche 5 (lot 3/3) : mock migré vers le client Gen2 (`aws-amplify/data`,
+// `client.models.Animal.list/update`), un mock dédié par méthode plutôt qu'un unique
+// `graphqlMock` discriminé par le texte de la query (même convention que useAnimals.js/
+// useClinicDonors.js, lots 1/2). Les assertions métier (contenu de `pendingAnimals.value`,
+// filtrage en attente/validé/expiré, contenu EXACT des inputs de mutation, `loadError`,
+// codes d'erreur) restent EXACTEMENT les mêmes qu'avant la migration — seule la forme du
+// mock change. Les anciennes assertions `authMode === 'userPool'` sont retirées : ce
+// paramètre n'existe plus sur `client.models.X.*` (voir CLAUDE.md / roadmap Phase 8).
 
-const graphqlMock = vi.fn()
+const animalListMock = vi.fn()
+const animalUpdateMock = vi.fn()
 
-vi.mock('aws-amplify/api', () => ({
-  generateClient: () => ({ graphql: graphqlMock }),
+vi.mock('aws-amplify/data', () => ({
+  generateClient: () => ({
+    models: {
+      Animal: {
+        list: (...args) => animalListMock(...args),
+        update: (...args) => animalUpdateMock(...args),
+      },
+    },
+  }),
 }))
 
 import {
@@ -21,7 +38,6 @@ import {
   mapValidationErrorKey,
   mapBloodGroupCorrectionErrorKey,
 } from '@/composables/useAnimalValidation'
-import { listAnimalsForValidation } from '@/graphql/custom-queries'
 
 const buildAnimal = (overrides = {}) => ({
   id: 'animal-1',
@@ -36,10 +52,13 @@ const buildAnimal = (overrides = {}) => ({
   ...overrides,
 })
 
+const resetAllMocks = () => {
+  animalListMock.mockReset()
+  animalUpdateMock.mockReset()
+}
+
 describe('useAnimalValidation.fetchPendingValidations', () => {
-  beforeEach(() => {
-    graphqlMock.mockReset()
-  })
+  beforeEach(resetAllMocks)
 
   afterEach(() => {
     vi.useRealTimers()
@@ -69,15 +88,9 @@ describe('useAnimalValidation.fetchPendingValidations', () => {
       validationExpiresAt: now.toISOString(),
     })
 
-    graphqlMock.mockImplementation(async ({ query }) => {
-      if (query.includes('ListAnimalsForValidation')) {
-        return {
-          data: {
-            listAnimals: { items: [stillValidByOneSecond, expiredByOneSecond, expiresExactlyNow] },
-          },
-        }
-      }
-      throw new Error(`Unexpected graphql call in test: ${query.slice(0, 60)}`)
+    animalListMock.mockResolvedValue({
+      data: [stillValidByOneSecond, expiredByOneSecond, expiresExactlyNow],
+      errors: undefined,
     })
 
     const { fetchPendingValidations, pendingAnimals } = useAnimalValidation()
@@ -88,37 +101,37 @@ describe('useAnimalValidation.fetchPendingValidations', () => {
     )
   })
 
-  it("n'envoie aucun filtre de scoping (ownerID/clinicID) : appelle bien la query globale listAnimalsForValidation sans `variables`, conformément à la portée volontairement globale documentée dans useAnimalValidation.js", async () => {
-    let capturedArgs = null
-
-    graphqlMock.mockImplementation(async (args) => {
-      capturedArgs = args
-      return { data: { listAnimals: { items: [] } } }
-    })
+  it("n'envoie aucun filtre de scoping (ownerID/clinicID) : liste globale via client.models.Animal.list(), conformément à la portée volontairement globale documentée dans useAnimalValidation.js", async () => {
+    animalListMock.mockResolvedValue({ data: [], errors: undefined })
 
     const { fetchPendingValidations } = useAnimalValidation()
     await fetchPendingValidations()
 
-    expect(capturedArgs.query).toBe(listAnimalsForValidation)
-    expect(capturedArgs.authMode).toBe('userPool')
-    // Aucune variable envoyée : pas de filter/ownerID/clinicID — la restriction de portée
-    // ne peut venir que d'@auth côté schéma, jamais d'un filtre client.
-    expect(capturedArgs.variables).toBeUndefined()
-    // La query elle-même ne déclare aucun paramètre sur l'opération ni de `filter` sur
-    // listAnimals — non plus juste "le mock l'accepte", mais la query réellement envoyée.
-    expect(listAnimalsForValidation).toContain('query ListAnimalsForValidation {')
-    expect(listAnimalsForValidation).toContain('listAnimals {')
+    expect(animalListMock).toHaveBeenCalledTimes(1)
+    const callArgs = animalListMock.mock.calls[0][0]
+    // Aucun `filter` (ownerID/clinicID) : la restriction de portée ne peut venir que
+    // d'@auth côté schéma, jamais d'un filtre client.
+    expect(callArgs.filter).toBeUndefined()
+    // selectionSet reprend EXACTEMENT les champs de la query Gen1 d'origine (voir
+    // useAnimalValidation.js) — vérifié ici plutôt que supposé.
+    expect(callArgs.selectionSet).toEqual([
+      'id',
+      'name',
+      'species',
+      'breed',
+      'bloodGroup',
+      'isValidatedDonor',
+      'validationExpiresAt',
+      'ownerID',
+      'ownerProfile.firstname',
+      'ownerProfile.lastname',
+    ])
   })
 
   it('inclut un Animal jamais validé (isValidatedDonor: false)', async () => {
     const neverValidated = buildAnimal({ id: 'animal-never', isValidatedDonor: false, validationExpiresAt: null })
 
-    graphqlMock.mockImplementation(async ({ query }) => {
-      if (query.includes('ListAnimalsForValidation')) {
-        return { data: { listAnimals: { items: [neverValidated] } } }
-      }
-      throw new Error(`Unexpected graphql call in test: ${query.slice(0, 60)}`)
-    })
+    animalListMock.mockResolvedValue({ data: [neverValidated], errors: undefined })
 
     const { fetchPendingValidations, pendingAnimals } = useAnimalValidation()
     await fetchPendingValidations()
@@ -133,12 +146,7 @@ describe('useAnimalValidation.fetchPendingValidations', () => {
       validationExpiresAt: '2020-01-01T00:00:00.000Z',
     })
 
-    graphqlMock.mockImplementation(async ({ query }) => {
-      if (query.includes('ListAnimalsForValidation')) {
-        return { data: { listAnimals: { items: [expired] } } }
-      }
-      throw new Error(`Unexpected graphql call in test: ${query.slice(0, 60)}`)
-    })
+    animalListMock.mockResolvedValue({ data: [expired], errors: undefined })
 
     const { fetchPendingValidations, pendingAnimals } = useAnimalValidation()
     await fetchPendingValidations()
@@ -153,12 +161,7 @@ describe('useAnimalValidation.fetchPendingValidations', () => {
       validationExpiresAt: '2099-01-01T00:00:00.000Z',
     })
 
-    graphqlMock.mockImplementation(async ({ query }) => {
-      if (query.includes('ListAnimalsForValidation')) {
-        return { data: { listAnimals: { items: [valid] } } }
-      }
-      throw new Error(`Unexpected graphql call in test: ${query.slice(0, 60)}`)
-    })
+    animalListMock.mockResolvedValue({ data: [valid], errors: undefined })
 
     const { fetchPendingValidations, pendingAnimals } = useAnimalValidation()
     await fetchPendingValidations()
@@ -179,12 +182,7 @@ describe('useAnimalValidation.fetchPendingValidations', () => {
       validationExpiresAt: '2099-01-01T00:00:00.000Z',
     })
 
-    graphqlMock.mockImplementation(async ({ query }) => {
-      if (query.includes('ListAnimalsForValidation')) {
-        return { data: { listAnimals: { items: [neverValidated, expired, valid] } } }
-      }
-      throw new Error(`Unexpected graphql call in test: ${query.slice(0, 60)}`)
-    })
+    animalListMock.mockResolvedValue({ data: [neverValidated, expired, valid], errors: undefined })
 
     const { fetchPendingValidations, pendingAnimals } = useAnimalValidation()
     await fetchPendingValidations()
@@ -192,10 +190,9 @@ describe('useAnimalValidation.fetchPendingValidations', () => {
     expect(pendingAnimals.value.map((a) => a.id).sort()).toEqual(['animal-expired', 'animal-never'])
   })
 
-  it('authMode userPool, isLoading true pendant le chargement puis false, et gère une erreur réseau sans throw', async () => {
+  it('isLoading true pendant le chargement puis false, et gère une erreur réseau sans throw', async () => {
     let sawLoadingDuringCall = false
-    graphqlMock.mockImplementation(async ({ authMode }) => {
-      expect(authMode).toBe('userPool')
+    animalListMock.mockImplementation(async () => {
       sawLoadingDuringCall = true
       throw new Error('network down')
     })
@@ -219,7 +216,7 @@ describe('useAnimalValidation.fetchPendingValidations', () => {
   it("loadError distingue un échec de chargement d'une file d'attente réellement vide (relevé en Lead Dev review : sans ça, un vétérinaire ne peut pas faire la différence)", async () => {
     const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 
-    graphqlMock.mockImplementation(async () => {
+    animalListMock.mockImplementation(async () => {
       throw new Error('network down')
     })
 
@@ -233,43 +230,52 @@ describe('useAnimalValidation.fetchPendingValidations', () => {
 
     // Un rechargement réussi (ex. après un clic sur "Réessayer") efface l'état d'erreur —
     // loadError ne doit pas rester bloqué à true indéfiniment.
-    graphqlMock.mockImplementation(async () => ({ data: { listAnimals: { items: [] } } }))
+    animalListMock.mockImplementation(async () => ({ data: [], errors: undefined }))
     await fetchPendingValidations()
 
     expect(loadError.value).toBe(false)
 
     consoleErrorSpy.mockRestore()
   })
+
+  it("un succès partiel GraphQL (`data` exploitable malgré `errors`) n'est PAS traité comme une erreur : throwIfGraphqlError ne lève que si `errors` est présent, peu importe `data`", async () => {
+    // Cas absent en Gen1 (où `client.graphql()` levait directement une exception pour toute
+    // erreur GraphQL, jamais un `{ data, errors }` résolu avec les deux à la fois) mais que
+    // `client.models.Animal.list()` peut désormais renvoyer -- voir le JSDoc de
+    // graphql-error-service.js. `fetchPendingValidations` utilise `throwIfGraphqlError`
+    // (jamais `resolveOrThrowOnFailure`), donc `errors` présent doit lever même si `data`
+    // est exploitable.
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    animalListMock.mockResolvedValue({
+      data: [buildAnimal({ id: 'animal-1' })],
+      errors: [{ message: 'partial failure' }],
+    })
+
+    const { fetchPendingValidations, loadError, pendingAnimals } = useAnimalValidation()
+    await fetchPendingValidations()
+
+    expect(loadError.value).toBe(true)
+    expect(pendingAnimals.value).toEqual([])
+    expect(consoleErrorSpy).toHaveBeenCalled()
+
+    consoleErrorSpy.mockRestore()
+  })
 })
 
 describe('useAnimalValidation.validateAnimal', () => {
-  beforeEach(() => {
-    graphqlMock.mockReset()
-  })
+  beforeEach(resetAllMocks)
 
   it("appelle la mutation avec un input contenant EXACTEMENT id/isValidatedDonor/validationExpiresAt (rien d'autre, surtout pas bloodGroup)", async () => {
-    let capturedInput = null
-
-    graphqlMock.mockImplementation(async ({ query, variables }) => {
-      if (query.includes('UpdateAnimal')) {
-        capturedInput = variables.input
-        return {
-          data: {
-            updateAnimal: {
-              id: variables.input.id,
-              isValidatedDonor: variables.input.isValidatedDonor,
-              validationExpiresAt: variables.input.validationExpiresAt,
-            },
-          },
-        }
-      }
-      throw new Error(`Unexpected graphql call in test: ${query.slice(0, 60)}`)
-    })
+    animalUpdateMock.mockImplementation(async (input) => ({
+      data: { ...input },
+      errors: undefined,
+    }))
 
     const { validateAnimal } = useAnimalValidation()
     await validateAnimal('animal-1')
 
-    expect(capturedInput).not.toBeNull()
+    expect(animalUpdateMock).toHaveBeenCalledTimes(1)
+    const capturedInput = animalUpdateMock.mock.calls[0][0]
     expect(Object.keys(capturedInput).sort()).toEqual(
       ['id', 'isValidatedDonor', 'validationExpiresAt'].sort(),
     )
@@ -289,7 +295,7 @@ describe('useAnimalValidation.validateAnimal', () => {
 
       await expect(validateAnimal('animal-1')).rejects.toThrow('BLOOD_GROUP_UNKNOWN')
 
-      expect(graphqlMock).not.toHaveBeenCalled()
+      expect(animalUpdateMock).not.toHaveBeenCalled()
       expect(isValidating.value).toBe(false)
       // La liste locale n'est pas modifiée : la validation a été refusée, pas acceptée.
       expect(pendingAnimals.value.map((a) => a.id)).toEqual(['animal-1'])
@@ -297,30 +303,31 @@ describe('useAnimalValidation.validateAnimal', () => {
   )
 
   it('valide normalement un animal dont le bloodGroup connu localement est renseigné et différent de UNKNOWN', async () => {
-    graphqlMock.mockImplementation(async ({ variables }) => ({
-      data: { updateAnimal: { ...variables.input } },
+    animalUpdateMock.mockImplementation(async (input) => ({
+      data: { ...input },
+      errors: undefined,
     }))
 
     const { validateAnimal, pendingAnimals } = useAnimalValidation()
     pendingAnimals.value = [buildAnimal({ id: 'animal-1', bloodGroup: 'DEA 1.1-' })]
 
     await expect(validateAnimal('animal-1')).resolves.toBeUndefined()
-    expect(graphqlMock).toHaveBeenCalledTimes(1)
+    expect(animalUpdateMock).toHaveBeenCalledTimes(1)
   })
 
   it('calcule validationExpiresAt à ~1 an dans le futur (ISO 8601 / AWSDateTime)', async () => {
     const before = Date.now()
-    let capturedInput = null
 
-    graphqlMock.mockImplementation(async ({ variables }) => {
-      capturedInput = variables.input
-      return { data: { updateAnimal: { ...variables.input } } }
-    })
+    animalUpdateMock.mockImplementation(async (input) => ({
+      data: { ...input },
+      errors: undefined,
+    }))
 
     const { validateAnimal } = useAnimalValidation()
     await validateAnimal('animal-1')
     const after = Date.now()
 
+    const capturedInput = animalUpdateMock.mock.calls[0][0]
     const expiresAtMs = new Date(capturedInput.validationExpiresAt).getTime()
     const oneYearMs = 365 * 24 * 60 * 60 * 1000
 
@@ -332,8 +339,9 @@ describe('useAnimalValidation.validateAnimal', () => {
   })
 
   it('retire l’Animal validé de pendingAnimals.value au succès (les autres restent affichés)', async () => {
-    graphqlMock.mockImplementation(async ({ variables }) => ({
-      data: { updateAnimal: { ...variables.input } },
+    animalUpdateMock.mockImplementation(async (input) => ({
+      data: { ...input },
+      errors: undefined,
     }))
 
     const { validateAnimal, pendingAnimals } = useAnimalValidation()
@@ -348,9 +356,8 @@ describe('useAnimalValidation.validateAnimal', () => {
     expect(pendingAnimals.value.map((a) => a.id)).toEqual(['animal-2', 'animal-3'])
   })
 
-  it('authMode userPool, isValidating true pendant l’appel puis false, propage l’erreur sans modifier pendingAnimals au échec', async () => {
-    graphqlMock.mockImplementation(async ({ authMode }) => {
-      expect(authMode).toBe('userPool')
+  it('isValidating true pendant l’appel puis false, propage l’erreur sans modifier pendingAnimals au échec', async () => {
+    animalUpdateMock.mockImplementation(async () => {
       throw new Error('boom')
     })
 
@@ -372,23 +379,43 @@ describe('useAnimalValidation.validateAnimal', () => {
     consoleErrorSpy.mockRestore()
   })
 
+  it('propage une erreur GraphQL résolue (`{ data: null, errors }`, pas d’exception JS rejetée) comme un échec — throwIfGraphqlError synthétise l’exception', async () => {
+    animalUpdateMock.mockResolvedValue({
+      data: null,
+      errors: [{ message: 'Not Authorized to access updateAnimal on type Animal' }],
+    })
+
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const { validateAnimal, isValidating, pendingAnimals } = useAnimalValidation()
+    pendingAnimals.value = [buildAnimal({ id: 'animal-1' })]
+
+    await expect(validateAnimal('animal-1')).rejects.toThrow('Erreur GraphQL updateAnimal')
+
+    expect(isValidating.value).toBe(false)
+    // Rejeté avant le filtre local : l'Animal reste dans pendingAnimals.
+    expect(pendingAnimals.value.map((a) => a.id)).toEqual(['animal-1'])
+
+    consoleErrorSpy.mockRestore()
+  })
+
   it('isValidating est un ref distinct de isLoading', () => {
     const { isValidating, isLoading } = useAnimalValidation()
     expect(isValidating).not.toBe(isLoading)
   })
 
   it("valide un animalId absent de pendingAnimals.value (ex. déjà validé dans un autre onglet/session) sans planter : la mutation part quand même (le backend/@auth reste juge), et le filtre local est un no-op qui laisse la liste inchangée", async () => {
-    let capturedInput = null
-    graphqlMock.mockImplementation(async ({ variables }) => {
-      capturedInput = variables.input
-      return { data: { updateAnimal: { ...variables.input } } }
-    })
+    animalUpdateMock.mockImplementation(async (input) => ({
+      data: { ...input },
+      errors: undefined,
+    }))
 
     const { validateAnimal, pendingAnimals } = useAnimalValidation()
     pendingAnimals.value = [buildAnimal({ id: 'animal-2' }), buildAnimal({ id: 'animal-3' })]
 
     await expect(validateAnimal('animal-absent-ailleurs')).resolves.toBeUndefined()
 
+    const capturedInput = animalUpdateMock.mock.calls[0][0]
     expect(capturedInput.id).toBe('animal-absent-ailleurs')
     expect(pendingAnimals.value.map((a) => a.id).sort()).toEqual(['animal-2', 'animal-3'])
   })
@@ -438,25 +465,19 @@ describe('mapValidationErrorKey', () => {
 // (updateAnimalBloodGroupSimple) — jamais isValidatedDonor/validationExpiresAt, qui
 // restent le rôle exclusif de validateAnimal (voir describe ci-dessus).
 describe('useAnimalValidation.correctBloodGroup', () => {
-  beforeEach(() => {
-    graphqlMock.mockReset()
-  })
+  beforeEach(resetAllMocks)
 
   it('appelle la mutation avec un input contenant EXACTEMENT id/bloodGroup (rien d’autre, surtout pas isValidatedDonor/validationExpiresAt)', async () => {
-    let capturedInput = null
-
-    graphqlMock.mockImplementation(async ({ query, variables }) => {
-      if (query.includes('UpdateAnimalBloodGroup')) {
-        capturedInput = variables.input
-        return { data: { updateAnimal: { ...variables.input } } }
-      }
-      throw new Error(`Unexpected graphql call in test: ${query.slice(0, 60)}`)
-    })
+    animalUpdateMock.mockImplementation(async (input) => ({
+      data: { ...input },
+      errors: undefined,
+    }))
 
     const { correctBloodGroup } = useAnimalValidation()
     await correctBloodGroup('animal-1', 'DEA 1.1-')
 
-    expect(capturedInput).not.toBeNull()
+    expect(animalUpdateMock).toHaveBeenCalledTimes(1)
+    const capturedInput = animalUpdateMock.mock.calls[0][0]
     expect(Object.keys(capturedInput).sort()).toEqual(['bloodGroup', 'id'].sort())
     expect(capturedInput.id).toBe('animal-1')
     expect(capturedInput.bloodGroup).toBe('DEA 1.1-')
@@ -475,14 +496,15 @@ describe('useAnimalValidation.correctBloodGroup', () => {
         'BLOOD_GROUP_UNKNOWN',
       )
 
-      expect(graphqlMock).not.toHaveBeenCalled()
+      expect(animalUpdateMock).not.toHaveBeenCalled()
       expect(isCorrectingBloodGroup.value).toBe(false)
     },
   )
 
   it('met à jour pendingAnimals.value localement avec la nouvelle valeur au succès (les autres animaux restent inchangés)', async () => {
-    graphqlMock.mockImplementation(async ({ variables }) => ({
-      data: { updateAnimal: { ...variables.input } },
+    animalUpdateMock.mockImplementation(async (input) => ({
+      data: { ...input },
+      errors: undefined,
     }))
 
     const { correctBloodGroup, pendingAnimals } = useAnimalValidation()
@@ -498,24 +520,23 @@ describe('useAnimalValidation.correctBloodGroup', () => {
   })
 
   it('corrige un animalId absent de pendingAnimals.value sans planter : la mutation part quand même, le filtre local est un no-op', async () => {
-    let capturedInput = null
-    graphqlMock.mockImplementation(async ({ variables }) => {
-      capturedInput = variables.input
-      return { data: { updateAnimal: { ...variables.input } } }
-    })
+    animalUpdateMock.mockImplementation(async (input) => ({
+      data: { ...input },
+      errors: undefined,
+    }))
 
     const { correctBloodGroup, pendingAnimals } = useAnimalValidation()
     pendingAnimals.value = [buildAnimal({ id: 'animal-2' })]
 
     await expect(correctBloodGroup('animal-absent-ailleurs', 'B')).resolves.toBeUndefined()
 
+    const capturedInput = animalUpdateMock.mock.calls[0][0]
     expect(capturedInput.id).toBe('animal-absent-ailleurs')
     expect(pendingAnimals.value.map((a) => a.id)).toEqual(['animal-2'])
   })
 
-  it('authMode userPool, isCorrectingBloodGroup true pendant l’appel puis false, propage l’erreur sans modifier pendingAnimals au échec', async () => {
-    graphqlMock.mockImplementation(async ({ authMode }) => {
-      expect(authMode).toBe('userPool')
+  it('isCorrectingBloodGroup true pendant l’appel puis false, propage l’erreur sans modifier pendingAnimals au échec', async () => {
+    animalUpdateMock.mockImplementation(async () => {
       throw new Error('boom')
     })
 
@@ -555,11 +576,10 @@ describe('useAnimalValidation.correctBloodGroup', () => {
       "que de le supposer : s'il se met à échouer parce qu'un garde-fou a été ajouté, " +
       "remplacer ce test par un test du nouveau comportement plutôt que le supprimer.",
     async () => {
-      let capturedInput = null
-      graphqlMock.mockImplementation(async ({ variables }) => {
-        capturedInput = variables.input
-        return { data: { updateAnimal: { ...variables.input } } }
-      })
+      animalUpdateMock.mockImplementation(async (input) => ({
+        data: { ...input },
+        errors: undefined,
+      }))
 
       const { correctBloodGroup, pendingAnimals } = useAnimalValidation()
       // Un Animal déjà validé ne devrait normalement jamais figurer dans pendingAnimals
@@ -577,6 +597,7 @@ describe('useAnimalValidation.correctBloodGroup', () => {
 
       await expect(correctBloodGroup('animal-deja-valide', 'DEA 1.1+')).resolves.toBeUndefined()
 
+      const capturedInput = animalUpdateMock.mock.calls[0][0]
       expect(capturedInput).toEqual({ id: 'animal-deja-valide', bloodGroup: 'DEA 1.1+' })
       expect(pendingAnimals.value[0].bloodGroup).toBe('DEA 1.1+')
       // isValidatedDonor n'est ni lu ni modifié par correctBloodGroup : le statut de
