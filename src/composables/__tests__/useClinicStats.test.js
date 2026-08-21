@@ -34,15 +34,22 @@ import { useClinicStats } from '@/composables/useClinicStats'
 /**
  * Configure `vetGetMock`/`clinicGetMock` pour le scénario "heureux" réutilisé par la
  * plupart des tests de ce fichier : résolution du clinicID puis lecture des compteurs.
+ *
+ * Vérifie au passage le `selectionSet` explicite ajouté en revue Lead Dev (lot 2) : ce
+ * composable ne lit jamais que `clinicID` (Veterinarian) et
+ * `transfusionsDone`/`donorOwnersCount` (Clinic) -- voir le commentaire de tête de
+ * useClinicStats.js.
  */
 function mockClient({ clinicID = 'clinic-1', clinic = { transfusionsDone: 4, donorOwnersCount: 2 } } = {}) {
   getCurrentUserMock.mockResolvedValue({ userId: 'vet-1' })
-  vetGetMock.mockImplementation(async ({ id }) => {
+  vetGetMock.mockImplementation(async ({ id }, options) => {
     expect(id).toBe('vet-1')
+    expect(options?.selectionSet).toEqual(['clinicID'])
     return { data: { id: 'vet-1', clinicID }, errors: undefined }
   })
-  clinicGetMock.mockImplementation(async ({ id }) => {
+  clinicGetMock.mockImplementation(async ({ id }, options) => {
     expect(id).toBe(clinicID)
+    expect(options?.selectionSet).toEqual(['transfusionsDone', 'donorOwnersCount'])
     return { data: clinic ? { id: clinicID, ...clinic } : null, errors: undefined }
   })
 }
@@ -168,6 +175,33 @@ describe('useClinicStats.fetchStats', () => {
 
     expect(loadError.value).toBe(true)
     expect(clinicGetMock).not.toHaveBeenCalled()
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('indicateurs'),
+      expect.any(Error),
+    )
+
+    consoleErrorSpy.mockRestore()
+  })
+
+  // Revue Lead Dev (lot 2) : le test précédent couvrait déjà le contrat Gen2 résolu
+  // (`{ data: null, errors }`, PAS un rejet JS) côté Veterinarian.get() -- ce test couvre le
+  // même contrat côté Clinic.get(), jusqu'ici seulement exercé via `mockRejectedValue`
+  // (échec réseau/exception JS, un cas différent) dans les deux tests au-dessus.
+  it('propage une erreur GraphQL/@auth sur Clinic.get() (errors présent, pas un rejet JS) via loadError', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    getCurrentUserMock.mockResolvedValue({ userId: 'vet-1' })
+    vetGetMock.mockResolvedValue({ data: { id: 'vet-1', clinicID: 'clinic-1' }, errors: undefined })
+    clinicGetMock.mockResolvedValue({
+      data: null,
+      errors: [{ message: 'Not Authorized to access getClinic' }],
+    })
+
+    const { fetchStats, loadError, transfusionsDone, donorOwnersCount } = useClinicStats()
+    await fetchStats()
+
+    expect(loadError.value).toBe(true)
+    expect(transfusionsDone.value).toBe(0)
+    expect(donorOwnersCount.value).toBe(0)
     expect(consoleErrorSpy).toHaveBeenCalledWith(
       expect.stringContaining('indicateurs'),
       expect.any(Error),

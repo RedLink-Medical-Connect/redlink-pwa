@@ -123,7 +123,12 @@ describe('useClinicSettings.deleteAccount', () => {
 
     await expect(deleteAccount()).resolves.toBeUndefined()
 
-    expect(vetListMock).toHaveBeenCalledWith({ filter: { clinicID: { eq: 'clinic-1' } } })
+    // `selectionSet: ['id']` (revue Lead Dev, lot 2) : seul `v.id` est lu par le garde-fou,
+    // le reste du profil des collègues rattachés à la Clinic n'a pas à être sur-fetché.
+    expect(vetListMock).toHaveBeenCalledWith({
+      filter: { clinicID: { eq: 'clinic-1' } },
+      selectionSet: ['id'],
+    })
     expect(vetDeleteMock).toHaveBeenCalledWith({ id: 'vet-1' })
     expect(clinicDeleteMock).toHaveBeenCalledWith({ id: 'clinic-1' })
     expect(deleteUserMock).toHaveBeenCalledTimes(1)

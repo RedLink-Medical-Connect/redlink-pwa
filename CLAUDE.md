@@ -49,12 +49,15 @@ architecturales) et `.cursorrules` (conventions détaillées pour l'éditeur).
   exige toujours un `belongsTo` apparié sur le modèle ciblé, avec un champ de
   référence identique des deux côtés — le processeur de schéma lève une
   erreur bloquante sinon (voir ADR-0010, `Request.mission`/`Mission.request`).
-  Sous-tâche 5 (bascule des composables) en cours, par lots : lot 1/3 fait
-  (`useAnimals.js`, `useOwnerProfile.js`, `useOwnerAvailability.js`,
-  `useRegistrationCompletion.js`, désormais sur `client.models.X` —
-  `aws-amplify/data`), lots 2/3 restants encore sur le client Gen1
-  (`generateClient().graphql(...)`, `aws-amplify/api`). Ne pas supposer
-  `client.models.X` disponible sur un composable avant d'avoir vérifié
+  Sous-tâche 5 (bascule des composables) en cours, par lots : lots 1/3 et 2/3
+  faits, 8/12 composables migrés (`useAnimals.js`, `useOwnerProfile.js`,
+  `useOwnerAvailability.js`, `useRegistrationCompletion.js` — lot 1 ;
+  `useClinicDonors.js`, `useClinicRequest.js`, `useClinicSettings.js`,
+  `useClinicStats.js` — lot 2), désormais sur `client.models.X` —
+  `aws-amplify/data`. Lot 3/3 restant encore sur le client Gen1
+  (`generateClient().graphql(...)`, `aws-amplify/api`) : `useAnimalValidation.js`,
+  `useMatchingRequests.js`, `useMissionClosure.js`, `useOwnerMissions.js`. Ne pas
+  supposer `client.models.X` disponible sur un composable avant d'avoir vérifié
   qu'il est bien listé comme migré ici. Changement de comportement central
   à connaître avant de toucher un composable non encore migré : le client
   Gen2 ne lève PAS d'exception sur une erreur GraphQL/`@auth` (contrairement
@@ -62,6 +65,20 @@ architecturales) et `.cursorrules` (conventions détaillées pour l'éditeur).
   `src/services/graphql-error-service.js` (à partir du lot 2) pour le
   helper partagé qui retransforme `errors` en exception là où le contrat
   observable par l'appelant (vue, composable parent) doit rester inchangé.
+  Pattern `selectionSet` (depuis le lot 2, requêtes avec relation imbriquée type
+  Gen1 `getVetWithClinic`) : contrairement à une query Gen1 partagée entre
+  plusieurs composables, le `selectionSet` Gen2 est posé par CHAQUE appelant —
+  chacun ne demande que les champs qu'IL consomme réellement (ex.
+  `useClinicDonors.fetchClinicContext()` ne sélectionne que
+  `clinic.latitude`/`clinic.longitude`, quand `useClinicSettings.fetchSettings()`
+  a besoin de tous les champs de `Clinic` pour son formulaire d'édition), plutôt
+  que de recopier aveuglément la sélection de la query Gen1 remplacée. Vaut aussi
+  pour un `.get()`/`.list()` sans relation imbriquée : ne pas laisser le
+  `selectionSet` par défaut (tous les champs scalaires) sur un appel qui ne lit
+  qu'un sous-ensemble des champs — surtout quand ce sous-ensemble appartient à
+  un autre utilisateur (ex. `useClinicSettings.deleteAccount`'s
+  garde-fou multi-vétérinaire, qui ne lit que `id` mais interrogeait par défaut
+  les coordonnées de collègues).
 
 **Tests**
 - Vitest (unitaire — le seul réellement utilisé)

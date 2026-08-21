@@ -64,7 +64,14 @@ export function useClinicRequests() {
     const { userId } = await getCurrentUser()
     if (!userId) throw new Error('Utilisateur non connecté')
 
-    const { data, errors } = await client.models.Veterinarian.get({ id: userId })
+    const { data, errors } = await client.models.Veterinarian.get(
+      { id: userId },
+      // Revue Lead Dev (lot 2) : seul `data.clinicID` est lu plus bas -- `selectionSet`
+      // explicite plutôt que la sélection scalaire par défaut du client Gen2 (même principe
+      // que `useClinicDonors.fetchClinicContext()`/`useClinicStats.fetchStats()`, voir
+      // CLAUDE.md, section Backend/Infra).
+      { selectionSet: ['clinicID'] },
+    )
 
     throwIfGraphqlError(errors, 'getVeterinarian')
 

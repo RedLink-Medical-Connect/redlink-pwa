@@ -190,8 +190,15 @@ export function useClinicSettings() {
       let clinicHasOtherVets = false
       if (clinicId.value) {
         try {
+          // Revue Lead Dev (lot 2) : seul `v.id` est lu plus bas -- `selectionSet` explicite
+          // plutôt que la sélection scalaire par défaut du client Gen2, d'autant plus
+          // important ici que ce sont les données personnelles de COLLÈGUES (firstname/
+          // lastname/email) qui seraient sur-fetchées par défaut, pas les siennes propres
+          // (même principe que `useClinicRequest.fetchClinicId()`/
+          // `useClinicDonors.fetchClinicContext()`, voir CLAUDE.md, section Backend/Infra).
           const { data, errors } = await client.models.Veterinarian.list({
             filter: { clinicID: { eq: clinicId.value } },
+            selectionSet: ['id'],
           })
 
           throwIfGraphqlError(errors, 'veterinariansByClinicID')
@@ -217,6 +224,15 @@ export function useClinicSettings() {
         }
 
         if (clinicId.value && !clinicHasOtherVets) {
+          // `Clinic` n'accorde `delete` qu'à `allow.owner()` (amplify/data/resource.ts) --
+          // le groupe Veterinarians n'a que create/read/update dessus. Concrètement : ce
+          // `client.models.Clinic.delete()` ne réussit que si le Veterinarian courant est
+          // celui qui a créé la Clinic à l'inscription (`createClinicSimple`, `owner` posé
+          // sur son identité) ; pour tout autre Veterinarian dernier-rattaché-mais-pas-créateur,
+          // l'appel échoue en `@auth` et est avalé silencieusement par le `catch (dbError)`
+          // ci-dessous (best-effort, voir sa JSDoc) -- pas un bug de CE composable, mais un
+          // résidu à garder en tête pour ne pas supposer que ce chemin réussit toujours pour
+          // n'importe quel dernier vétérinaire.
           const { errors: clinicDeleteErrors } = await client.models.Clinic.delete({
             id: clinicId.value,
           })
