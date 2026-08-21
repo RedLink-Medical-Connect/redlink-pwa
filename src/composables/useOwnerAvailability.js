@@ -1,23 +1,21 @@
 import { ref } from 'vue'
 import { generateClient } from 'aws-amplify/data'
 import { getCurrentUser } from 'aws-amplify/auth'
+import { throwIfGraphqlError } from '@/services/graphql-error-service'
 
 // Phase 8, sous-tâche 5 (lot 1/3) : migré sur le client Gen2 (`aws-amplify/data`,
 // `client.models.OwnerAvailability.*`). Plus d'import depuis `@/graphql/custom-mutations`/
 // `@/graphql/custom-queries` -- voir le commentaire équivalent dans useAnimals.js.
 //
-// Changement de comportement le plus important de cette migration (voir aussi
-// useAnimals.js/useOwnerProfile.js/useRegistrationCompletion.js, même sous-tâche) :
-// `client.models.OwnerAvailability.*` NE LÈVE PAS d'exception sur une erreur GraphQL/@auth --
-// il résout normalement avec `{ data, errors }`. Chaque appel synthétise donc une exception
-// sur `errors` pour préserver le comportement observable Gen1 :
-// - `fetchAvailabilities()` : avalait déjà toute erreur dans son `catch` -- la synthèse
+// Sur le changement de comportement d'erreur Gen1 -> Gen2 (`client.models.OwnerAvailability.*`
+// résout `{ data, errors }` au lieu de lever une exception) et sa traduction via
+// `throwIfGraphqlError` ci-dessous : voir le JSDoc de `src/services/graphql-error-service.js`,
+// seule source de vérité sur le "pourquoi". Deux points spécifiques à ce fichier :
+// - `fetchAvailabilities()` : avalait déjà toute erreur dans son `catch` -- `throwIfGraphqlError`
 //   retombe simplement dans ce même `catch`, rien ne change pour l'appelant.
 // - `addAvailabilityForDays()` : chaque création tourne dans `Promise.allSettled()` -- sans
 //   cette synthèse, un jour en échec `@auth` résoudrait `Promise.allSettled` en `'fulfilled'`
 //   au lieu de `'rejected'`, et casserait le compteur `succeeded`/`failed` best-effort.
-// - `removeAvailability()` : relançait déjà l'erreur à l'appelant (`AvailabilityView.vue`,
-//   correction R-03/Phase 7.2) -- la synthèse préserve cette relance.
 
 export function useOwnerAvailability() {
   const client = generateClient()
@@ -33,9 +31,7 @@ export function useOwnerAvailability() {
         filter: { ownerID: { eq: userId } },
       })
 
-      if (errors) {
-        throw Object.assign(new Error('Erreur GraphQL listOwnerAvailabilities'), { errors })
-      }
+      throwIfGraphqlError(errors, 'listOwnerAvailabilities')
 
       availabilities.value = (data || []).sort((a, b) => {
         const dayA = a.dayOfWeek === 0 ? 7 : a.dayOfWeek
@@ -75,9 +71,7 @@ export function useOwnerAvailability() {
           endTime: end,
         })
 
-        if (errors) {
-          throw Object.assign(new Error('Erreur GraphQL createOwnerAvailability'), { errors })
-        }
+        throwIfGraphqlError(errors, 'createOwnerAvailability')
 
         return data
       }),
@@ -97,9 +91,7 @@ export function useOwnerAvailability() {
     try {
       const { errors } = await client.models.OwnerAvailability.delete({ id })
 
-      if (errors) {
-        throw Object.assign(new Error('Erreur GraphQL deleteOwnerAvailability'), { errors })
-      }
+      throwIfGraphqlError(errors, 'deleteOwnerAvailability')
 
       availabilities.value = availabilities.value.filter((a) => a.id !== id)
     } catch (e) {

@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { generateClient } from 'aws-amplify/data'
 import { Species, DonationFrequency } from '@/constants/enums'
+import { throwIfGraphqlError } from '@/services/graphql-error-service'
 
 /**
  * Phase 7.7 : composable regroupant la logique métier + les 5 appels `client.graphql()`
@@ -10,15 +11,13 @@ import { Species, DonationFrequency } from '@/constants/enums'
  *
  * Phase 8, sous-tâche 5 (lot 1/3) : migré sur le client Gen2 (`aws-amplify/data`,
  * `client.models.Owner.create()`/`client.models.Animal.create()`/etc.). Plus d'import depuis
- * `@/graphql/custom-mutations` -- voir le commentaire équivalent dans useAnimals.js.
- * Changement de comportement le plus important de cette migration (voir aussi
- * useAnimals.js/useOwnerProfile.js/useOwnerAvailability.js, même sous-tâche) :
- * `client.models.X.create()` NE LÈVE PAS d'exception sur une erreur GraphQL/@auth -- il
- * résout normalement avec `{ data, errors }`. Aucun des 5 appels de ce fichier n'avait de
- * `catch` dédié en Gen1 (seul `completeRegistration()`, plus bas, entoure l'ensemble d'un
- * `try/catch` qui logue et relance) : chaque appel synthétise donc une exception sur
- * `errors` pour continuer à faire remonter l'échec jusqu'à ce `try/catch` englobant --
- * exactement le contrat qu'attend `VerifyEmailView.vue` (`err.errors`).
+ * `@/graphql/custom-mutations` -- voir le commentaire équivalent dans useAnimals.js. Sur le
+ * changement de comportement d'erreur Gen1 -> Gen2 et `throwIfGraphqlError` ci-dessous : voir
+ * le JSDoc de `src/services/graphql-error-service.js`, seule source de vérité sur le
+ * "pourquoi" (aucun des 5 appels de ce fichier n'avait de `catch` dédié en Gen1 -- seul
+ * `completeRegistration()`, plus bas, entoure l'ensemble d'un `try/catch` qui logue et
+ * relance -- `throwIfGraphqlError` continue de faire remonter l'échec jusqu'à ce `try/catch`
+ * englobant, exactement le contrat qu'attend `VerifyEmailView.vue`, `err.errors`).
  *
  * Intervient APRÈS la vérification du code Cognito (`auth.confirmRegistration`, restée
  * dans la vue — ce n'est pas un appel `client.graphql()`, et hors du périmètre de cette
@@ -101,9 +100,7 @@ export function useRegistrationCompletion() {
       totalDonations: 0,
     })
 
-    if (ownerErrors) {
-      throw Object.assign(new Error('Erreur GraphQL createOwner'), { errors: ownerErrors })
-    }
+    throwIfGraphqlError(ownerErrors, 'createOwner')
 
     const ownerID = owner.id
 
@@ -126,9 +123,7 @@ export function useRegistrationCompletion() {
         donationFrequency: DonationFrequency.ASAP,
       })
 
-      if (animalErrors) {
-        throw Object.assign(new Error('Erreur GraphQL createAnimal'), { errors: animalErrors })
-      }
+      throwIfGraphqlError(animalErrors, 'createAnimal')
     }
 
     const { errors: availabilityErrors } = await client.models.OwnerAvailability.create({
@@ -138,11 +133,7 @@ export function useRegistrationCompletion() {
       endTime: '12:00Z',
     })
 
-    if (availabilityErrors) {
-      throw Object.assign(new Error('Erreur GraphQL createOwnerAvailability'), {
-        errors: availabilityErrors,
-      })
-    }
+    throwIfGraphqlError(availabilityErrors, 'createOwnerAvailability')
   }
 
   /**
@@ -165,9 +156,7 @@ export function useRegistrationCompletion() {
       donorOwnersCount: 0,
     })
 
-    if (clinicErrors) {
-      throw Object.assign(new Error('Erreur GraphQL createClinic'), { errors: clinicErrors })
-    }
+    throwIfGraphqlError(clinicErrors, 'createClinic')
 
     const { errors: vetErrors } = await client.models.Veterinarian.create({
       id: cognitoUserId,
@@ -177,9 +166,7 @@ export function useRegistrationCompletion() {
       email: data.email,
     })
 
-    if (vetErrors) {
-      throw Object.assign(new Error('Erreur GraphQL createVeterinarian'), { errors: vetErrors })
-    }
+    throwIfGraphqlError(vetErrors, 'createVeterinarian')
   }
 
   /**

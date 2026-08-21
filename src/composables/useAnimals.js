@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { generateClient } from 'aws-amplify/data'
 import { getCurrentUser } from 'aws-amplify/auth'
+import { throwIfGraphqlError, resolveOrThrowOnFailure } from '@/services/graphql-error-service'
 
 // Phase 8, sous-tâche 5 (lot 1/3) : migré sur le client Gen2 (`aws-amplify/data`,
 // `client.models.Animal.*`). Les mutations `*Simple`/queries indexées Gen1
@@ -10,13 +11,10 @@ import { getCurrentUser } from 'aws-amplify/auth'
 // `update()` limite déjà les champs envoyés, sans avoir besoin d'un document GraphQL séparé
 // pour ça (voir CLAUDE.md/commentaire de tête d'`amplify/data/resource.ts`).
 //
-// Changement de comportement le plus important de cette migration (voir aussi
-// useOwnerProfile.js/useOwnerAvailability.js/useRegistrationCompletion.js, même sous-tâche) :
-// `client.models.Animal.*` NE LÈVE PAS d'exception sur une erreur GraphQL/@auth (contrairement
-// à `client.graphql()` en Gen1) -- il résout normalement avec `{ data, errors }`. Chaque endroit
-// qui doit se comporter EXACTEMENT comme avant pour son appelant (loadError déclenché,
-// rollback+rethrow, écran d'erreur affiché...) synthétise donc une exception à la place --
-// voir le commentaire dédié sur chaque fonction ci-dessous.
+// Sur le changement de comportement d'erreur Gen1 -> Gen2 (`client.models.Animal.*` résout
+// `{ data, errors }` au lieu de lever une exception) et sa traduction via
+// `throwIfGraphqlError`/`resolveOrThrowOnFailure` ci-dessous : voir le JSDoc de
+// `src/services/graphql-error-service.js`, seule source de vérité sur le "pourquoi".
 
 export function useAnimals() {
   const client = generateClient()
@@ -59,13 +57,7 @@ export function useAnimals() {
         filter: { ownerID: { eq: userId } },
       })
 
-      // Gen1 (aws-amplify/api) levait une exception sur toute erreur GraphQL/@auth, attrapée
-      // par le catch ci-dessous. Gen2 (aws-amplify/data) résout normalement avec
-      // `{ data, errors }` -- on la retransforme en exception pour que ce même catch reste le
-      // seul endroit qui pilote `loadError`, sans dupliquer sa logique ici.
-      if (errors) {
-        throw Object.assign(new Error('Erreur GraphQL listAnimals'), { errors })
-      }
+      throwIfGraphqlError(errors, 'listAnimals')
 
       const rawAnimals = data || []
 
@@ -92,15 +84,10 @@ export function useAnimals() {
 
   /**
    * Met à jour les champs éditables d'un Animal (via `client.models.Animal.update()`) et
-   * synchronise `animals` avec la réponse serveur. Gère le succès partiel GraphQL : en Gen2,
-   * une réponse portant à la fois `data` et `errors` (ex. une relation annexe non résolue)
-   * n'est plus une exception JS porteuse d'un `.data` (pattern Gen1) mais directement le
-   * `{ data, errors }` résolu par `client.models.Animal.update()` -- si `data` est exploitable
-   * malgré `errors`, on traite comme un succès (même logique qu'auparavant, juste déplacée
-   * d'un `catch` vers une vérification explicite après l'`await`). Une vraie erreur (pas de
-   * `data` exploitable, ou une exception JS réseau/offline) continue de relancer -- via le
-   * `try/finally` (pas de `catch` ici : rien à intercepter, la relance est le comportement
-   * par défaut d'une exception non attrapée).
+   * synchronise `animals` avec la réponse serveur. `resolveOrThrowOnFailure` traite un succès
+   * partiel (`data` exploitable malgré `errors`, ex. une relation annexe non résolue) comme un
+   * succès -- le `console.warn` ci-dessous, lui, reste local à cette fonction (ce n'est pas le
+   * rôle du service de décider quoi logger).
    *
    * @param {object} form Formulaire d'édition (voir `editForm` dans AnimalsView.vue) --
    *   doit au moins contenir `id`.
@@ -126,15 +113,10 @@ export function useAnimals() {
 
       const { data, errors } = await client.models.Animal.update(input)
 
+      updatedItem = resolveOrThrowOnFailure({ data, errors }, 'updateAnimal')
+
       if (errors) {
-        if (data) {
-          console.warn('Update réussi (malgré erreurs relations)', errors)
-          updatedItem = data
-        } else {
-          throw Object.assign(new Error('Erreur GraphQL updateAnimal'), { errors })
-        }
-      } else {
-        updatedItem = data
+        console.warn('Update réussi (malgré erreurs relations)', errors)
       }
     } finally {
       if (updatedItem) {
@@ -153,12 +135,10 @@ export function useAnimals() {
 
   /**
    * Supprime un Animal (retrait optimiste immédiat, rollback sur vraie erreur). Même
-   * traitement du succès partiel GraphQL qu'`updateAnimalDetails` ci-dessus : `data` présent
-   * malgré `errors` est traité comme un succès (pas de rollback), le reste (vraie erreur
-   * @auth remontée en `errors` sans `data`, ou exception JS réseau/offline) déclenche le
-   * rollback + relance, unifiés dans le même `catch` (la vraie erreur `@auth` est
-   * synthétisée en exception juste en dessous pour y retomber, exactement comme une
-   * exception JS classique).
+   * traitement du succès partiel GraphQL qu'`updateAnimalDetails` ci-dessus via
+   * `resolveOrThrowOnFailure` (pas de rollback si `data` reste exploitable malgré `errors`) ;
+   * une vraie erreur (`errors` sans `data`, ou exception JS réseau/offline) retombe dans le
+   * même `catch` (rollback + relance).
    */
   const deleteAnimalById = async (id) => {
     isSaving.value = true
@@ -169,11 +149,7 @@ export function useAnimals() {
 
       const { data, errors } = await client.models.Animal.delete({ id })
 
-      if (errors && !data) {
-        throw Object.assign(new Error('Erreur GraphQL deleteAnimal'), { errors })
-      }
-      // errors && data (succès partiel) : rien de plus à faire, pas de rollback -- même
-      // comportement que le `return` anticipé du pattern Gen1 `catch(error) { if (error.data...) return }`.
+      resolveOrThrowOnFailure({ data, errors }, 'deleteAnimal')
     } catch (error) {
       console.error('Vraie erreur suppression:', error)
       animals.value = previousAnimals
@@ -189,11 +165,6 @@ export function useAnimals() {
    * renseigné -- CONTEXT.md ("Validated Donor") interdit un groupe sanguin inconnu à la
    * validation, mais pas à la création : un Owner peut déclarer un animal sans connaître son
    * groupe, ce sera bloqué plus tard par `useAnimalValidation.js`.
-   *
-   * Gen1 n'avait pas de `catch` ici : une erreur GraphQL (via `client.graphql()`) se
-   * propageait telle quelle à l'appelant (`AddAnimalView.vue`, qui lit `err.errors`). Gen2 ne
-   * levant plus d'exception pour ce cas, on synthétise une exception portant `.errors` pour
-   * préserver exactement ce contrat -- voir le commentaire d'en-tête de fichier.
    *
    * @param {object} form Formulaire de création (voir AddAnimalView.vue).
    * @param {string} ownerID Owner propriétaire de l'Animal créé.
@@ -221,19 +192,16 @@ export function useAnimals() {
 
       const { data, errors } = await client.models.Animal.create(input)
 
-      if (errors && !data) {
-        throw Object.assign(new Error('Erreur GraphQL createAnimal'), { errors })
-      }
+      const created = resolveOrThrowOnFailure({ data, errors }, 'createAnimal')
 
-      if (data) {
+      if (created) {
         animals.value.push({
-          ...data,
-          age: calculateAge(data.birthDate),
+          ...created,
+          age: calculateAge(created.birthDate),
         })
       }
 
-      return data
-
+      return created
     } finally {
       isSaving.value = false
     }
