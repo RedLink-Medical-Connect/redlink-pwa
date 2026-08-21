@@ -3,17 +3,48 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 // Phase 7.7 : useRegistrationCompletion() regroupe les 5 appels client.graphql() de
 // complétion d'inscription (création de Clinic/Veterinarian ou Owner/Animal/
 // OwnerAvailability selon le rôle) extraits de VerifyEmailView.vue.
+//
+// Phase 8, sous-tâche 5 (lot 1/3) : mock migré vers le client Gen2 (`aws-amplify/data`,
+// `client.models.Owner.create()`/`client.models.Animal.create()`/etc.) -- un mock dédié par
+// modèle plutôt qu'un unique `graphqlMock` discriminé par le nom de mutation extrait du
+// texte de la query (`mutationNameOf`, qui n'a plus de sens côté appelant en Gen2 : l'input
+// est passé directement, plus de document GraphQL nommé). Les assertions métier (ordre des
+// appels, valeurs des champs envoyés, propagation d'erreur, `isCompleting`) restent les
+// mêmes qu'avant la migration. Les assertions `authMode === 'userPool'` par appel ont été
+// retirées : Gen2 ne le repasse plus par appel (`defaultAuthorizationMode` global dans
+// `defineData(...)`, voir CLAUDE.md/`amplify/data/resource.ts`) -- c'était un détail
+// d'implémentation Gen1, pas un comportement métier.
 
-const graphqlMock = vi.fn()
+const ownerCreateMock = vi.fn()
+const animalCreateMock = vi.fn()
+const availabilityCreateMock = vi.fn()
+const clinicCreateMock = vi.fn()
+const vetCreateMock = vi.fn()
 
-vi.mock('aws-amplify/api', () => ({
-  generateClient: () => ({ graphql: graphqlMock }),
+vi.mock('aws-amplify/data', () => ({
+  generateClient: () => ({
+    models: {
+      Owner: { create: (...args) => ownerCreateMock(...args) },
+      Animal: { create: (...args) => animalCreateMock(...args) },
+      OwnerAvailability: { create: (...args) => availabilityCreateMock(...args) },
+      Clinic: { create: (...args) => clinicCreateMock(...args) },
+      Veterinarian: { create: (...args) => vetCreateMock(...args) },
+    },
+  }),
 }))
 
 import {
   useRegistrationCompletion,
   shouldShowExpressDefaultsInfo,
 } from '@/composables/useRegistrationCompletion'
+
+const resetAllMocks = () => {
+  ownerCreateMock.mockReset()
+  animalCreateMock.mockReset()
+  availabilityCreateMock.mockReset()
+  clinicCreateMock.mockReset()
+  vetCreateMock.mockReset()
+}
 
 const buildOwnerData = (overrides = {}) => ({
   role: 'owner',
@@ -47,27 +78,22 @@ const buildVetData = (overrides = {}) => ({
   ...overrides,
 })
 
-const mutationNameOf = (query) => {
-  const match = query.match(/mutation (\w+)\(/)
-  return match ? match[1] : null
-}
-
 describe('useRegistrationCompletion.completeRegistration — chemin owner', () => {
-  beforeEach(() => {
-    graphqlMock.mockReset()
-  })
+  beforeEach(resetAllMocks)
 
-  it('appelle CreateOwner puis CreateAnimal (animal_name renseigné) puis CreateOwnerAvailability, dans cet ordre, avec authMode userPool', async () => {
+  it('appelle CreateOwner puis CreateAnimal (animal_name renseigné) puis CreateOwnerAvailability, dans cet ordre', async () => {
     const calls = []
-    graphqlMock.mockImplementation(async ({ query, variables, authMode }) => {
-      const name = mutationNameOf(query)
-      calls.push({ name, variables, authMode })
-      if (name === 'CreateOwner') return { data: { createOwner: { id: 'owner-123' } } }
-      if (name === 'CreateAnimal') return { data: { createAnimal: { id: 'animal-1' } } }
-      if (name === 'CreateOwnerAvailability') {
-        return { data: { createOwnerAvailability: { id: 'avail-1' } } }
-      }
-      throw new Error(`Unexpected mutation in test: ${name}`)
+    ownerCreateMock.mockImplementation(async (input) => {
+      calls.push({ name: 'CreateOwner', input })
+      return { data: { id: 'owner-123' }, errors: undefined }
+    })
+    animalCreateMock.mockImplementation(async (input) => {
+      calls.push({ name: 'CreateAnimal', input })
+      return { data: { id: 'animal-1' }, errors: undefined }
+    })
+    availabilityCreateMock.mockImplementation(async (input) => {
+      calls.push({ name: 'CreateOwnerAvailability', input })
+      return { data: { id: 'avail-1' }, errors: undefined }
     })
 
     const { completeRegistration, isCompleting } = useRegistrationCompletion()
@@ -76,7 +102,6 @@ describe('useRegistrationCompletion.completeRegistration — chemin owner', () =
     await completeRegistration(buildOwnerData(), 'cognito-user-1')
 
     expect(calls.map((c) => c.name)).toEqual(['CreateOwner', 'CreateAnimal', 'CreateOwnerAvailability'])
-    expect(calls.every((c) => c.authMode === 'userPool')).toBe(true)
     expect(isCompleting.value).toBe(false)
   })
 
@@ -85,21 +110,17 @@ describe('useRegistrationCompletion.completeRegistration — chemin owner', () =
     let animalInput = null
     let availabilityInput = null
 
-    graphqlMock.mockImplementation(async ({ query, variables }) => {
-      const name = mutationNameOf(query)
-      if (name === 'CreateOwner') {
-        ownerInput = variables.input
-        return { data: { createOwner: { id: 'owner-generated-id' } } }
-      }
-      if (name === 'CreateAnimal') {
-        animalInput = variables.input
-        return { data: { createAnimal: { id: 'animal-1' } } }
-      }
-      if (name === 'CreateOwnerAvailability') {
-        availabilityInput = variables.input
-        return { data: { createOwnerAvailability: { id: 'avail-1' } } }
-      }
-      throw new Error(`Unexpected mutation in test: ${name}`)
+    ownerCreateMock.mockImplementation(async (input) => {
+      ownerInput = input
+      return { data: { id: 'owner-generated-id' }, errors: undefined }
+    })
+    animalCreateMock.mockImplementation(async (input) => {
+      animalInput = input
+      return { data: { id: 'animal-1' }, errors: undefined }
+    })
+    availabilityCreateMock.mockImplementation(async (input) => {
+      availabilityInput = input
+      return { data: { id: 'avail-1' }, errors: undefined }
     })
 
     const { completeRegistration } = useRegistrationCompletion()
@@ -112,36 +133,30 @@ describe('useRegistrationCompletion.completeRegistration — chemin owner', () =
 
   it("saute CreateAnimal quand animal_name n'est pas renseigné (inscription sans animal), mais crée quand même l'OwnerAvailability par défaut", async () => {
     const calls = []
-    graphqlMock.mockImplementation(async ({ query }) => {
-      const name = mutationNameOf(query)
-      calls.push(name)
-      if (name === 'CreateOwner') return { data: { createOwner: { id: 'owner-123' } } }
-      if (name === 'CreateOwnerAvailability') {
-        return { data: { createOwnerAvailability: { id: 'avail-1' } } }
-      }
-      throw new Error(`Unexpected mutation in test: ${name}`)
+    ownerCreateMock.mockImplementation(async () => {
+      calls.push('CreateOwner')
+      return { data: { id: 'owner-123' }, errors: undefined }
+    })
+    availabilityCreateMock.mockImplementation(async () => {
+      calls.push('CreateOwnerAvailability')
+      return { data: { id: 'avail-1' }, errors: undefined }
     })
 
     const { completeRegistration } = useRegistrationCompletion()
     await completeRegistration(buildOwnerData({ animal_name: '' }), 'cognito-user-1')
 
     expect(calls).toEqual(['CreateOwner', 'CreateOwnerAvailability'])
+    expect(animalCreateMock).not.toHaveBeenCalled()
   })
 
   it("utilise Species.DOG ('DOG') comme espèce par défaut quand animal_species n'est pas renseigné, et DonationFrequency.ASAP ('ASAP') comme fréquence de don par défaut (R-14)", async () => {
     let animalInput = null
-    graphqlMock.mockImplementation(async ({ query, variables }) => {
-      const name = mutationNameOf(query)
-      if (name === 'CreateOwner') return { data: { createOwner: { id: 'owner-123' } } }
-      if (name === 'CreateAnimal') {
-        animalInput = variables.input
-        return { data: { createAnimal: { id: 'animal-1' } } }
-      }
-      if (name === 'CreateOwnerAvailability') {
-        return { data: { createOwnerAvailability: { id: 'avail-1' } } }
-      }
-      throw new Error(`Unexpected mutation in test: ${name}`)
+    ownerCreateMock.mockResolvedValue({ data: { id: 'owner-123' }, errors: undefined })
+    animalCreateMock.mockImplementation(async (input) => {
+      animalInput = input
+      return { data: { id: 'animal-1' }, errors: undefined }
     })
+    availabilityCreateMock.mockResolvedValue({ data: { id: 'avail-1' }, errors: undefined })
 
     const { completeRegistration } = useRegistrationCompletion()
     await completeRegistration(buildOwnerData({ animal_species: '' }), 'cognito-user-1')
@@ -149,69 +164,83 @@ describe('useRegistrationCompletion.completeRegistration — chemin owner', () =
     expect(animalInput.species).toBe('DOG')
     expect(animalInput.donationFrequency).toBe('ASAP')
   })
+
+  it('relance (propage) une erreur GraphQL/@auth résolue par le client Gen2 (pas de exception JS) sur CreateOwner', async () => {
+    ownerCreateMock.mockResolvedValue({
+      data: null,
+      errors: [{ message: 'Not Authorized to access createOwner' }],
+    })
+
+    const { completeRegistration } = useRegistrationCompletion()
+
+    await expect(completeRegistration(buildOwnerData(), 'cognito-user-1')).rejects.toThrow()
+    expect(animalCreateMock).not.toHaveBeenCalled()
+    expect(availabilityCreateMock).not.toHaveBeenCalled()
+  })
 })
 
 describe('useRegistrationCompletion.completeRegistration — chemin vet', () => {
-  beforeEach(() => {
-    graphqlMock.mockReset()
-  })
+  beforeEach(resetAllMocks)
 
-  it('appelle CreateClinic puis CreateVeterinarian, dans cet ordre, avec authMode userPool, et Veterinarian.id = cognitoUserId (jamais Clinic.id)', async () => {
+  it('appelle CreateClinic puis CreateVeterinarian, dans cet ordre, et Veterinarian.id = cognitoUserId (jamais Clinic.id)', async () => {
     const calls = []
     let vetInput = null
     let clinicInput = null
 
-    graphqlMock.mockImplementation(async ({ query, variables, authMode }) => {
-      const name = mutationNameOf(query)
-      calls.push({ name, authMode })
-      if (name === 'CreateClinic') {
-        clinicInput = variables.input
-        return { data: { createClinic: { id: 'clinic-generated-id' } } }
-      }
-      if (name === 'CreateVeterinarian') {
-        vetInput = variables.input
-        return { data: { createVeterinarian: { id: 'cognito-vet-1' } } }
-      }
-      throw new Error(`Unexpected mutation in test: ${name}`)
+    clinicCreateMock.mockImplementation(async (input) => {
+      calls.push('CreateClinic')
+      clinicInput = input
+      return { data: { id: 'clinic-generated-id' }, errors: undefined }
+    })
+    vetCreateMock.mockImplementation(async (input) => {
+      calls.push('CreateVeterinarian')
+      vetInput = input
+      return { data: { id: 'cognito-vet-1' }, errors: undefined }
     })
 
     const { completeRegistration } = useRegistrationCompletion()
     await completeRegistration(buildVetData(), 'cognito-vet-1')
 
-    expect(calls.map((c) => c.name)).toEqual(['CreateClinic', 'CreateVeterinarian'])
-    expect(calls.every((c) => c.authMode === 'userPool')).toBe(true)
+    expect(calls).toEqual(['CreateClinic', 'CreateVeterinarian'])
     expect(clinicInput.id).toBeUndefined()
     expect(vetInput.id).toBe('cognito-vet-1')
     expect(vetInput.clinicID).toBe('clinic-generated-id')
   })
+
+  it('relance (propage) une erreur GraphQL/@auth résolue par le client Gen2 sur CreateVeterinarian', async () => {
+    clinicCreateMock.mockResolvedValue({ data: { id: 'clinic-1' }, errors: undefined })
+    vetCreateMock.mockResolvedValue({
+      data: null,
+      errors: [{ message: 'Not Authorized to access createVeterinarian' }],
+    })
+
+    const { completeRegistration } = useRegistrationCompletion()
+
+    await expect(completeRegistration(buildVetData(), 'cognito-vet-1')).rejects.toThrow()
+  })
 })
 
 describe('useRegistrationCompletion.completeRegistration — rôle inconnu', () => {
-  beforeEach(() => {
-    graphqlMock.mockReset()
-  })
+  beforeEach(resetAllMocks)
 
   it("n'appelle aucune mutation pour un rôle différent de 'owner'/'vet' (comportement identique à l'original : le if/else if ne couvrait déjà que ces deux cas)", async () => {
     const { completeRegistration } = useRegistrationCompletion()
     await expect(completeRegistration({ role: 'admin' }, 'cognito-user-1')).resolves.toBeUndefined()
-    expect(graphqlMock).not.toHaveBeenCalled()
+
+    expect(ownerCreateMock).not.toHaveBeenCalled()
+    expect(animalCreateMock).not.toHaveBeenCalled()
+    expect(availabilityCreateMock).not.toHaveBeenCalled()
+    expect(clinicCreateMock).not.toHaveBeenCalled()
+    expect(vetCreateMock).not.toHaveBeenCalled()
   })
 })
 
 describe('useRegistrationCompletion.completeRegistration — échec au milieu de la séquence', () => {
-  beforeEach(() => {
-    graphqlMock.mockReset()
-  })
+  beforeEach(resetAllMocks)
 
-  it('CreateOwner réussit puis CreateAnimal échoue : propage l’erreur, isCompleting repasse à false, et CreateOwnerAvailability n’est JAMAIS appelée — pas de rollback du Owner déjà créé (bug préexistant documenté, pas corrigé par cette extraction)', async () => {
-    const calls = []
-    graphqlMock.mockImplementation(async ({ query }) => {
-      const name = mutationNameOf(query)
-      calls.push(name)
-      if (name === 'CreateOwner') return { data: { createOwner: { id: 'owner-orphaned' } } }
-      if (name === 'CreateAnimal') throw new Error('DynamoDB:ConditionalCheckFailedException')
-      throw new Error(`Unexpected mutation in test: ${name}`)
-    })
+  it('CreateOwner réussit puis CreateAnimal échoue (exception JS réseau) : propage l’erreur, isCompleting repasse à false, et CreateOwnerAvailability n’est JAMAIS appelée — pas de rollback du Owner déjà créé (bug préexistant documenté, pas corrigé par cette extraction)', async () => {
+    ownerCreateMock.mockResolvedValue({ data: { id: 'owner-orphaned' }, errors: undefined })
+    animalCreateMock.mockRejectedValue(new Error('DynamoDB:ConditionalCheckFailedException'))
 
     const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 
@@ -227,19 +256,15 @@ describe('useRegistrationCompletion.completeRegistration — échec au milieu de
     // compensation. L'Owner créé au premier appel reste orphelin côté backend (hors de
     // portée d'un test unitaire composable-seul, mais la conséquence directe est ici :
     // aucune tentative de nettoyage ni de retry n'est faite par le composable lui-même).
-    expect(calls).toEqual(['CreateOwner', 'CreateAnimal'])
+    expect(availabilityCreateMock).not.toHaveBeenCalled()
     expect(consoleErrorSpy).toHaveBeenCalled()
 
     consoleErrorSpy.mockRestore()
   })
 
   it('CreateClinic réussit puis CreateVeterinarian échoue : propage l’erreur sans modifier isCompleting durablement', async () => {
-    graphqlMock.mockImplementation(async ({ query }) => {
-      const name = mutationNameOf(query)
-      if (name === 'CreateClinic') return { data: { createClinic: { id: 'clinic-orphaned' } } }
-      if (name === 'CreateVeterinarian') throw new Error('boom')
-      throw new Error(`Unexpected mutation in test: ${name}`)
-    })
+    clinicCreateMock.mockResolvedValue({ data: { id: 'clinic-orphaned' }, errors: undefined })
+    vetCreateMock.mockRejectedValue(new Error('boom'))
 
     const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 

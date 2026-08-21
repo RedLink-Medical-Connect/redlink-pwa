@@ -30,10 +30,58 @@ import { listOpenRequestsWithClinic } from '@/graphql/custom-queries'
 // These tests exercise the full chain with a mocked `generateClient().graphql`
 // and assert an actual Match comes out the other end, not just "doesn't throw".
 
-const graphqlMock = vi.fn()
+// Phase 8, sous-tâche 5 (lot 1/3, correction post-lot) : useMatchingRequests.js instancie
+// en interne useOwnerProfile()/useAnimals()/useOwnerAvailability() (voir plus bas), migrés
+// sur le client Gen2 (`aws-amplify/data`, `client.models.*`) dans ce même lot -- 3 des 5
+// branches précédemment routées via `graphqlMock` (GetOwner, ListMyAnimalsByOwnerId,
+// ListMyAvailabilities) passent donc désormais par ces 3 mocks dédiés. `graphqlMock`
+// reste utilisé pour les 2 appels PROPRES de useMatchingRequests.js (MyClinicRelationsByOwnerID,
+// ListOpenRequestsWithClinic, toujours `client.graphql(...)`) -- pas encore migrés, prévus
+// dans un lot ultérieur.
+//
+// IMPORTANT (découvert en écrivant cette correction) : dans la version installée
+// d'`aws-amplify`, `aws-amplify/api` et `aws-amplify/data` résolvent au MÊME fichier
+// physique (`exports["./api"]` et `exports["./data"]` pointent toutes deux vers
+// `dist/esm/api/index.mjs` dans node_modules/aws-amplify/package.json -- un seul
+// `generateClient()` unifié, cohérent avec la doc Amplify Gen2 réelle : `.graphql()` et
+// `.models.*` coexistent sur le même client, quel que soit le sous-chemin d'import
+// utilisé). Vitest mocke par fichier résolu, pas par spécificateur d'import : deux
+// `vi.mock()` avec des factories DIFFÉRENTES sur ces deux spécificateurs se marchent
+// dessus (l'un écrase l'autre silencieusement). Un seul objet client, exposant à la fois
+// `.graphql` (utilisé par useMatchingRequests.js, pas encore migré) et `.models.*`
+// (utilisé par les composables migrés dans ce lot), mocké IDENTIQUEMENT sous les deux
+// spécificateurs pour rester robuste à celui réellement résolu.
+//
+// `vi.hoisted()` (plutôt que de simples `const` en tête de fichier, pattern qui suffisait
+// tant qu'un seul `vi.mock()` référençait `graphqlMock` seul) : `vi.mock()` est hoisté au
+// tout début du fichier par Vitest, avant toute autre instruction -- `mockGenerateClient`
+// (une fonction qui ferme sur les 4 mocks ci-dessous) n'est PAS reconnu par l'heuristique
+// de hoisting "légère" de Vitest (qui ne couvre que des `const xxxMock = vi.fn()` triviaux
+// référencés directement), d'où une `ReferenceError: Cannot access before initialization`
+// sans ce `vi.hoisted()` explicite.
+const { graphqlMock, ownerGetMock, animalListMock, availabilityListMock, mockGenerateClient } =
+  vi.hoisted(() => {
+    const graphqlMock = vi.fn()
+    const ownerGetMock = vi.fn()
+    const animalListMock = vi.fn()
+    const availabilityListMock = vi.fn()
+    const mockGenerateClient = () => ({
+      graphql: graphqlMock,
+      models: {
+        Owner: { get: (...args) => ownerGetMock(...args) },
+        Animal: { list: (...args) => animalListMock(...args) },
+        OwnerAvailability: { list: (...args) => availabilityListMock(...args) },
+      },
+    })
+    return { graphqlMock, ownerGetMock, animalListMock, availabilityListMock, mockGenerateClient }
+  })
 
 vi.mock('aws-amplify/api', () => ({
-  generateClient: () => ({ graphql: graphqlMock }),
+  generateClient: mockGenerateClient,
+}))
+
+vi.mock('aws-amplify/data', () => ({
+  generateClient: mockGenerateClient,
 }))
 
 vi.mock('aws-amplify/auth', () => ({
@@ -141,21 +189,20 @@ const buildRequest = (overrides = {}) => ({
  * dedicated `describe` block below), so most tests here never trigger it at all.
  */
 function mockGraphqlResponses({ profile, animals, requests, clinicRelations = [], availabilities = [] }) {
+  // GetOwner / ListMyAnimalsByOwnerId / ListMyAvailabilities : composables migrés Gen2
+  // (aws-amplify/data), voir le commentaire sur les mocks en tête de fichier.
+  ownerGetMock.mockResolvedValue({ data: profile, errors: undefined })
+  animalListMock.mockResolvedValue({ data: animals, errors: undefined })
+  availabilityListMock.mockResolvedValue({ data: availabilities, errors: undefined })
+
+  // MyClinicRelationsByOwnerID / ListOpenRequestsWithClinic : appels propres de
+  // useMatchingRequests.js, pas encore migrés (aws-amplify/api).
   graphqlMock.mockImplementation(async ({ query }) => {
-    if (query.includes('GetOwner')) {
-      return { data: { getOwner: profile } }
-    }
-    if (query.includes('ListMyAnimalsByOwnerId')) {
-      return { data: { listAnimals: { items: animals } } }
-    }
     if (query.includes('MyClinicRelationsByOwnerID')) {
       return { data: { clinicOwnerRelationsByOwnerID: { items: clinicRelations } } }
     }
     if (query.includes('ListOpenRequestsWithClinic')) {
       return { data: { listRequests: { items: requests } } }
-    }
-    if (query.includes('ListMyAvailabilities')) {
-      return { data: { listOwnerAvailabilities: { items: availabilities } } }
     }
     throw new Error(`Unexpected graphql call in test: ${query.slice(0, 60)}`)
   })
@@ -165,6 +212,9 @@ describe('useMatchingRequests', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     graphqlMock.mockReset()
+    ownerGetMock.mockReset()
+    animalListMock.mockReset()
+    availabilityListMock.mockReset()
     // Réinitialise explicitement à chaque test la valeur par défaut ('owner-1',
     // celle utilisée par toutes les fixtures ci-dessus) : ce module mock n'a pas
     // `restoreMocks`/`clearMocks` activé dans vitest.config.js, et un test qui
@@ -200,9 +250,7 @@ describe('useMatchingRequests', () => {
 
     // La preuve que fetchProfile() a bien été appelé (bug #1 et #2) : getOwner
     // a été requêté.
-    expect(graphqlMock).toHaveBeenCalledWith(
-      expect.objectContaining({ query: expect.stringContaining('GetOwner') }),
-    )
+    expect(ownerGetMock).toHaveBeenCalled()
 
     expect(matches.value).toHaveLength(1)
     expect(matches.value[0].id).toBe('request-1')
@@ -450,13 +498,9 @@ describe('useMatchingRequests', () => {
     it("un échec de MyClinicRelationsByOwnerID ne vide pas matches.value — dégrade juste Clinic Priority à false pour tout le monde", async () => {
       const requestNear = buildRequest({ id: 'request-near', clinic: { latitude: 48.8567, longitude: 2.3522 } })
 
+      ownerGetMock.mockResolvedValue({ data: buildOwnerProfile(), errors: undefined })
+      animalListMock.mockResolvedValue({ data: [buildAnimal()], errors: undefined })
       graphqlMock.mockImplementation(async ({ query }) => {
-        if (query.includes('GetOwner')) {
-          return { data: { getOwner: buildOwnerProfile() } }
-        }
-        if (query.includes('ListMyAnimalsByOwnerId')) {
-          return { data: { listAnimals: { items: [buildAnimal()] } } }
-        }
         if (query.includes('MyClinicRelationsByOwnerID')) {
           throw new Error('réseau : timeout')
         }
@@ -662,11 +706,9 @@ describe('useMatchingRequests', () => {
   // affichait auparavant le même message rassurant dans les deux cas.
   describe('loadError (Phase 7.6, R-09)', () => {
     it("un échec explicite (searchMatches() par défaut) du flux principal met loadError à true", async () => {
+      ownerGetMock.mockResolvedValue({ data: buildOwnerProfile(), errors: undefined })
+      animalListMock.mockResolvedValue({ data: [buildAnimal()], errors: undefined })
       graphqlMock.mockImplementation(async ({ query }) => {
-        if (query.includes('GetOwner')) return { data: { getOwner: buildOwnerProfile() } }
-        if (query.includes('ListMyAnimalsByOwnerId')) {
-          return { data: { listAnimals: { items: [buildAnimal()] } } }
-        }
         if (query.includes('MyClinicRelationsByOwnerID')) {
           return { data: { clinicOwnerRelationsByOwnerID: { items: [] } } }
         }
@@ -689,11 +731,9 @@ describe('useMatchingRequests', () => {
     })
 
     it("un échec silencieux (searchMatches({ silent: true }), polling/retour de focus) ne met JAMAIS loadError à true", async () => {
+      ownerGetMock.mockResolvedValue({ data: buildOwnerProfile(), errors: undefined })
+      animalListMock.mockResolvedValue({ data: [buildAnimal()], errors: undefined })
       graphqlMock.mockImplementation(async ({ query }) => {
-        if (query.includes('GetOwner')) return { data: { getOwner: buildOwnerProfile() } }
-        if (query.includes('ListMyAnimalsByOwnerId')) {
-          return { data: { listAnimals: { items: [buildAnimal()] } } }
-        }
         if (query.includes('MyClinicRelationsByOwnerID')) {
           return { data: { clinicOwnerRelationsByOwnerID: { items: [] } } }
         }
@@ -722,10 +762,14 @@ describe('useMatchingRequests', () => {
 
       const { searchMatches, loadError } = useMatchingRequests()
 
-      // 1er appel explicite : échec du flux principal.
-      graphqlMock.mockImplementationOnce(async () => {
-        throw new Error('réseau : timeout')
-      })
+      // 1er appel explicite : échec du flux principal -- déclenché sur `Owner.get`
+      // (fetchProfile(), le tout premier appel réseau de searchMatches()) plutôt que sur
+      // `graphqlMock` : depuis la migration Gen2 de useOwnerProfile.js, ce n'est plus lui
+      // qui reçoit GetOwner. Une lecture secondaire (MyClinicRelationsByOwnerID, restée sur
+      // graphqlMock) ne doit PAS mettre loadError à true -- voir le test dédié plus bas --
+      // donc cibler ownerGetMock ici est la seule façon de continuer à représenter un vrai
+      // échec du flux PRINCIPAL, pas de la lecture secondaire.
+      ownerGetMock.mockRejectedValueOnce(new Error('réseau : timeout'))
       const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
       await searchMatches()
       expect(loadError.value).toBe(true)
@@ -740,11 +784,9 @@ describe('useMatchingRequests', () => {
     it("un échec de la lecture secondaire Clinic Priority (MyClinicRelationsByOwnerID) ne met PAS loadError à true -- reste une dégradation isolée du tri", async () => {
       const requestNear = buildRequest({ id: 'request-near', clinic: { latitude: 48.8567, longitude: 2.3522 } })
 
+      ownerGetMock.mockResolvedValue({ data: buildOwnerProfile(), errors: undefined })
+      animalListMock.mockResolvedValue({ data: [buildAnimal()], errors: undefined })
       graphqlMock.mockImplementation(async ({ query }) => {
-        if (query.includes('GetOwner')) return { data: { getOwner: buildOwnerProfile() } }
-        if (query.includes('ListMyAnimalsByOwnerId')) {
-          return { data: { listAnimals: { items: [buildAnimal()] } } }
-        }
         if (query.includes('MyClinicRelationsByOwnerID')) {
           throw new Error('réseau : timeout')
         }
@@ -794,9 +836,7 @@ describe('useMatchingRequests', () => {
       const { searchMatches } = useMatchingRequests()
       await searchMatches()
 
-      expect(graphqlMock).not.toHaveBeenCalledWith(
-        expect.objectContaining({ query: expect.stringContaining('ListMyAvailabilities') }),
-      )
+      expect(availabilityListMock).not.toHaveBeenCalled()
     })
 
     it('interroge ListMyAvailabilities dès qu\'au moins une Request ouverte est APPOINTMENT', async () => {
@@ -810,9 +850,7 @@ describe('useMatchingRequests', () => {
       const { searchMatches } = useMatchingRequests()
       await searchMatches()
 
-      expect(graphqlMock).toHaveBeenCalledWith(
-        expect.objectContaining({ query: expect.stringContaining('ListMyAvailabilities') }),
-      )
+      expect(availabilityListMock).toHaveBeenCalled()
     })
 
     it('inclut une Request APPOINTMENT dont appointmentDatetime tombe dans une OwnerAvailability', async () => {
@@ -864,21 +902,15 @@ describe('useMatchingRequests', () => {
       const appointmentReq = buildAppointmentRequest()
       const emergencyReq = buildRequest({ id: 'request-emergency' })
 
+      ownerGetMock.mockResolvedValue({ data: buildOwnerProfile(), errors: undefined })
+      animalListMock.mockResolvedValue({ data: [buildAnimal()], errors: undefined })
+      availabilityListMock.mockRejectedValue(new Error('réseau : timeout'))
       graphqlMock.mockImplementation(async ({ query }) => {
-        if (query.includes('GetOwner')) {
-          return { data: { getOwner: buildOwnerProfile() } }
-        }
-        if (query.includes('ListMyAnimalsByOwnerId')) {
-          return { data: { listAnimals: { items: [buildAnimal()] } } }
-        }
         if (query.includes('MyClinicRelationsByOwnerID')) {
           return { data: { clinicOwnerRelationsByOwnerID: { items: [] } } }
         }
         if (query.includes('ListOpenRequestsWithClinic')) {
           return { data: { listRequests: { items: [appointmentReq, emergencyReq] } } }
-        }
-        if (query.includes('ListMyAvailabilities')) {
-          throw new Error('réseau : timeout')
         }
         throw new Error(`Unexpected graphql call in test: ${query.slice(0, 60)}`)
       })
@@ -923,8 +955,20 @@ describe('useMatchingRequests', () => {
   // focus + nettoyage), pas le contenu du matching déjà couvert ci-dessus -- les
   // fixtures ici restent volontairement minimales (aucun animal) pour que
   // searchMatches() s'arrête tôt (guard "pas d'animaux") tout en émettant quand même
-  // les 2 appels GraphQL (GetOwner, ListMyAnimalsByOwnerId) qui suffisent à prouver
-  // qu'un nouveau cycle de recherche a bien été déclenché.
+  // les appels GraphQL qui suffisent à prouver qu'un nouveau cycle de recherche a bien
+  // été déclenché.
+  //
+  // Phase 8, sous-tâche 5 (lot 1/3, correction post-lot) : la preuve "un cycle a tourné"
+  // ci-dessous cible désormais `animalListMock` (Animal.list, useAnimals.fetchAnimals())
+  // plutôt que `graphqlMock` -- deux raisons combinées. (1) GetOwner ne transite plus par
+  // `graphqlMock` depuis la migration Gen2 de useOwnerProfile.js (voir `mockGraphqlResponses`
+  // plus haut). (2) `Owner.get` n'aurait de toute façon pas été un signal fiable pour un
+  // polling répété : `useOwnerProfile.fetchProfile()` a un cache par session (`isLoaded`,
+  // R-19) qui rend les appels suivants no-op sur la MÊME instance de composable -- il ne se
+  // déclenche donc qu'au tout premier tick, jamais aux suivants. `fetchAnimals()` n'a lui
+  // aucun cache et est rappelé à chaque searchMatches() tant que `animals.value` reste vide
+  // (le cas ici, fixtures `animals: []`) : c'est le signal qui grossit de façon fiable à
+  // chaque tick, exactement ce que ces tests vérifient.
   //
   // 60_000 ci-dessous doit rester synchronisé avec DASHBOARD_REFRESH_INTERVAL_MS
   // (useMatchingRequests.js) -- ce n'est pas exporté (détail d'implémentation), donc
@@ -981,14 +1025,14 @@ describe('useMatchingRequests', () => {
       startAutoRefresh()
 
       // Rien avant le premier tick.
-      expect(graphqlMock).not.toHaveBeenCalled()
+      expect(animalListMock).not.toHaveBeenCalled()
 
       await vi.advanceTimersByTimeAsync(REFRESH_INTERVAL_MS)
-      const callsAfterFirstTick = graphqlMock.mock.calls.length
+      const callsAfterFirstTick = animalListMock.mock.calls.length
       expect(callsAfterFirstTick).toBeGreaterThan(0)
 
       await vi.advanceTimersByTimeAsync(REFRESH_INTERVAL_MS)
-      expect(graphqlMock.mock.calls.length).toBeGreaterThan(callsAfterFirstTick)
+      expect(animalListMock.mock.calls.length).toBeGreaterThan(callsAfterFirstTick)
     })
 
     it("ne relance PAS searchMatches() au tick de l'interval si l'onglet est en arrière-plan (visibilityState !== 'visible')", async () => {
@@ -1000,20 +1044,25 @@ describe('useMatchingRequests', () => {
 
       await vi.advanceTimersByTimeAsync(REFRESH_INTERVAL_MS)
 
-      expect(graphqlMock).not.toHaveBeenCalled()
+      expect(animalListMock).not.toHaveBeenCalled()
     })
 
     it("déclenche un refresh immédiat sur un retour de focus (`visibilitychange`), sans attendre le prochain tick de l'interval", async () => {
       const { startAutoRefresh } = createMatchingRequests()
       startAutoRefresh()
 
-      expect(graphqlMock).not.toHaveBeenCalled()
+      // Ici, `ownerGetMock` (pas `animalListMock`) : ce test ne flush que 2 microtasks après
+      // l'évènement, insuffisant pour atteindre le `fetchAnimals()` qui suit `fetchProfile()`
+      // dans searchMatches() -- `Owner.get()` (fetchProfile(), le tout premier appel réseau)
+      // reste le signal le plus rapide à observer pour "un nouveau cycle a démarré", sans
+      // dépendre du nombre de microtasks jusqu'au second appel.
+      expect(ownerGetMock).not.toHaveBeenCalled()
 
       document.dispatchEvent(new Event('visibilitychange'))
       await Promise.resolve()
       await Promise.resolve()
 
-      expect(graphqlMock).toHaveBeenCalled()
+      expect(ownerGetMock).toHaveBeenCalled()
     })
 
     it("stopAutoRefresh() arrête le polling : plus aucun appel après le tick suivant", async () => {
@@ -1025,7 +1074,7 @@ describe('useMatchingRequests', () => {
 
       await vi.advanceTimersByTimeAsync(REFRESH_INTERVAL_MS * 2)
 
-      expect(graphqlMock).not.toHaveBeenCalled()
+      expect(animalListMock).not.toHaveBeenCalled()
     })
 
     it("stopAutoRefresh() retire aussi le listener `visibilitychange` : un retour de focus après stop ne déclenche plus rien", async () => {
@@ -1037,7 +1086,7 @@ describe('useMatchingRequests', () => {
       await Promise.resolve()
       await Promise.resolve()
 
-      expect(graphqlMock).not.toHaveBeenCalled()
+      expect(animalListMock).not.toHaveBeenCalled()
     })
 
     it('startAutoRefresh() est idempotent : un second appel remplace le premier interval au lieu de le doubler', async () => {
@@ -1054,7 +1103,7 @@ describe('useMatchingRequests', () => {
 
       await vi.advanceTimersByTimeAsync(REFRESH_INTERVAL_MS * 2)
 
-      expect(graphqlMock).not.toHaveBeenCalled()
+      expect(animalListMock).not.toHaveBeenCalled()
     })
   })
 })

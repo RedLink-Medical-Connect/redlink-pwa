@@ -1,10 +1,25 @@
 import { ref } from 'vue'
-import { generateClient } from 'aws-amplify/api'
+import { generateClient } from 'aws-amplify/data'
 import { deleteUser, getCurrentUser } from 'aws-amplify/auth'
-import { getOwner, listAnimals } from '@/graphql/queries'
-import { updateOwner, deleteOwner, deleteAnimal } from '@/graphql/mutations'
 import { useAuthStore } from '@/stores/auth'
 import { useRouter } from 'vue-router'
+
+// Phase 8, sous-tâche 5 (lot 1/3) : migré sur le client Gen2 (`aws-amplify/data`,
+// `client.models.Owner.*`/`client.models.Animal.*`). Plus d'import depuis
+// `@/graphql/queries`/`@/graphql/mutations` -- le client Gen2 sélectionne déjà les champs
+// scalaires du modèle par défaut, et `create()`/`update()` prennent l'objet `input`
+// directement (voir CLAUDE.md/`amplify/data/resource.ts`).
+//
+// Changement de comportement le plus important de cette migration (voir aussi
+// useAnimals.js/useOwnerAvailability.js/useRegistrationCompletion.js, même sous-tâche) :
+// `client.models.X.*` NE LÈVE PAS d'exception sur une erreur GraphQL/@auth -- il résout
+// normalement avec `{ data, errors }`. Ce fichier n'avait AUCUN `catch` avant cette
+// migration (`fetchProfile`/`updateProfile` laissaient l'exception Gen1 se propager telle
+// quelle à l'appelant -- `ProfileView.vue` fait `fetchProfile().catch(...)`,
+// `useMatchingRequests.js` fait `await fetchProfile()` dans son propre `try/catch` qui pilote
+// `loadError`) : chaque appel synthétise donc une exception sur `errors` pour préserver
+// exactement cette propagation, sans quoi ces deux appelants ne verraient plus jamais
+// d'échec sur ce chemin.
 
 export function useOwnerProfile() {
   const client = generateClient()
@@ -56,15 +71,19 @@ export function useOwnerProfile() {
 
       if (!userId) throw new Error("Impossible de récupérer l'ID utilisateur")
 
-      const { data } = await client.graphql({
-        query: getOwner,
-        variables: {
-          id: userId,
-        },
-        authMode: 'userPool',
-      })
+      const { data, errors } = await client.models.Owner.get({ id: userId })
 
-      const profile = data.getOwner
+      // Voir le commentaire d'en-tête de fichier : Gen1 propageait telle quelle une exception
+      // sur toute erreur GraphQL/@auth (aucun `catch` ici) -- Gen2 résout normalement avec
+      // `{ data, errors }`, donc on la retransforme en exception pour ne pas changer ce que
+      // voient ProfileView.vue/useMatchingRequests.js sur ce chemin. `data === null` SANS
+      // `errors` (Owner pas encore créé) reste un cas légitime, pas une erreur -- `profile`
+      // reste falsy plus bas, `isLoaded` passe quand même à `true`, comme avant.
+      if (errors) {
+        throw Object.assign(new Error('Erreur GraphQL getOwner'), { errors })
+      }
+
+      const profile = data
 
       if (profile) {
         ownerId.value = profile.id
@@ -100,11 +119,11 @@ export function useOwnerProfile() {
         maxTravelDistance: form.value.maxTravelDistance,
       }
 
-      await client.graphql({
-        query: updateOwner,
-        variables: { input },
-        authMode: 'userPool',
-      })
+      const { errors } = await client.models.Owner.update(input)
+
+      if (errors) {
+        throw Object.assign(new Error('Erreur GraphQL updateOwner'), { errors })
+      }
     } finally {
       isSaving.value = false
     }
@@ -118,38 +137,44 @@ export function useOwnerProfile() {
    * une écriture secondaire qui précède l'action critique (`deleteUser()`) — son échec est
    * loggé mais jamais relancé, pour ne pas empêcher un Owner de supprimer son compte Cognito
    * à cause d'un animal/relation orphelin en base. Seul l'échec de `deleteUser()` (et de ce
-   * qui suit) doit remonter à l'appelant.
+   * qui suit) doit remonter à l'appelant. Ce bloc étant déjà best-effort (toute erreur est
+   * avalée par le `catch (dbError)` ci-dessous), une erreur GraphQL Gen2 (`{ data, errors }`)
+   * est simplement retransformée en exception pour retomber dans ce même `catch`, plutôt que
+   * dupliquée en une vérification `if (errors)` distincte par appel.
    */
   const deleteAccount = async () => {
     isSaving.value = true
     try {
       if (ownerId.value) {
         try {
-          const { data } = await client.graphql({
-            query: listAnimals,
-            authMode: 'userPool',
-          })
+          const { data, errors: listErrors } = await client.models.Animal.list()
 
-          const rawItems = data.listAnimals?.items || []
+          if (listErrors) {
+            throw Object.assign(new Error('Erreur GraphQL listAnimals'), { errors: listErrors })
+          }
+
+          const rawItems = data || []
+          // `_deleted` : résidu Gen1 (DataStore/conflict-resolution), voir useAnimals.js --
+          // toujours faux côté Gen2, laissé tel quel (comportement observable inchangé).
           const validAnimals = rawItems.filter((item) => item && item.id && !item._deleted)
 
           if (validAnimals.length > 0) {
-            await Promise.all(
-              validAnimals.map((a) =>
-                client.graphql({
-                  query: deleteAnimal,
-                  variables: { input: { id: a.id } },
-                  authMode: 'userPool',
-                }),
-              ),
+            const deleteResults = await Promise.all(
+              validAnimals.map((a) => client.models.Animal.delete({ id: a.id })),
             )
+            const failed = deleteResults.find((r) => r.errors)
+            if (failed) {
+              throw Object.assign(new Error('Erreur GraphQL deleteAnimal'), { errors: failed.errors })
+            }
           }
 
-          await client.graphql({
-            query: deleteOwner,
-            variables: { input: { id: ownerId.value } },
-            authMode: 'userPool',
+          const { errors: deleteOwnerErrors } = await client.models.Owner.delete({
+            id: ownerId.value,
           })
+
+          if (deleteOwnerErrors) {
+            throw Object.assign(new Error('Erreur GraphQL deleteOwner'), { errors: deleteOwnerErrors })
+          }
         } catch (dbError) {
           console.error(
             'Erreur nettoyage DB (Animals/Owner) lors de la suppression du compte, ignorée (best-effort) :',

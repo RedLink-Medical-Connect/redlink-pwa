@@ -10,11 +10,35 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 // useAnimals.js), au succès partiel GraphQL de `updateAnimalDetails`, au rollback
 // optimiste de `deleteAnimalById`, et verrouille explicitement le défaut
 // `bloodGroup: 'UNKNOWN'` de `createNewAnimal` déjà en place avant cette sous-tâche.
+//
+// Phase 8, sous-tâche 5 (lot 1/3) : mock migré vers le client Gen2 (`aws-amplify/data`,
+// `client.models.Animal.*`), un mock dédié par méthode plutôt qu'un unique `graphqlMock`
+// discriminé par le texte de la query. Les assertions métier (valeurs de `animals.value`/
+// `loadError.value`, propagation ou non d'une erreur) restent EXACTEMENT les mêmes qu'avant
+// la migration -- seule la forme du mock change (voir CLAUDE.md / roadmap Phase 8). Deux cas
+// supplémentaires couverts ici, absents du test Gen1 : `errors` SANS `data` exploitable sur
+// `updateAnimalDetails`/`deleteAnimalById` -- un cas qui n'existait pas en Gen1 (où
+// `client.graphql()` levait directement une exception pour toute erreur GraphQL/@auth, jamais
+// un `{ data: null, errors }` résolu) mais que `client.models.Animal.*` peut désormais
+// renvoyer -- `useAnimals.js` doit continuer à le traiter comme un échec (rollback + relance),
+// pas comme un succès silencieux.
 
-const graphqlMock = vi.fn()
+const animalListMock = vi.fn()
+const animalCreateMock = vi.fn()
+const animalUpdateMock = vi.fn()
+const animalDeleteMock = vi.fn()
 
-vi.mock('aws-amplify/api', () => ({
-  generateClient: () => ({ graphql: graphqlMock }),
+vi.mock('aws-amplify/data', () => ({
+  generateClient: () => ({
+    models: {
+      Animal: {
+        list: (...args) => animalListMock(...args),
+        create: (...args) => animalCreateMock(...args),
+        update: (...args) => animalUpdateMock(...args),
+        delete: (...args) => animalDeleteMock(...args),
+      },
+    },
+  }),
 }))
 
 vi.mock('aws-amplify/auth', () => ({
@@ -23,14 +47,20 @@ vi.mock('aws-amplify/auth', () => ({
 
 import { useAnimals } from '@/composables/useAnimals'
 
-describe('useAnimals.createNewAnimal', () => {
-  beforeEach(() => {
-    graphqlMock.mockReset()
-  })
+const resetAllMocks = () => {
+  animalListMock.mockReset()
+  animalCreateMock.mockReset()
+  animalUpdateMock.mockReset()
+  animalDeleteMock.mockReset()
+}
 
-  it('transmet le sexe choisi tel quel dans la mutation createAnimalSimple', async () => {
-    graphqlMock.mockImplementation(async ({ variables }) => ({
-      data: { createAnimal: { id: 'animal-1', ...variables.input } },
+describe('useAnimals.createNewAnimal', () => {
+  beforeEach(resetAllMocks)
+
+  it('transmet le sexe choisi tel quel dans la mutation create', async () => {
+    animalCreateMock.mockImplementation(async (input) => ({
+      data: { id: 'animal-1', ...input },
+      errors: undefined,
     }))
 
     const { createNewAnimal } = useAnimals()
@@ -50,14 +80,15 @@ describe('useAnimals.createNewAnimal', () => {
       'owner-1',
     )
 
-    expect(graphqlMock).toHaveBeenCalledTimes(1)
-    const { variables } = graphqlMock.mock.calls[0][0]
-    expect(variables.input.sex).toBe('MALE')
+    expect(animalCreateMock).toHaveBeenCalledTimes(1)
+    const input = animalCreateMock.mock.calls[0][0]
+    expect(input.sex).toBe('MALE')
   })
 
   it("n'impose aucune valeur par défaut quand le sexe n'est pas renseigné (champ informatif optionnel)", async () => {
-    graphqlMock.mockImplementation(async ({ variables }) => ({
-      data: { createAnimal: { id: 'animal-2', ...variables.input } },
+    animalCreateMock.mockImplementation(async (input) => ({
+      data: { id: 'animal-2', ...input },
+      errors: undefined,
     }))
 
     const { createNewAnimal } = useAnimals()
@@ -76,13 +107,14 @@ describe('useAnimals.createNewAnimal', () => {
       'owner-1',
     )
 
-    const { variables } = graphqlMock.mock.calls[0][0]
-    expect(variables.input.sex).toBeNull()
+    const input = animalCreateMock.mock.calls[0][0]
+    expect(input.sex).toBeNull()
   })
 
   it("retombe sur bloodGroup: 'UNKNOWN' quand le formulaire n'en fournit pas", async () => {
-    graphqlMock.mockImplementation(async ({ variables }) => ({
-      data: { createAnimal: { id: 'animal-3', ...variables.input } },
+    animalCreateMock.mockImplementation(async (input) => ({
+      data: { id: 'animal-3', ...input },
+      errors: undefined,
     }))
 
     const { createNewAnimal } = useAnimals()
@@ -101,19 +133,36 @@ describe('useAnimals.createNewAnimal', () => {
       'owner-1',
     )
 
-    const { variables } = graphqlMock.mock.calls[0][0]
-    expect(variables.input.bloodGroup).toBe('UNKNOWN')
+    const input = animalCreateMock.mock.calls[0][0]
+    expect(input.bloodGroup).toBe('UNKNOWN')
+  })
+
+  it("relance (propage) une erreur GraphQL sans data exploitable, sans ajouter l'animal localement", async () => {
+    animalCreateMock.mockResolvedValue({
+      data: null,
+      errors: [{ message: 'Not Authorized to access createAnimal' }],
+    })
+
+    const { animals, createNewAnimal } = useAnimals()
+
+    await expect(
+      createNewAnimal(
+        { name: 'Rex', species: 'DOG', weight: 25, bloodGroup: 'A', donationFrequency: 'ASAP' },
+        'owner-1',
+      ),
+    ).rejects.toThrow()
+
+    expect(animals.value).toEqual([])
   })
 })
 
 describe('useAnimals.fetchAnimals', () => {
-  beforeEach(() => {
-    graphqlMock.mockReset()
-  })
+  beforeEach(resetAllMocks)
 
   it('charge les animaux et laisse loadError à false en cas de succès', async () => {
-    graphqlMock.mockResolvedValue({
-      data: { listAnimals: { items: [{ id: 'animal-1', name: 'Rex', birthDate: null }] } },
+    animalListMock.mockResolvedValue({
+      data: [{ id: 'animal-1', name: 'Rex', birthDate: null }],
+      errors: undefined,
     })
 
     const { animals, loadError, fetchAnimals } = useAnimals()
@@ -125,7 +174,7 @@ describe('useAnimals.fetchAnimals', () => {
   })
 
   it('bascule loadError à true et vide animals sans relancer, sur échec réseau/@auth', async () => {
-    graphqlMock.mockRejectedValue(new Error('Network error'))
+    animalListMock.mockRejectedValue(new Error('Network error'))
 
     const { animals, loadError, fetchAnimals } = useAnimals()
 
@@ -137,11 +186,21 @@ describe('useAnimals.fetchAnimals', () => {
     expect(animals.value).toEqual([])
   })
 
-  it('réinitialise loadError à false au début du prochain appel réussi', async () => {
-    graphqlMock.mockRejectedValueOnce(new Error('Network error'))
-    graphqlMock.mockResolvedValueOnce({
-      data: { listAnimals: { items: [] } },
+  it('bascule loadError à true sur une erreur GraphQL/@auth résolue (pas rejetée) par le client Gen2', async () => {
+    animalListMock.mockResolvedValue({
+      data: null,
+      errors: [{ message: 'Not Authorized to access listAnimals' }],
     })
+
+    const { loadError, fetchAnimals } = useAnimals()
+
+    await expect(fetchAnimals()).resolves.toBeUndefined()
+    expect(loadError.value).toBe(true)
+  })
+
+  it('réinitialise loadError à false au début du prochain appel réussi', async () => {
+    animalListMock.mockRejectedValueOnce(new Error('Network error'))
+    animalListMock.mockResolvedValueOnce({ data: [], errors: undefined })
 
     const { loadError, fetchAnimals } = useAnimals()
 
@@ -154,13 +213,12 @@ describe('useAnimals.fetchAnimals', () => {
 })
 
 describe('useAnimals.updateAnimalDetails', () => {
-  beforeEach(() => {
-    graphqlMock.mockReset()
-  })
+  beforeEach(resetAllMocks)
 
   it('met à jour animals localement sur succès plein', async () => {
-    graphqlMock.mockResolvedValue({
-      data: { updateAnimal: { id: 'animal-1', name: 'Rex modifié', birthDate: null } },
+    animalUpdateMock.mockResolvedValue({
+      data: { id: 'animal-1', name: 'Rex modifié', birthDate: null },
+      errors: undefined,
     })
 
     const { animals, updateAnimalDetails } = useAnimals()
@@ -172,14 +230,13 @@ describe('useAnimals.updateAnimalDetails', () => {
   })
 
   it("traite un succès partiel GraphQL (data ET errors) comme un succès, sans relancer", async () => {
-    // Amplify (aws-amplify/api) remonte ce cas comme une exception JS porteuse à la fois
-    // de `.data` et `.errors` (pas une simple réponse `{ data, errors }` retournée sans
-    // throw) -- même modélisation que `deleteAnimalById` ci-dessous.
-    const partialError = Object.assign(new Error('GraphQL error'), {
-      data: { updateAnimal: { id: 'animal-1', name: 'Rex modifié', birthDate: null } },
-      errors: [{ message: "Impossible de résoudre une relation annexe" }],
+    // Gen2 (aws-amplify/data) résout normalement avec `{ data, errors }`, y compris pour un
+    // succès partiel (relation annexe non résolue) -- plus d'exception JS porteuse d'un
+    // `.data` (pattern Gen1).
+    animalUpdateMock.mockResolvedValue({
+      data: { id: 'animal-1', name: 'Rex modifié', birthDate: null },
+      errors: [{ message: 'Impossible de résoudre une relation annexe' }],
     })
-    graphqlMock.mockRejectedValue(partialError)
 
     const { animals, updateAnimalDetails } = useAnimals()
     animals.value = [{ id: 'animal-1', name: 'Rex' }]
@@ -191,9 +248,8 @@ describe('useAnimals.updateAnimalDetails', () => {
     expect(animals.value[0].name).toBe('Rex modifié')
   })
 
-  it("relance une vraie erreur (pas de data.updateAnimal exploitable) sans modifier animals", async () => {
-    const realError = new Error('Network error')
-    graphqlMock.mockRejectedValue(realError)
+  it("relance une vraie erreur réseau/exception JS sans modifier animals", async () => {
+    animalUpdateMock.mockRejectedValue(new Error('Network error'))
 
     const { animals, updateAnimalDetails } = useAnimals()
     animals.value = [{ id: 'animal-1', name: 'Rex' }]
@@ -204,15 +260,27 @@ describe('useAnimals.updateAnimalDetails', () => {
 
     expect(animals.value[0].name).toBe('Rex')
   })
+
+  it("relance une erreur GraphQL/@auth résolue sans data exploitable, sans modifier animals", async () => {
+    animalUpdateMock.mockResolvedValue({
+      data: null,
+      errors: [{ message: 'Not Authorized to access updateAnimal' }],
+    })
+
+    const { animals, updateAnimalDetails } = useAnimals()
+    animals.value = [{ id: 'animal-1', name: 'Rex' }]
+
+    await expect(updateAnimalDetails({ id: 'animal-1', name: 'Rex modifié' })).rejects.toThrow()
+
+    expect(animals.value[0].name).toBe('Rex')
+  })
 })
 
 describe('useAnimals.deleteAnimalById', () => {
-  beforeEach(() => {
-    graphqlMock.mockReset()
-  })
+  beforeEach(resetAllMocks)
 
   it('retire animals de manière optimiste puis confirme sur succès', async () => {
-    graphqlMock.mockResolvedValue({ data: { deleteAnimal: { id: 'animal-1' } } })
+    animalDeleteMock.mockResolvedValue({ data: { id: 'animal-1' }, errors: undefined })
 
     const { animals, deleteAnimalById } = useAnimals()
     animals.value = [{ id: 'animal-1', name: 'Rex' }]
@@ -223,8 +291,7 @@ describe('useAnimals.deleteAnimalById', () => {
   })
 
   it('annule (rollback) le retrait optimiste et relance sur vraie erreur serveur', async () => {
-    const realError = new Error('Network error')
-    graphqlMock.mockRejectedValue(realError)
+    animalDeleteMock.mockRejectedValue(new Error('Network error'))
 
     const { animals, deleteAnimalById } = useAnimals()
     animals.value = [{ id: 'animal-1', name: 'Rex' }]
@@ -235,12 +302,11 @@ describe('useAnimals.deleteAnimalById', () => {
     expect(animals.value).toEqual([{ id: 'animal-1', name: 'Rex' }])
   })
 
-  it("ne fait pas de rollback sur succès partiel GraphQL (data.deleteAnimal présent malgré errors)", async () => {
-    const partialError = Object.assign(new Error('GraphQL error'), {
-      data: { deleteAnimal: { id: 'animal-1' } },
-      errors: [{ message: "Impossible de résoudre une relation annexe" }],
+  it("ne fait pas de rollback sur succès partiel GraphQL (data présent malgré errors)", async () => {
+    animalDeleteMock.mockResolvedValue({
+      data: { id: 'animal-1' },
+      errors: [{ message: 'Impossible de résoudre une relation annexe' }],
     })
-    graphqlMock.mockRejectedValue(partialError)
 
     const { animals, deleteAnimalById } = useAnimals()
     animals.value = [{ id: 'animal-1', name: 'Rex' }]
@@ -248,5 +314,19 @@ describe('useAnimals.deleteAnimalById', () => {
     await expect(deleteAnimalById('animal-1')).resolves.toBeUndefined()
 
     expect(animals.value).toEqual([])
+  })
+
+  it("fait un rollback sur une erreur GraphQL/@auth résolue sans data exploitable", async () => {
+    animalDeleteMock.mockResolvedValue({
+      data: null,
+      errors: [{ message: 'Not Authorized to access deleteAnimal' }],
+    })
+
+    const { animals, deleteAnimalById } = useAnimals()
+    animals.value = [{ id: 'animal-1', name: 'Rex' }]
+
+    await expect(deleteAnimalById('animal-1')).rejects.toThrow()
+
+    expect(animals.value).toEqual([{ id: 'animal-1', name: 'Rex' }])
   })
 })

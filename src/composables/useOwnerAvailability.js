@@ -1,8 +1,23 @@
 import { ref } from 'vue'
-import { generateClient } from 'aws-amplify/api'
+import { generateClient } from 'aws-amplify/data'
 import { getCurrentUser } from 'aws-amplify/auth'
-import { createOwnerAvailabilitySimple, deleteOwnerAvailabilitySimple } from '@/graphql/custom-mutations'
-import { listMyAvailabilities } from '@/graphql/custom-queries'
+
+// Phase 8, sous-tâche 5 (lot 1/3) : migré sur le client Gen2 (`aws-amplify/data`,
+// `client.models.OwnerAvailability.*`). Plus d'import depuis `@/graphql/custom-mutations`/
+// `@/graphql/custom-queries` -- voir le commentaire équivalent dans useAnimals.js.
+//
+// Changement de comportement le plus important de cette migration (voir aussi
+// useAnimals.js/useOwnerProfile.js/useRegistrationCompletion.js, même sous-tâche) :
+// `client.models.OwnerAvailability.*` NE LÈVE PAS d'exception sur une erreur GraphQL/@auth --
+// il résout normalement avec `{ data, errors }`. Chaque appel synthétise donc une exception
+// sur `errors` pour préserver le comportement observable Gen1 :
+// - `fetchAvailabilities()` : avalait déjà toute erreur dans son `catch` -- la synthèse
+//   retombe simplement dans ce même `catch`, rien ne change pour l'appelant.
+// - `addAvailabilityForDays()` : chaque création tourne dans `Promise.allSettled()` -- sans
+//   cette synthèse, un jour en échec `@auth` résoudrait `Promise.allSettled` en `'fulfilled'`
+//   au lieu de `'rejected'`, et casserait le compteur `succeeded`/`failed` best-effort.
+// - `removeAvailability()` : relançait déjà l'erreur à l'appelant (`AvailabilityView.vue`,
+//   correction R-03/Phase 7.2) -- la synthèse préserve cette relance.
 
 export function useOwnerAvailability() {
   const client = generateClient()
@@ -14,15 +29,15 @@ export function useOwnerAvailability() {
     try {
       const { userId } = await getCurrentUser()
 
-      const { data } = await client.graphql({
-        query: listMyAvailabilities,
-        variables: {
-          filter: { ownerID: { eq: userId } },
-        },
-        authMode: 'userPool',
+      const { data, errors } = await client.models.OwnerAvailability.list({
+        filter: { ownerID: { eq: userId } },
       })
 
-      availabilities.value = data.listOwnerAvailabilities.items.sort((a, b) => {
+      if (errors) {
+        throw Object.assign(new Error('Erreur GraphQL listOwnerAvailabilities'), { errors })
+      }
+
+      availabilities.value = (data || []).sort((a, b) => {
         const dayA = a.dayOfWeek === 0 ? 7 : a.dayOfWeek
         const dayB = b.dayOfWeek === 0 ? 7 : b.dayOfWeek
         return dayA - dayB
@@ -52,13 +67,20 @@ export function useOwnerAvailability() {
     const { userId } = await getCurrentUser()
 
     const results = await Promise.allSettled(
-      days.map((day) =>
-        client.graphql({
-          query: createOwnerAvailabilitySimple,
-          variables: { input: { ownerID: userId, dayOfWeek: day, startTime: start, endTime: end } },
-          authMode: 'userPool',
-        }),
-      ),
+      days.map(async (day) => {
+        const { data, errors } = await client.models.OwnerAvailability.create({
+          ownerID: userId,
+          dayOfWeek: day,
+          startTime: start,
+          endTime: end,
+        })
+
+        if (errors) {
+          throw Object.assign(new Error('Erreur GraphQL createOwnerAvailability'), { errors })
+        }
+
+        return data
+      }),
     )
 
     results
@@ -73,12 +95,11 @@ export function useOwnerAvailability() {
 
   const removeAvailability = async (id) => {
     try {
-      // 👇 3. On utilise la mutation SIMPLE pour la suppression aussi
-      await client.graphql({
-        query: deleteOwnerAvailabilitySimple,
-        variables: { input: { id } },
-        authMode: 'userPool',
-      })
+      const { errors } = await client.models.OwnerAvailability.delete({ id })
+
+      if (errors) {
+        throw Object.assign(new Error('Erreur GraphQL deleteOwnerAvailability'), { errors })
+      }
 
       availabilities.value = availabilities.value.filter((a) => a.id !== id)
     } catch (e) {
