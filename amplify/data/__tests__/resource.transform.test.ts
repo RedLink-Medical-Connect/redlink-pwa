@@ -182,6 +182,45 @@ describe('amplify/data/resource.ts — Animal.isValidatedDonor / validationExpir
   )
 })
 
+describe('amplify/data/resource.ts — Animal, garde-fou de régression sur le reste du type (ex-schema.test.js)', () => {
+  // Revue QA (sous-tâche 6, nettoyage) : ce garde-fou Gen1 n'avait pas été porté -- sans lui,
+  // un futur `.authorization()` accidentellement ajouté sur un champ saisi par l'Owner (name,
+  // breed, weight...) ou situé après validationExpiresAt (ownerID, ownerProfile, missions...)
+  // passerait toute la suite Gen2 sans être détecté. Même principe que Gen1 : on retire du
+  // texte du type les seuls blocs `@auth` légitimes (bloodGroup ; lastDonationDate/
+  // donationFrequency/isValidatedDonor/validationExpiresAt, contigus) et on vérifie qu'aucun
+  // `@auth(` ne subsiste ailleurs. Part de `name:` pour exclure le `@auth` de niveau TYPE
+  // (`type Animal @model @auth(rules: [...])`), légitime et hors du périmètre de ce test.
+  it("aucun champ hors bloodGroup/lastDonationDate/isValidatedDonor/validationExpiresAt (name, weight, isVaccinated, sex, breed, birthDate, donationFrequency, isSterilized, ownerID, ownerProfile, missions...) ne porte de @auth au niveau champ", () => {
+    const animalType = extractType('Animal')
+    const nameFieldIdx = animalType.indexOf('name: String!')
+    const bloodGroupBlock = extractFieldAuthBlock(animalType, 'bloodGroup')
+    const lastDonationDateBlock = extractFieldAuthBlock(animalType, 'lastDonationDate')
+    const isValidatedDonorBlock = extractFieldAuthBlock(animalType, 'isValidatedDonor')
+    const validationExpiresAtBlock = extractFieldAuthBlock(animalType, 'validationExpiresAt')
+
+    const bloodGroupBlockStart = animalType.indexOf(bloodGroupBlock)
+    const bloodGroupBlockEnd = bloodGroupBlockStart + bloodGroupBlock.length
+    const lastDonationDateBlockStart = animalType.indexOf(lastDonationDateBlock)
+    const validationExpiresAtBlockEnd =
+      animalType.indexOf(validationExpiresAtBlock) + validationExpiresAtBlock.length
+
+    // Vérifie l'hypothèse d'ordonnancement plutôt que de la supposer silencieusement (comme
+    // Gen1) : bloodGroup précède weight->isVaccinated, PUIS lastDonationDate/donationFrequency/
+    // isValidatedDonor/validationExpiresAt restent contigus entre eux.
+    expect(bloodGroupBlockStart).toBeGreaterThan(-1)
+    expect(bloodGroupBlockEnd).toBeLessThan(lastDonationDateBlockStart)
+    expect(animalType.indexOf(isValidatedDonorBlock)).toBeGreaterThan(lastDonationDateBlockStart)
+
+    const restOfType =
+      animalType.slice(nameFieldIdx, bloodGroupBlockStart) +
+      animalType.slice(bloodGroupBlockEnd, lastDonationDateBlockStart) +
+      animalType.slice(validationExpiresAtBlockEnd)
+
+    expect(restOfType).not.toContain('@auth(')
+  })
+})
+
 describe('amplify/data/resource.ts — Animal.bloodGroup (équivalent Gen2 ADR-0006, ex-schema.test.js)', () => {
   const animalType = extractType('Animal')
 
@@ -304,6 +343,10 @@ describe('amplify/data/resource.ts — Mission @auth (équivalent Gen2 ADR-0004,
     expect(missionType).toContain('status: MissionStatus!\n')
     expect(missionType).toContain('requestID: ID!\n')
     expect(missionType).toContain('animalID: ID!\n')
+    // Revue QA (sous-tâche 6, nettoyage) : le titre du test citait déjà `appointmentDatetime`
+    // mais le corps ne le vérifiait pas -- ajouté pour que le test tienne réellement ce qu'il
+    // annonce (le champ Gen1 équivalent n'avait pas non plus de @auth au niveau champ).
+    expect(missionType).toContain('appointmentDatetime: AWSDateTime\n')
   })
 
   it("la règle de type Veterinarians garde 'update' -- rend une re-clôture (updateMission sur une Mission déjà COMPLETED/NO_SHOW) inoffensive côté serveur", () => {
