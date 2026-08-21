@@ -1,7 +1,7 @@
 import { ref } from 'vue'
-import { generateClient } from 'aws-amplify/api'
+import { generateClient } from 'aws-amplify/data'
 import { getCurrentUser } from 'aws-amplify/auth'
-import { getVeterinarian, getClinic } from '@/graphql/queries'
+import { throwIfGraphqlError } from '@/services/graphql-error-service'
 
 /**
  * Phase 6.7 (CdC §2.4) : indicateurs tableau de bord vétérinaire, en lecture seule côté UI
@@ -9,6 +9,15 @@ import { getVeterinarian, getClinic } from '@/graphql/queries'
  * `useMissionClosure.js`). Résout son propre `clinicID` (même pattern que `fetchClinicId`
  * dans `useClinicRequest.js`) plutôt que de le recevoir en paramètre — cohérent avec le reste
  * des composables de ce repo, aucun ne reçoit ses dépendances en injection aujourd'hui.
+ *
+ * Phase 8, sous-tâche 5 (lot 2/3) : migré sur le client Gen2 (`aws-amplify/data`,
+ * `client.models.Veterinarian.get()`/`client.models.Clinic.get()`) -- des `.get()` directs,
+ * `getVeterinarian`/`getClinic` (Gen1, `@/graphql/queries`) ne sélectionnaient ici que des
+ * champs scalaires (`clinicID`, `transfusionsDone`, `donorOwnersCount`), déjà couverts par
+ * le `selectionSet` par défaut du client Gen2 -- pas besoin d'un `selectionSet` explicite
+ * (aucune relation imbriquée lue par ce composable, contrairement à `useClinicDonors.js`/
+ * `useClinicSettings.js`). Sur le changement de comportement d'erreur Gen1 -> Gen2 et
+ * `throwIfGraphqlError` ci-dessous : voir le JSDoc de `src/services/graphql-error-service.js`.
  */
 export function useClinicStats() {
   const client = generateClient()
@@ -25,23 +34,21 @@ export function useClinicStats() {
     try {
       const { userId } = await getCurrentUser()
 
-      const { data: vetData } = await client.graphql({
-        query: getVeterinarian,
-        variables: { id: userId },
-        authMode: 'userPool',
+      const { data: vetData, errors: vetErrors } = await client.models.Veterinarian.get({
+        id: userId,
       })
 
-      const clinicID = vetData.getVeterinarian?.clinicID
+      throwIfGraphqlError(vetErrors, 'getVeterinarian')
+
+      const clinicID = vetData?.clinicID
       if (!clinicID) throw new Error('Clinique introuvable pour ce vétérinaire')
 
-      const { data } = await client.graphql({
-        query: getClinic,
-        variables: { id: clinicID },
-        authMode: 'userPool',
-      })
+      const { data, errors } = await client.models.Clinic.get({ id: clinicID })
 
-      transfusionsDone.value = data.getClinic?.transfusionsDone ?? 0
-      donorOwnersCount.value = data.getClinic?.donorOwnersCount ?? 0
+      throwIfGraphqlError(errors, 'getClinic')
+
+      transfusionsDone.value = data?.transfusionsDone ?? 0
+      donorOwnersCount.value = data?.donorOwnersCount ?? 0
     } catch (e) {
       console.error('Erreur récupération des indicateurs clinique:', e)
       loadError.value = true

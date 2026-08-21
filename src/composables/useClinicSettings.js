@@ -1,17 +1,31 @@
 import { ref } from 'vue'
-import { generateClient } from 'aws-amplify/api'
+import { generateClient } from 'aws-amplify/data'
 import { deleteUser, getCurrentUser } from 'aws-amplify/auth'
-import {
-  updateClinic,
-} from '@/graphql/mutations'
 import { useAuthStore } from '@/stores/auth'
 import { useRouter } from 'vue-router'
-import { getVetWithClinic, veterinariansByClinicIDSimple } from '@/graphql/custom-queries.js'
-import {
-  deleteClinicSimple,
-  deleteVeterinarianSimple,
-  updateVeterinarianSimple,
-} from '@/graphql/custom-mutations.js'
+import { throwIfGraphqlError } from '@/services/graphql-error-service'
+
+// Phase 8, sous-tâche 5 (lot 2/3) : migré sur le client Gen2 (`aws-amplify/data`,
+// `client.models.Veterinarian.*`/`client.models.Clinic.*`). Plus d'import depuis
+// `@/graphql/mutations`/`@/graphql/custom-queries`/`@/graphql/custom-mutations` -- voir le
+// commentaire équivalent dans useClinicRequest.js.
+//
+// `getVetWithClinic` (Gen1) sélectionnait explicitement les 8 champs de `Clinic` -- son
+// équivalent Gen2 est l'option `selectionSet` (confirmé via context7,
+// `/aws-amplify/amplify-data`, "Query Related Data with Selection Set"), voir
+// `fetchSettings()` ci-dessous. Contrairement à `useClinicDonors.fetchClinicContext()` (qui
+// ne lit que `clinic.latitude`/`clinic.longitude` et restreint son `selectionSet` en
+// conséquence, voir son commentaire dédié), ce composable a réellement besoin de TOUS les
+// champs de `Clinic` pour peupler `clinicForm` -- le `selectionSet` ci-dessous reproduit
+// donc exactement les 8 champs que `getVetWithClinic` sélectionnait.
+//
+// Sur le changement de comportement d'erreur Gen1 -> Gen2 (`client.models.X.*` résout
+// `{ data, errors }` au lieu de lever une exception) et sa traduction via
+// `throwIfGraphqlError` ci-dessous : voir le JSDoc de `src/services/graphql-error-service.js`.
+// `fetchSettings()`/`updateClinicDetails()`/`updateVetDetails()` n'avaient déjà AUCUN
+// `catch` en Gen1 (juste un `try/finally` pour piloter `isLoading`/`isSaving`) --
+// `throwIfGraphqlError` continue de laisser l'exception se propager telle quelle à
+// l'appelant (SettingsView.vue), comportement inchangé.
 
 export function useClinicSettings() {
   const client = generateClient()
@@ -48,13 +62,31 @@ export function useClinicSettings() {
 
       if (!userId) throw new Error("Impossible de récupérer l'ID utilisateur")
 
-      const { data } = await client.graphql({
-        query: getVetWithClinic,
-        variables: { id: userId },
-        authMode: 'userPool',
-      })
+      const { data, errors } = await client.models.Veterinarian.get(
+        { id: userId },
+        {
+          selectionSet: [
+            'id',
+            'firstname',
+            'lastname',
+            'email',
+            'clinicID',
+            'clinic.id',
+            'clinic.name',
+            'clinic.rpps',
+            'clinic.email',
+            'clinic.phone',
+            'clinic.address',
+            'clinic.latitude',
+            'clinic.longitude',
+            'clinic.hasEmergencyService',
+          ],
+        },
+      )
 
-      const vet = data.getVeterinarian
+      throwIfGraphqlError(errors, 'getVeterinarian')
+
+      const vet = data
 
       if (vet) {
         vetId.value = vet.id
@@ -100,11 +132,9 @@ export function useClinicSettings() {
         hasEmergencyService: clinicForm.value.hasEmergencyService,
       }
 
-      await client.graphql({
-        query: updateClinic,
-        variables: { input },
-        authMode: 'userPool',
-      })
+      const { errors } = await client.models.Clinic.update(input)
+
+      throwIfGraphqlError(errors, 'updateClinic')
     } finally {
       isSaving.value = false
     }
@@ -121,11 +151,9 @@ export function useClinicSettings() {
         email: vetForm.value.email,
       }
 
-      await client.graphql({
-        query: updateVeterinarianSimple,
-        variables: { input },
-        authMode: 'userPool',
-      })
+      const { errors } = await client.models.Veterinarian.update(input)
+
+      throwIfGraphqlError(errors, 'updateVeterinarian')
     } finally {
       isSaving.value = false
     }
@@ -162,12 +190,13 @@ export function useClinicSettings() {
       let clinicHasOtherVets = false
       if (clinicId.value) {
         try {
-          const { data } = await client.graphql({
-            query: veterinariansByClinicIDSimple,
-            variables: { clinicID: clinicId.value },
-            authMode: 'userPool',
+          const { data, errors } = await client.models.Veterinarian.list({
+            filter: { clinicID: { eq: clinicId.value } },
           })
-          const items = data.veterinariansByClinicID?.items || []
+
+          throwIfGraphqlError(errors, 'veterinariansByClinicID')
+
+          const items = data || []
           clinicHasOtherVets = items.some((v) => v && v.id !== vetId.value)
         } catch (guardError) {
           clinicHasOtherVets = true
@@ -180,19 +209,19 @@ export function useClinicSettings() {
 
       try {
         if (vetId.value) {
-          await client.graphql({
-            query: deleteVeterinarianSimple,
-            variables: { input: { id: vetId.value } },
-            authMode: 'userPool',
+          const { errors: vetDeleteErrors } = await client.models.Veterinarian.delete({
+            id: vetId.value,
           })
+
+          throwIfGraphqlError(vetDeleteErrors, 'deleteVeterinarian')
         }
 
         if (clinicId.value && !clinicHasOtherVets) {
-          await client.graphql({
-            query: deleteClinicSimple,
-            variables: { input: { id: clinicId.value } },
-            authMode: 'userPool',
+          const { errors: clinicDeleteErrors } = await client.models.Clinic.delete({
+            id: clinicId.value,
           })
+
+          throwIfGraphqlError(clinicDeleteErrors, 'deleteClinic')
         }
       } catch (dbError) {
         console.error(

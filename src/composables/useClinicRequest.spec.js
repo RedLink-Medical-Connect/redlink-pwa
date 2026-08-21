@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { generateClient } from 'aws-amplify/api'
 import { getCurrentUser } from 'aws-amplify/auth'
 import { Species } from '@/constants/enums'
 import { useClinicRequests } from '@/composables/useClinicRequest'
@@ -9,9 +8,28 @@ import { useClinicRequests } from '@/composables/useClinicRequest'
 // (`speciesMap[...] || 'DOG'`). In a blood-matching context that silently creates a Request
 // for the wrong species, which is a data-integrity risk, not a cosmetic bug. It must now throw
 // instead, and the previously-supported variants must keep mapping correctly.
+//
+// Phase 8, sous-tâche 5 (lot 2/3) : useClinicRequest.js migré sur le client Gen2
+// (`aws-amplify/data`, `client.models.Veterinarian.get()`/`client.models.Request.create()`/
+// `.list()`) -- mock reconstruit sur `{ data, errors }` par méthode de modèle plutôt que
+// `client.graphql({ query, variables })`. Assertions métier (mapping d'espèce, format des
+// logs d'erreur, loadError) inchangées.
 
-vi.mock('aws-amplify/api', () => ({
-  generateClient: vi.fn(),
+const vetGetMock = vi.fn()
+const requestCreateMock = vi.fn()
+const requestListMock = vi.fn()
+
+vi.mock('aws-amplify/data', () => ({
+  generateClient: () => ({
+    models: {
+      Veterinarian: { get: (...args) => vetGetMock(...args) },
+      Request: {
+        create: (...args) => requestCreateMock(...args),
+        list: (...args) => requestListMock(...args),
+        update: vi.fn(),
+      },
+    },
+  }),
 }))
 
 vi.mock('aws-amplify/auth', () => ({
@@ -23,17 +41,11 @@ vi.mock('vue-router', () => ({
 }))
 
 describe('useClinicRequests > createNewRequest species mapping', () => {
-  let mockGraphql
-
   beforeEach(async () => {
     vi.clearAllMocks()
-    mockGraphql = vi.fn()
-    generateClient.mockReturnValue({ graphql: mockGraphql })
     getCurrentUser.mockResolvedValue({ userId: 'vet-cognito-id' })
-    // First call in any createNewRequest flow is always fetchClinicId's getVeterinarian query.
-    mockGraphql.mockResolvedValueOnce({
-      data: { getVeterinarian: { clinicID: 'clinic-1' } },
-    })
+    // First call in any createNewRequest flow is always fetchClinicId's Veterinarian.get().
+    vetGetMock.mockResolvedValue({ data: { id: 'vet-cognito-id', clinicID: 'clinic-1' }, errors: undefined })
   })
 
   const baseFormData = {
@@ -49,8 +61,9 @@ describe('useClinicRequests > createNewRequest species mapping', () => {
       createNewRequest({ ...baseFormData, species: 'lapin' }),
     ).rejects.toThrow(/Espèce non reconnue/)
 
-    // Only the fetchClinicId lookup should have happened — never the createRequestSimple call.
-    expect(mockGraphql).toHaveBeenCalledTimes(1)
+    // Only the fetchClinicId lookup should have happened — never Request.create().
+    expect(vetGetMock).toHaveBeenCalledTimes(1)
+    expect(requestCreateMock).not.toHaveBeenCalled()
   })
 
   it('throws for an empty/undefined species instead of defaulting to DOG', async () => {
@@ -59,7 +72,8 @@ describe('useClinicRequests > createNewRequest species mapping', () => {
     await expect(
       createNewRequest({ ...baseFormData, species: undefined }),
     ).rejects.toThrow(/Espèce non reconnue/)
-    expect(mockGraphql).toHaveBeenCalledTimes(1)
+    expect(vetGetMock).toHaveBeenCalledTimes(1)
+    expect(requestCreateMock).not.toHaveBeenCalled()
   })
 
   it.each([
@@ -72,18 +86,18 @@ describe('useClinicRequests > createNewRequest species mapping', () => {
     ['chat', Species.CAT],
     ['Chat', Species.CAT],
   ])('maps species variant "%s" to %s and proceeds to create the request', async (input, expected) => {
-    // 2nd call: createRequestSimple. 3rd call: the fetchRequests() refresh createNewRequest
-    // triggers internally after a successful create.
-    mockGraphql.mockResolvedValueOnce({ data: { createRequest: { id: 'req-1' } } })
-    mockGraphql.mockResolvedValueOnce({ data: { listRequests: { items: [] } } })
+    requestCreateMock.mockResolvedValueOnce({ data: { id: 'req-1', status: 'OPEN' }, errors: undefined })
+    requestListMock.mockResolvedValueOnce({ data: [], errors: undefined })
 
     const { createNewRequest } = useClinicRequests()
 
     await createNewRequest({ ...baseFormData, species: input })
 
-    expect(mockGraphql).toHaveBeenCalledTimes(3)
-    const [, createCall] = mockGraphql.mock.calls
-    expect(createCall[0].variables.input.requiredSpecies).toBe(expected)
+    expect(vetGetMock).toHaveBeenCalledTimes(1)
+    expect(requestCreateMock).toHaveBeenCalledTimes(1)
+    expect(requestListMock).toHaveBeenCalledTimes(1)
+    const [createInput] = requestCreateMock.mock.calls[0]
+    expect(createInput.requiredSpecies).toBe(expected)
   })
 })
 
@@ -94,7 +108,6 @@ describe('useClinicRequests > createNewRequest species mapping', () => {
 // debug `console.log` calls (with emoji, full input payload) that used to run on every request
 // creation — a PII risk in CloudWatch (roadmap Phase -1.C).
 describe('useClinicRequests > createNewRequest error logging (R-05, R-17)', () => {
-  let mockGraphql
   let consoleErrorSpy
   let consoleLogSpy
 
@@ -106,12 +119,8 @@ describe('useClinicRequests > createNewRequest error logging (R-05, R-17)', () =
 
   beforeEach(() => {
     vi.clearAllMocks()
-    mockGraphql = vi.fn()
-    generateClient.mockReturnValue({ graphql: mockGraphql })
     getCurrentUser.mockResolvedValue({ userId: 'vet-cognito-id' })
-    mockGraphql.mockResolvedValueOnce({
-      data: { getVeterinarian: { clinicID: 'clinic-1' } },
-    })
+    vetGetMock.mockResolvedValue({ data: { id: 'vet-cognito-id', clinicID: 'clinic-1' }, errors: undefined })
     consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
   })
@@ -125,7 +134,7 @@ describe('useClinicRequests > createNewRequest error logging (R-05, R-17)', () =
     const graphqlErrorWithEmptyErrors = Object.assign(new Error('création refusée'), {
       errors: [],
     })
-    mockGraphql.mockRejectedValueOnce(graphqlErrorWithEmptyErrors)
+    requestCreateMock.mockRejectedValueOnce(graphqlErrorWithEmptyErrors)
 
     const { createNewRequest } = useClinicRequests()
 
@@ -141,7 +150,7 @@ describe('useClinicRequests > createNewRequest error logging (R-05, R-17)', () =
     const graphqlError = {
       errors: [{ message: 'Espèce invalide côté serveur', errorType: 'ValidationException' }],
     }
-    mockGraphql.mockRejectedValueOnce(graphqlError)
+    requestCreateMock.mockRejectedValueOnce(graphqlError)
 
     const { createNewRequest } = useClinicRequests()
 
@@ -154,9 +163,27 @@ describe('useClinicRequests > createNewRequest error logging (R-05, R-17)', () =
     expect(consoleErrorSpy).toHaveBeenCalledWith("👉 Type d'erreur :", 'ValidationException')
   })
 
+  it('surfaces a GraphQL/@auth failure resolved as `{ data: null, errors }` the same way as a thrown exception', async () => {
+    requestCreateMock.mockResolvedValueOnce({
+      data: null,
+      errors: [{ message: 'Not Authorized to access createRequest', errorType: 'Unauthorized' }],
+    })
+
+    const { createNewRequest } = useClinicRequests()
+
+    await expect(createNewRequest({ ...baseFormData, species: 'dog' })).rejects.toThrow(
+      'Erreur GraphQL createRequest',
+    )
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      '👉 Message Backend :',
+      'Not Authorized to access createRequest',
+    )
+  })
+
   it('never calls console.log (debug logs removed) on a successful creation', async () => {
-    mockGraphql.mockResolvedValueOnce({ data: { createRequest: { id: 'req-1' } } })
-    mockGraphql.mockResolvedValueOnce({ data: { listRequests: { items: [] } } })
+    requestCreateMock.mockResolvedValueOnce({ data: { id: 'req-1', status: 'OPEN' }, errors: undefined })
+    requestListMock.mockResolvedValueOnce({ data: [], errors: undefined })
 
     const { createNewRequest } = useClinicRequests()
     await createNewRequest({ ...baseFormData, species: 'dog' })
@@ -170,20 +197,14 @@ describe('useClinicRequests > createNewRequest error logging (R-05, R-17)', () =
 // by useClinicHistory.js (HistoryView.vue), purely additive to RequestsView.vue (which
 // doesn't destructure it, see git diff for this branch).
 describe('useClinicRequests > fetchRequests loadError', () => {
-  let mockGraphql
-
   beforeEach(() => {
     vi.clearAllMocks()
-    mockGraphql = vi.fn()
-    generateClient.mockReturnValue({ graphql: mockGraphql })
     getCurrentUser.mockResolvedValue({ userId: 'vet-cognito-id' })
   })
 
-  it('sets loadError to true when the listRequestsByClinic call fails after resolving clinicId', async () => {
-    mockGraphql.mockResolvedValueOnce({
-      data: { getVeterinarian: { clinicID: 'clinic-1' } },
-    })
-    mockGraphql.mockRejectedValueOnce(new Error('network down'))
+  it('sets loadError to true when the Request.list() call fails after resolving clinicId', async () => {
+    vetGetMock.mockResolvedValueOnce({ data: { id: 'vet-cognito-id', clinicID: 'clinic-1' }, errors: undefined })
+    requestListMock.mockRejectedValueOnce(new Error('network down'))
 
     const { fetchRequests, loadError } = useClinicRequests()
     expect(loadError.value).toBe(false)
@@ -194,21 +215,20 @@ describe('useClinicRequests > fetchRequests loadError', () => {
   })
 
   it('resets loadError to false at the start of the next successful fetch', async () => {
-    mockGraphql.mockResolvedValueOnce({
-      data: { getVeterinarian: { clinicID: 'clinic-1' } },
-    })
-    mockGraphql.mockRejectedValueOnce(new Error('network down'))
+    vetGetMock.mockResolvedValueOnce({ data: { id: 'vet-cognito-id', clinicID: 'clinic-1' }, errors: undefined })
+    requestListMock.mockRejectedValueOnce(new Error('network down'))
 
     const { fetchRequests, loadError } = useClinicRequests()
     await fetchRequests()
     expect(loadError.value).toBe(true)
 
     // clinicId is memoized on the composable instance (fetchClinicId()), so the retry only
-    // issues the listRequestsByClinic call, not a second getVeterinarian lookup.
-    mockGraphql.mockResolvedValueOnce({ data: { listRequests: { items: [] } } })
+    // issues the Request.list() call, not a second Veterinarian.get() lookup.
+    requestListMock.mockResolvedValueOnce({ data: [], errors: undefined })
     await fetchRequests()
 
     expect(loadError.value).toBe(false)
+    expect(vetGetMock).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -220,13 +240,10 @@ describe('useClinicRequests > fetchRequests loadError', () => {
 // pattern as fetchClinicContext() in useClinicDonors.js): a thrown error now propagates
 // straight into fetchRequests()'s own try/catch, which is the one that sets loadError.
 describe('useClinicRequests > fetchRequests / fetchClinicId error vs. "no clinic" distinction (R-12)', () => {
-  let mockGraphql
   let consoleErrorSpy
 
   beforeEach(() => {
     vi.clearAllMocks()
-    mockGraphql = vi.fn()
-    generateClient.mockReturnValue({ graphql: mockGraphql })
     getCurrentUser.mockResolvedValue({ userId: 'vet-cognito-id' })
     consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
   })
@@ -235,24 +252,22 @@ describe('useClinicRequests > fetchRequests / fetchClinicId error vs. "no clinic
     consoleErrorSpy.mockRestore()
   })
 
-  it('sets loadError to true (and does not just show an empty list) when getVeterinarian itself fails', async () => {
-    mockGraphql.mockRejectedValueOnce(new Error('réseau : timeout'))
+  it('sets loadError to true (and does not just show an empty list) when Veterinarian.get() itself fails', async () => {
+    vetGetMock.mockRejectedValueOnce(new Error('réseau : timeout'))
 
     const { fetchRequests, requests, loadError } = useClinicRequests()
 
     await fetchRequests()
 
     expect(loadError.value).toBe(true)
-    // Only the failed getVeterinarian lookup was attempted — listRequestsByClinic never
-    // runs without a resolved clinicId.
-    expect(mockGraphql).toHaveBeenCalledTimes(1)
+    // Only the failed Veterinarian.get() lookup was attempted — Request.list() never runs
+    // without a resolved clinicId.
+    expect(requestListMock).not.toHaveBeenCalled()
     expect(requests.value).toEqual([])
   })
 
-  it('keeps loadError false (legitimate "no clinic yet" case) when getVeterinarian succeeds but the Veterinarian has no clinicID', async () => {
-    mockGraphql.mockResolvedValueOnce({
-      data: { getVeterinarian: { clinicID: null } },
-    })
+  it('keeps loadError false (legitimate "no clinic yet" case) when Veterinarian.get() succeeds but the Veterinarian has no clinicID', async () => {
+    vetGetMock.mockResolvedValueOnce({ data: { id: 'vet-cognito-id', clinicID: null }, errors: undefined })
 
     const { fetchRequests, requests, loadError } = useClinicRequests()
 
@@ -260,13 +275,13 @@ describe('useClinicRequests > fetchRequests / fetchClinicId error vs. "no clinic
 
     expect(loadError.value).toBe(false)
     expect(requests.value).toEqual([])
-    // No listRequestsByClinic call either — this is the same "no clinic" short-circuit as
+    // No Request.list() call either — this is the same "no clinic" short-circuit as
     // before, just no longer confused with a real error.
-    expect(mockGraphql).toHaveBeenCalledTimes(1)
+    expect(requestListMock).not.toHaveBeenCalled()
   })
 
-  it('keeps loadError false when getVeterinarian resolves to no Veterinarian record at all', async () => {
-    mockGraphql.mockResolvedValueOnce({ data: { getVeterinarian: null } })
+  it('keeps loadError false when Veterinarian.get() resolves to no Veterinarian record at all', async () => {
+    vetGetMock.mockResolvedValueOnce({ data: null, errors: undefined })
 
     const { fetchRequests, loadError } = useClinicRequests()
 

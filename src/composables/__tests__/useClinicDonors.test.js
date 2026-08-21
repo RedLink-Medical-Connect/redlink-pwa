@@ -5,12 +5,27 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 // une ligne par (Animal, Owner), filtrée aux seuls Validated Donor courants
 // (isValidatedDonor(), eligibility-service.js), avec distanceKM calculée entre la clinique
 // et l'Owner.
+//
+// Phase 8, sous-tâche 5 (lot 2/3) : useClinicDonors.js migré sur le client Gen2
+// (`aws-amplify/data`, `client.models.Veterinarian.get()` avec `selectionSet` +
+// `client.models.ClinicOwnerRelation.list()` avec `selectionSet`) -- mock reconstruit sur
+// `{ data, errors }` par méthode de modèle. `ownerProfile.animals` est désormais un
+// tableau direct (`RestoreArrays`, cf. commentaire dans useClinicDonors.js), plus
+// enveloppé dans `{ items: [...] }` comme le faisait la query Gen1
+// (`listClinicDonorsByClinicID`) -- `buildOwner()` ci-dessous reflète ce nouveau shape.
+// Assertions métier (flattening, Validated Donor, distanceKM, loadError) inchangées.
 
-const graphqlMock = vi.fn()
+const vetGetMock = vi.fn()
+const relationListMock = vi.fn()
 const getCurrentUserMock = vi.fn()
 
-vi.mock('aws-amplify/api', () => ({
-  generateClient: () => ({ graphql: graphqlMock }),
+vi.mock('aws-amplify/data', () => ({
+  generateClient: () => ({
+    models: {
+      Veterinarian: { get: (...args) => vetGetMock(...args) },
+      ClinicOwnerRelation: { list: (...args) => relationListMock(...args) },
+    },
+  }),
 }))
 
 vi.mock('aws-amplify/auth', () => ({
@@ -18,7 +33,6 @@ vi.mock('aws-amplify/auth', () => ({
 }))
 
 import { useClinicDonors } from '@/composables/useClinicDonors'
-import { getVetWithClinic, listClinicDonorsByClinicID } from '@/graphql/custom-queries'
 import { calculateDistance } from '@/services/eligibility-service'
 
 const buildAnimal = (overrides = {}) => ({
@@ -41,42 +55,45 @@ const buildOwner = (overrides = {}) => ({
   address: '1 rue de la Paix',
   latitude: 45.75,
   longitude: 4.85,
-  animals: { items: [] },
+  animals: [],
   ...overrides,
 })
 
 /**
- * Mock GraphQL réutilisé par les tests de ce fichier : gère GetVetWithClinic (résolution
- * du contexte clinique) puis ListClinicDonorsByClinicID (l'annuaire lui-même).
+ * Mock du client Gen2 réutilisé par les tests de ce fichier : gère
+ * `Veterinarian.get()` (résolution du contexte clinique, avec `selectionSet`) puis
+ * `ClinicOwnerRelation.list()` (l'annuaire lui-même, avec `selectionSet`).
  */
-function mockGraphql({ vetClinic = { latitude: 45.75, longitude: 4.8 }, relations = [] } = {}) {
+function mockClient({ vetClinic = { latitude: 45.75, longitude: 4.8 }, relations = [] } = {}) {
   getCurrentUserMock.mockResolvedValue({ userId: 'vet-1' })
-  graphqlMock.mockImplementation(async ({ query, variables }) => {
-    if (query.includes('GetVetWithClinic')) {
-      if (!vetClinic) {
-        return { data: { getVeterinarian: { id: 'vet-1', clinicID: null, clinic: null } } }
-      }
-      return {
-        data: {
-          getVeterinarian: {
-            id: 'vet-1',
-            clinicID: 'clinic-1',
-            clinic: { id: 'clinic-1', ...vetClinic },
-          },
-        },
-      }
+
+  vetGetMock.mockImplementation(async ({ id }, options) => {
+    expect(id).toBe('vet-1')
+    expect(options?.selectionSet).toEqual(
+      expect.arrayContaining(['clinicID', 'clinic.latitude', 'clinic.longitude']),
+    )
+    if (!vetClinic) {
+      return { data: { id: 'vet-1', clinicID: null, clinic: null }, errors: undefined }
     }
-    if (query.includes('ListClinicDonorsByClinicID')) {
-      expect(variables).toEqual({ clinicID: 'clinic-1' })
-      return { data: { clinicOwnerRelationsByClinicID: { items: relations } } }
+    return {
+      data: { id: 'vet-1', clinicID: 'clinic-1', clinic: { id: 'clinic-1', ...vetClinic } },
+      errors: undefined,
     }
-    throw new Error(`Unexpected graphql call in test: ${query.slice(0, 60)}`)
+  })
+
+  relationListMock.mockImplementation(async ({ filter, selectionSet }) => {
+    expect(filter).toEqual({ clinicID: { eq: 'clinic-1' } })
+    expect(selectionSet).toEqual(
+      expect.arrayContaining(['ownerID', 'ownerProfile.animals.bloodGroup']),
+    )
+    return { data: relations, errors: undefined }
   })
 }
 
 describe('useClinicDonors.fetchDonors', () => {
   beforeEach(() => {
-    graphqlMock.mockReset()
+    vetGetMock.mockReset()
+    relationListMock.mockReset()
     getCurrentUserMock.mockReset()
   })
 
@@ -85,12 +102,12 @@ describe('useClinicDonors.fetchDonors', () => {
   })
 
   it('exclut un Animal non Validated Donor (isValidatedDonor: false)', async () => {
-    mockGraphql({
+    mockClient({
       relations: [
         {
           ownerID: 'owner-1',
           ownerProfile: buildOwner({
-            animals: { items: [buildAnimal({ isValidatedDonor: false })] },
+            animals: [buildAnimal({ isValidatedDonor: false })],
           }),
         },
       ],
@@ -103,16 +120,14 @@ describe('useClinicDonors.fetchDonors', () => {
   })
 
   it('exclut un Animal dont la validation a expiré (isValidatedDonor: true mais validationExpiresAt dans le passé)', async () => {
-    mockGraphql({
+    mockClient({
       relations: [
         {
           ownerID: 'owner-1',
           ownerProfile: buildOwner({
-            animals: {
-              items: [
-                buildAnimal({ isValidatedDonor: true, validationExpiresAt: '2020-01-01T00:00:00.000Z' }),
-              ],
-            },
+            animals: [
+              buildAnimal({ isValidatedDonor: true, validationExpiresAt: '2020-01-01T00:00:00.000Z' }),
+            ],
           }),
         },
       ],
@@ -125,17 +140,15 @@ describe('useClinicDonors.fetchDonors', () => {
   })
 
   it('un Owner avec 2 Animals Validated Donor produit 2 lignes (table animal-centrique)', async () => {
-    mockGraphql({
+    mockClient({
       relations: [
         {
           ownerID: 'owner-1',
           ownerProfile: buildOwner({
-            animals: {
-              items: [
-                buildAnimal({ id: 'animal-1', name: 'Rex' }),
-                buildAnimal({ id: 'animal-2', name: 'Milo' }),
-              ],
-            },
+            animals: [
+              buildAnimal({ id: 'animal-1', name: 'Rex' }),
+              buildAnimal({ id: 'animal-2', name: 'Milo' }),
+            ],
           }),
         },
       ],
@@ -163,7 +176,7 @@ describe('useClinicDonors.fetchDonors', () => {
   })
 
   it('flattening sur un batch réaliste : 2 relations, un Owner avec 3 Animals (2 Validated Donor, 1 non), un Owner sans aucun Animal — exactement 2 lignes, du bon Owner, avec les bons Animals (vérification indépendante de la logique d’aplatissement, pas juste un cas trivial à 1 item)', async () => {
-    mockGraphql({
+    mockClient({
       relations: [
         {
           ownerID: 'owner-A',
@@ -171,13 +184,11 @@ describe('useClinicDonors.fetchDonors', () => {
             id: 'owner-A',
             firstname: 'Owner',
             lastname: 'A',
-            animals: {
-              items: [
-                buildAnimal({ id: 'a1', name: 'Un', isValidatedDonor: true }),
-                buildAnimal({ id: 'a2', name: 'Deux', isValidatedDonor: true }),
-                buildAnimal({ id: 'a3', name: 'Trois', isValidatedDonor: false, validationExpiresAt: null }),
-              ],
-            },
+            animals: [
+              buildAnimal({ id: 'a1', name: 'Un', isValidatedDonor: true }),
+              buildAnimal({ id: 'a2', name: 'Deux', isValidatedDonor: true }),
+              buildAnimal({ id: 'a3', name: 'Trois', isValidatedDonor: false, validationExpiresAt: null }),
+            ],
           }),
         },
         {
@@ -186,7 +197,7 @@ describe('useClinicDonors.fetchDonors', () => {
             id: 'owner-B',
             firstname: 'Owner',
             lastname: 'B',
-            animals: { items: [] },
+            animals: [],
           }),
         },
       ],
@@ -201,18 +212,16 @@ describe('useClinicDonors.fetchDonors', () => {
   })
 
   it('mélange plusieurs Owners/Animals : ne garde que les lignes réellement Validated Donor', async () => {
-    mockGraphql({
+    mockClient({
       relations: [
         {
           ownerID: 'owner-1',
           ownerProfile: buildOwner({
             id: 'owner-1',
-            animals: {
-              items: [
-                buildAnimal({ id: 'animal-valid', isValidatedDonor: true }),
-                buildAnimal({ id: 'animal-never', isValidatedDonor: false }),
-              ],
-            },
+            animals: [
+              buildAnimal({ id: 'animal-valid', isValidatedDonor: true }),
+              buildAnimal({ id: 'animal-never', isValidatedDonor: false }),
+            ],
           }),
         },
         {
@@ -220,9 +229,7 @@ describe('useClinicDonors.fetchDonors', () => {
           ownerProfile: buildOwner({
             id: 'owner-2',
             firstname: 'Alice',
-            animals: {
-              items: [buildAnimal({ id: 'animal-expired', validationExpiresAt: '2020-01-01T00:00:00.000Z' })],
-            },
+            animals: [buildAnimal({ id: 'animal-expired', validationExpiresAt: '2020-01-01T00:00:00.000Z' })],
           }),
         },
       ],
@@ -248,14 +255,14 @@ describe('useClinicDonors.fetchDonors', () => {
         ) * 10,
       ) / 10
 
-    mockGraphql({
+    mockClient({
       vetClinic: clinicCoords,
       relations: [
         {
           ownerID: 'owner-1',
           ownerProfile: buildOwner({
             ...ownerCoords,
-            animals: { items: [buildAnimal()] },
+            animals: [buildAnimal()],
           }),
         },
       ],
@@ -277,33 +284,31 @@ describe('useClinicDonors.fetchDonors', () => {
     const now = new Date('2026-08-13T12:00:00.000Z')
     vi.setSystemTime(now)
 
-    mockGraphql({
+    mockClient({
       relations: [
         {
           ownerID: 'owner-1',
           ownerProfile: buildOwner({
-            animals: {
-              items: [
-                buildAnimal({
-                  id: 'animal-boundary-still-valid',
-                  isValidatedDonor: true,
-                  validationExpiresAt: new Date(now.getTime() + 1000).toISOString(),
-                }),
-                buildAnimal({
-                  id: 'animal-boundary-just-expired',
-                  isValidatedDonor: true,
-                  validationExpiresAt: new Date(now.getTime() - 1000).toISOString(),
-                }),
-                // Expire exactement à l'instant présent : isValidatedDonor() compare avec `>`
-                // strict (eligibility-service.js), donc "expire maintenant" doit être traité
-                // comme expiré, pas comme encore valide.
-                buildAnimal({
-                  id: 'animal-boundary-exact-now',
-                  isValidatedDonor: true,
-                  validationExpiresAt: now.toISOString(),
-                }),
-              ],
-            },
+            animals: [
+              buildAnimal({
+                id: 'animal-boundary-still-valid',
+                isValidatedDonor: true,
+                validationExpiresAt: new Date(now.getTime() + 1000).toISOString(),
+              }),
+              buildAnimal({
+                id: 'animal-boundary-just-expired',
+                isValidatedDonor: true,
+                validationExpiresAt: new Date(now.getTime() - 1000).toISOString(),
+              }),
+              // Expire exactement à l'instant présent : isValidatedDonor() compare avec `>`
+              // strict (eligibility-service.js), donc "expire maintenant" doit être traité
+              // comme expiré, pas comme encore valide.
+              buildAnimal({
+                id: 'animal-boundary-exact-now',
+                isValidatedDonor: true,
+                validationExpiresAt: now.toISOString(),
+              }),
+            ],
           }),
         },
       ],
@@ -318,14 +323,14 @@ describe('useClinicDonors.fetchDonors', () => {
   it("distanceKM est 0 (pas null) quand la clinique et l'Owner sont exactement aux mêmes coordonnées — distingue 'distance vraiment nulle' de 'distance non calculable' (coordonnées manquantes, testé séparément ci-dessous) : les deux ne doivent PAS être confondus dans le rendu (distance_unknown vs '0 km')", async () => {
     const sharedCoords = { latitude: 45.75, longitude: 4.85 }
 
-    mockGraphql({
+    mockClient({
       vetClinic: sharedCoords,
       relations: [
         {
           ownerID: 'owner-1',
           ownerProfile: buildOwner({
             ...sharedCoords,
-            animals: { items: [buildAnimal()] },
+            animals: [buildAnimal()],
           }),
         },
       ],
@@ -340,14 +345,14 @@ describe('useClinicDonors.fetchDonors', () => {
   })
 
   it("distanceKM est null (pas 'Infinity') quand les coordonnées de l'Owner sont manquantes", async () => {
-    mockGraphql({
+    mockClient({
       relations: [
         {
           ownerID: 'owner-1',
           ownerProfile: buildOwner({
             latitude: null,
             longitude: null,
-            animals: { items: [buildAnimal()] },
+            animals: [buildAnimal()],
           }),
         },
       ],
@@ -360,7 +365,7 @@ describe('useClinicDonors.fetchDonors', () => {
   })
 
   it('relation sans ownerProfile (Owner introuvable/supprimé) : ignorée sans planter', async () => {
-    mockGraphql({
+    mockClient({
       relations: [{ ownerID: 'owner-orphan', ownerProfile: null }],
     })
 
@@ -370,13 +375,13 @@ describe('useClinicDonors.fetchDonors', () => {
   })
 
   it('batch mélangé réaliste : une relation avec ownerProfile null au milieu de relations valides — les lignes des Owners valides sortent quand même, seule la relation orpheline est sautée (pas un cas trivial où TOUT est orphelin)', async () => {
-    mockGraphql({
+    mockClient({
       relations: [
         {
           ownerID: 'owner-1',
           ownerProfile: buildOwner({
             id: 'owner-1',
-            animals: { items: [buildAnimal({ id: 'animal-1' })] },
+            animals: [buildAnimal({ id: 'animal-1' })],
           }),
         },
         { ownerID: 'owner-orphan', ownerProfile: null },
@@ -385,7 +390,7 @@ describe('useClinicDonors.fetchDonors', () => {
           ownerProfile: buildOwner({
             id: 'owner-2',
             firstname: 'Alice',
-            animals: { items: [buildAnimal({ id: 'animal-2' })] },
+            animals: [buildAnimal({ id: 'animal-2' })],
           }),
         },
       ],
@@ -398,51 +403,31 @@ describe('useClinicDonors.fetchDonors', () => {
     expect(donors.value.map((d) => d.ownerId).sort()).toEqual(['owner-1', 'owner-2'])
   })
 
-  it('Veterinarian sans clinicID/clinic résolue : donors vide, pas d’appel à ListClinicDonorsByClinicID, pas d’erreur', async () => {
-    mockGraphql({ vetClinic: null })
+  it('Veterinarian sans clinicID/clinic résolue : donors vide, pas d’appel à ClinicOwnerRelation.list(), pas d’erreur', async () => {
+    mockClient({ vetClinic: null })
 
     const { fetchDonors, donors, loadError } = useClinicDonors()
     await fetchDonors()
 
     expect(donors.value).toEqual([])
     expect(loadError.value).toBe(false)
-    expect(graphqlMock).toHaveBeenCalledTimes(1)
+    expect(vetGetMock).toHaveBeenCalledTimes(1)
+    expect(relationListMock).not.toHaveBeenCalled()
   })
 
-  it('mémoïse le contexte clinique : un second fetchDonors() ne rappelle pas GetVetWithClinic', async () => {
-    mockGraphql({ relations: [] })
+  it('mémoïse le contexte clinique : un second fetchDonors() ne rappelle pas Veterinarian.get()', async () => {
+    mockClient({ relations: [] })
 
     const { fetchDonors } = useClinicDonors()
     await fetchDonors()
     await fetchDonors()
 
-    const vetCalls = graphqlMock.mock.calls.filter(([{ query }]) => query.includes('GetVetWithClinic'))
-    expect(vetCalls).toHaveLength(1)
+    expect(vetGetMock).toHaveBeenCalledTimes(1)
+    expect(relationListMock).toHaveBeenCalledTimes(2)
   })
 
-  it('authMode userPool sur les deux appels, isLoading true pendant le chargement puis false', async () => {
-    mockGraphql({ relations: [] })
-    let sawUserPoolCalls = 0
-    graphqlMock.mockImplementation(async ({ query, variables, authMode }) => {
-      expect(authMode).toBe('userPool')
-      sawUserPoolCalls += 1
-      if (query.includes('GetVetWithClinic')) {
-        return {
-          data: {
-            getVeterinarian: {
-              id: 'vet-1',
-              clinicID: 'clinic-1',
-              clinic: { id: 'clinic-1', latitude: 45.75, longitude: 4.8 },
-            },
-          },
-        }
-      }
-      if (query.includes('ListClinicDonorsByClinicID')) {
-        expect(variables).toEqual({ clinicID: 'clinic-1' })
-        return { data: { clinicOwnerRelationsByClinicID: { items: [] } } }
-      }
-      throw new Error('unexpected')
-    })
+  it('isLoading passe à true pendant le chargement puis retombe à false', async () => {
+    mockClient({ relations: [] })
 
     const { fetchDonors, isLoading } = useClinicDonors()
     expect(isLoading.value).toBe(false)
@@ -452,15 +437,14 @@ describe('useClinicDonors.fetchDonors', () => {
     await promise
 
     expect(isLoading.value).toBe(false)
-    expect(sawUserPoolCalls).toBe(2)
+    expect(vetGetMock).toHaveBeenCalledTimes(1)
+    expect(relationListMock).toHaveBeenCalledTimes(1)
   })
 
   it("loadError distingue un échec de chargement d'un annuaire réellement vide", async () => {
     const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     getCurrentUserMock.mockResolvedValue({ userId: 'vet-1' })
-    graphqlMock.mockImplementation(async () => {
-      throw new Error('network down')
-    })
+    vetGetMock.mockRejectedValue(new Error('network down'))
 
     const { fetchDonors, loadError, donors } = useClinicDonors()
     expect(loadError.value).toBe(false)
@@ -472,7 +456,7 @@ describe('useClinicDonors.fetchDonors', () => {
     expect(consoleErrorSpy).toHaveBeenCalled()
 
     // Un rechargement réussi (ex. clic "Réessayer") efface l'état d'erreur.
-    mockGraphql({ relations: [] })
+    mockClient({ relations: [] })
     await fetchDonors()
 
     expect(loadError.value).toBe(false)
@@ -480,23 +464,14 @@ describe('useClinicDonors.fetchDonors', () => {
     consoleErrorSpy.mockRestore()
   })
 
-  it("échec de la query ListClinicDonorsByClinicID (après résolution réussie du contexte clinique) : loadError à true, donors vidé", async () => {
+  it("échec de la query ClinicOwnerRelation.list() (après résolution réussie du contexte clinique) : loadError à true, donors vidé", async () => {
     const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     getCurrentUserMock.mockResolvedValue({ userId: 'vet-1' })
-    graphqlMock.mockImplementation(async ({ query }) => {
-      if (query.includes('GetVetWithClinic')) {
-        return {
-          data: {
-            getVeterinarian: {
-              id: 'vet-1',
-              clinicID: 'clinic-1',
-              clinic: { id: 'clinic-1', latitude: 45.75, longitude: 4.8 },
-            },
-          },
-        }
-      }
-      throw new Error('DynamoDB throttled')
+    vetGetMock.mockResolvedValue({
+      data: { id: 'vet-1', clinicID: 'clinic-1', clinic: { id: 'clinic-1', latitude: 45.75, longitude: 4.8 } },
+      errors: undefined,
     })
+    relationListMock.mockRejectedValue(new Error('DynamoDB throttled'))
 
     const { fetchDonors, loadError, donors } = useClinicDonors()
     await fetchDonors()
@@ -511,38 +486,66 @@ describe('useClinicDonors.fetchDonors', () => {
     consoleErrorSpy.mockRestore()
   })
 
-  it('les deux queries référencées sont bien celles importées de custom-queries.js', async () => {
-    mockGraphql({ relations: [] })
-    const capturedQueries = []
-    graphqlMock.mockImplementation(async ({ query, variables }) => {
-      capturedQueries.push(query)
-      if (query.includes('GetVetWithClinic')) {
-        return {
-          data: {
-            getVeterinarian: {
-              id: 'vet-1',
-              clinicID: 'clinic-1',
-              clinic: { id: 'clinic-1', latitude: 45.75, longitude: 4.8 },
-            },
-          },
-        }
-      }
-      expect(variables).toEqual({ clinicID: 'clinic-1' })
-      return { data: { clinicOwnerRelationsByClinicID: { items: [] } } }
+  it("échec GraphQL/@auth sur ClinicOwnerRelation.list() (`errors` présent sans exception JS) : loadError à true", async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    getCurrentUserMock.mockResolvedValue({ userId: 'vet-1' })
+    vetGetMock.mockResolvedValue({
+      data: { id: 'vet-1', clinicID: 'clinic-1', clinic: { id: 'clinic-1', latitude: 45.75, longitude: 4.8 } },
+      errors: undefined,
     })
+    relationListMock.mockResolvedValue({
+      data: null,
+      errors: [{ message: 'Not Authorized to access clinicOwnerRelationsByClinicID' }],
+    })
+
+    const { fetchDonors, loadError, donors } = useClinicDonors()
+    await fetchDonors()
+
+    expect(loadError.value).toBe(true)
+    expect(donors.value).toEqual([])
+    expect(consoleErrorSpy).toHaveBeenCalled()
+
+    consoleErrorSpy.mockRestore()
+  })
+
+  it('les deux appels référencent bien un `selectionSet` couvrant tous les champs consommés par fetchDonors()', async () => {
+    mockClient({ relations: [] })
 
     const { fetchDonors } = useClinicDonors()
     await fetchDonors()
 
-    expect(capturedQueries).toContain(getVetWithClinic)
-    expect(capturedQueries).toContain(listClinicDonorsByClinicID)
+    const [, vetOptions] = vetGetMock.mock.calls[0]
+    expect(vetOptions.selectionSet).toEqual(
+      expect.arrayContaining(['id', 'clinicID', 'clinic.id', 'clinic.latitude', 'clinic.longitude']),
+    )
+
+    const [relationArgs] = relationListMock.mock.calls[0]
+    expect(relationArgs.selectionSet).toEqual(
+      expect.arrayContaining([
+        'ownerID',
+        'ownerProfile.id',
+        'ownerProfile.firstname',
+        'ownerProfile.lastname',
+        'ownerProfile.phone',
+        'ownerProfile.latitude',
+        'ownerProfile.longitude',
+        'ownerProfile.animals.id',
+        'ownerProfile.animals.name',
+        'ownerProfile.animals.species',
+        'ownerProfile.animals.breed',
+        'ownerProfile.animals.bloodGroup',
+        'ownerProfile.animals.isValidatedDonor',
+        'ownerProfile.animals.validationExpiresAt',
+        'ownerProfile.animals.lastDonationDate',
+      ]),
+    )
   })
 })
 
 // Phase 6.6 : barre de recherche de DonorsView.vue câblée sur un filtre côté client
 // (searchQuery + computed filteredDonors), sans aller-retour GraphQL supplémentaire —
 // donors.value est peuplé directement ici (pas besoin de repasser par fetchDonors()/le
-// mock GraphQL, la logique de filtre est indépendante du chargement).
+// mock du client Gen2, la logique de filtre est indépendante du chargement).
 describe('useClinicDonors.filteredDonors', () => {
   const seedDonors = (donors) => {
     const composable = useClinicDonors()

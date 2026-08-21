@@ -13,13 +13,33 @@ import { createPinia, setActivePinia } from 'pinia'
 //   (DOIT remonter à l'appelant) ;
 // - le garde-fou multi-vétérinaire : au moins un autre Veterinarian rattaché à la même
 //   Clinic -> seul le Veterinarian courant est supprimé, la Clinic survit.
+//
+// Phase 8, sous-tâche 5 (lot 2/3) : useClinicSettings.js migré sur le client Gen2
+// (`aws-amplify/data`, `client.models.Veterinarian.*`/`client.models.Clinic.*`) -- mock
+// reconstruit sur `{ data, errors }` par méthode de modèle. Assertions métier inchangées.
 
-const graphqlMock = vi.fn()
+const vetGetMock = vi.fn()
+const vetListMock = vi.fn()
+const vetDeleteMock = vi.fn()
+const clinicDeleteMock = vi.fn()
 const deleteUserMock = vi.fn()
 const signOutMock = vi.fn()
 
-vi.mock('aws-amplify/api', () => ({
-  generateClient: () => ({ graphql: graphqlMock }),
+vi.mock('aws-amplify/data', () => ({
+  generateClient: () => ({
+    models: {
+      Veterinarian: {
+        get: (...args) => vetGetMock(...args),
+        list: (...args) => vetListMock(...args),
+        delete: (...args) => vetDeleteMock(...args),
+        update: vi.fn(),
+      },
+      Clinic: {
+        delete: (...args) => clinicDeleteMock(...args),
+        update: vi.fn(),
+      },
+    },
+  }),
 }))
 
 vi.mock('aws-amplify/auth', () => ({
@@ -51,32 +71,29 @@ import { useClinicSettings } from '@/composables/useClinicSettings'
 
 /**
  * Charge un Vet+Clinic (nécessaire pour que `vetId.value`/`clinicId.value` soient définis)
- * avant de reconfigurer `graphqlMock` pour le scénario testé.
+ * avant de reconfigurer les mocks pour le scénario testé.
  */
 const primeVetAndClinic = async () => {
-  graphqlMock.mockImplementationOnce(async ({ query }) => {
-    expect(query).toContain('GetVetWithClinic')
-    return {
-      data: {
-        getVeterinarian: {
-          id: 'vet-1',
-          firstname: 'Alex',
-          lastname: 'Martin',
-          email: 'alex.martin@clinique.fr',
-          clinic: {
-            id: 'clinic-1',
-            name: 'Clinique du Centre',
-            rpps: '12345',
-            email: 'contact@clinique.fr',
-            phone: '0100000000',
-            address: '1 rue de la Clinique',
-            latitude: 48.8566,
-            longitude: 2.3522,
-            hasEmergencyService: true,
-          },
-        },
+  vetGetMock.mockResolvedValueOnce({
+    data: {
+      id: 'vet-1',
+      firstname: 'Alex',
+      lastname: 'Martin',
+      email: 'alex.martin@clinique.fr',
+      clinicID: 'clinic-1',
+      clinic: {
+        id: 'clinic-1',
+        name: 'Clinique du Centre',
+        rpps: '12345',
+        email: 'contact@clinique.fr',
+        phone: '0100000000',
+        address: '1 rue de la Clinique',
+        latitude: 48.8566,
+        longitude: 2.3522,
+        hasEmergencyService: true,
       },
-    }
+    },
+    errors: undefined,
   })
   const composable = useClinicSettings()
   await composable.fetchSettings()
@@ -86,7 +103,10 @@ const primeVetAndClinic = async () => {
 describe('useClinicSettings.deleteAccount', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
-    graphqlMock.mockReset()
+    vetGetMock.mockReset()
+    vetListMock.mockReset()
+    vetDeleteMock.mockReset()
+    clinicDeleteMock.mockReset()
     deleteUserMock.mockReset()
     signOutMock.mockReset()
     deleteUserMock.mockResolvedValue(undefined)
@@ -96,27 +116,16 @@ describe('useClinicSettings.deleteAccount', () => {
   it('supprime le Veterinarian ET la Clinic, puis le compte Cognito (dernier vétérinaire de la Clinic)', async () => {
     const { deleteAccount } = await primeVetAndClinic()
 
-    const calledQueries = []
-    graphqlMock.mockImplementation(async ({ query, variables }) => {
-      calledQueries.push(query)
-      if (query.includes('VeterinariansByClinicIDSimple')) {
-        expect(variables).toEqual({ clinicID: 'clinic-1' })
-        // Seul le vétérinaire courant est rattaché à la Clinic.
-        return { data: { veterinariansByClinicID: { items: [{ id: 'vet-1' }] } } }
-      }
-      if (query.includes('DeleteVeterinarian')) {
-        return { data: { deleteVeterinarian: { id: 'vet-1' } } }
-      }
-      if (query.includes('DeleteClinic')) {
-        return { data: { deleteClinic: { id: 'clinic-1' } } }
-      }
-      throw new Error(`Requête GraphQL inattendue dans ce test : ${query}`)
-    })
+    // Seul le vétérinaire courant est rattaché à la Clinic.
+    vetListMock.mockResolvedValue({ data: [{ id: 'vet-1' }], errors: undefined })
+    vetDeleteMock.mockResolvedValue({ data: { id: 'vet-1' }, errors: undefined })
+    clinicDeleteMock.mockResolvedValue({ data: { id: 'clinic-1' }, errors: undefined })
 
     await expect(deleteAccount()).resolves.toBeUndefined()
 
-    expect(calledQueries.some((q) => q.includes('DeleteVeterinarian'))).toBe(true)
-    expect(calledQueries.some((q) => q.includes('DeleteClinic'))).toBe(true)
+    expect(vetListMock).toHaveBeenCalledWith({ filter: { clinicID: { eq: 'clinic-1' } } })
+    expect(vetDeleteMock).toHaveBeenCalledWith({ id: 'vet-1' })
+    expect(clinicDeleteMock).toHaveBeenCalledWith({ id: 'clinic-1' })
     expect(deleteUserMock).toHaveBeenCalledTimes(1)
     expect(signOutMock).toHaveBeenCalledTimes(1)
   })
@@ -124,27 +133,17 @@ describe('useClinicSettings.deleteAccount', () => {
   it("garde-fou multi-vétérinaire : un autre Veterinarian reste rattaché -> seul le compte courant est supprimé, la Clinic survit", async () => {
     const { deleteAccount } = await primeVetAndClinic()
 
-    const calledQueries = []
-    graphqlMock.mockImplementation(async ({ query }) => {
-      calledQueries.push(query)
-      if (query.includes('VeterinariansByClinicIDSimple')) {
-        // Deux vétérinaires rattachés à la même Clinic : le courant (vet-1) et un autre.
-        return {
-          data: {
-            veterinariansByClinicID: { items: [{ id: 'vet-1' }, { id: 'vet-2' }] },
-          },
-        }
-      }
-      if (query.includes('DeleteVeterinarian')) {
-        return { data: { deleteVeterinarian: { id: 'vet-1' } } }
-      }
-      throw new Error(`Requête GraphQL inattendue dans ce test (la Clinic ne doit PAS être supprimée) : ${query}`)
+    // Deux vétérinaires rattachés à la même Clinic : le courant (vet-1) et un autre.
+    vetListMock.mockResolvedValue({
+      data: [{ id: 'vet-1' }, { id: 'vet-2' }],
+      errors: undefined,
     })
+    vetDeleteMock.mockResolvedValue({ data: { id: 'vet-1' }, errors: undefined })
 
     await expect(deleteAccount()).resolves.toBeUndefined()
 
-    expect(calledQueries.some((q) => q.includes('DeleteVeterinarian'))).toBe(true)
-    expect(calledQueries.some((q) => q.includes('DeleteClinic'))).toBe(false)
+    expect(vetDeleteMock).toHaveBeenCalledWith({ id: 'vet-1' })
+    expect(clinicDeleteMock).not.toHaveBeenCalled()
     expect(deleteUserMock).toHaveBeenCalledTimes(1)
   })
 
@@ -152,12 +151,8 @@ describe('useClinicSettings.deleteAccount', () => {
     const { deleteAccount, isSaving } = await primeVetAndClinic()
 
     const dbError = new Error('Not Authorized to access deleteVeterinarian on type Veterinarian')
-    graphqlMock.mockImplementation(async ({ query }) => {
-      if (query.includes('VeterinariansByClinicIDSimple')) {
-        return { data: { veterinariansByClinicID: { items: [{ id: 'vet-1' }] } } }
-      }
-      throw dbError
-    })
+    vetListMock.mockResolvedValue({ data: [{ id: 'vet-1' }], errors: undefined })
+    vetDeleteMock.mockRejectedValue(dbError)
 
     await expect(deleteAccount()).resolves.toBeUndefined()
 
@@ -169,18 +164,9 @@ describe('useClinicSettings.deleteAccount', () => {
   it('relance (propage) une erreur de deleteUser() (Cognito) -- contrairement au nettoyage DB', async () => {
     const { deleteAccount, isSaving } = await primeVetAndClinic()
 
-    graphqlMock.mockImplementation(async ({ query }) => {
-      if (query.includes('VeterinariansByClinicIDSimple')) {
-        return { data: { veterinariansByClinicID: { items: [{ id: 'vet-1' }] } } }
-      }
-      if (query.includes('DeleteVeterinarian')) {
-        return { data: { deleteVeterinarian: { id: 'vet-1' } } }
-      }
-      if (query.includes('DeleteClinic')) {
-        return { data: { deleteClinic: { id: 'clinic-1' } } }
-      }
-      throw new Error(`Requête GraphQL inattendue dans ce test : ${query}`)
-    })
+    vetListMock.mockResolvedValue({ data: [{ id: 'vet-1' }], errors: undefined })
+    vetDeleteMock.mockResolvedValue({ data: { id: 'vet-1' }, errors: undefined })
+    clinicDeleteMock.mockResolvedValue({ data: { id: 'clinic-1' }, errors: undefined })
 
     const cognitoError = new Error('Cognito: unable to delete user')
     deleteUserMock.mockRejectedValue(cognitoError)
@@ -191,26 +177,33 @@ describe('useClinicSettings.deleteAccount', () => {
     expect(isSaving.value).toBe(false)
   })
 
-  it("garde-fou en échec (lecture VeterinariansByClinicID en erreur) -- ne supprime PAS la Clinic par prudence (fail-safe)", async () => {
+  it("garde-fou en échec (lecture Veterinarian.list en erreur) -- ne supprime PAS la Clinic par prudence (fail-safe)", async () => {
     const { deleteAccount, isSaving } = await primeVetAndClinic()
 
-    const calledQueries = []
-    graphqlMock.mockImplementation(async ({ query }) => {
-      calledQueries.push(query)
-      if (query.includes('VeterinariansByClinicIDSimple')) {
-        throw new Error('Timeout réseau')
-      }
-      if (query.includes('DeleteVeterinarian')) {
-        return { data: { deleteVeterinarian: { id: 'vet-1' } } }
-      }
-      throw new Error(`Requête GraphQL inattendue dans ce test (la Clinic ne doit PAS être supprimée) : ${query}`)
-    })
+    vetListMock.mockRejectedValue(new Error('Timeout réseau'))
+    vetDeleteMock.mockResolvedValue({ data: { id: 'vet-1' }, errors: undefined })
 
     await expect(deleteAccount()).resolves.toBeUndefined()
 
-    expect(calledQueries.some((q) => q.includes('DeleteVeterinarian'))).toBe(true)
-    expect(calledQueries.some((q) => q.includes('DeleteClinic'))).toBe(false)
+    expect(vetDeleteMock).toHaveBeenCalledWith({ id: 'vet-1' })
+    expect(clinicDeleteMock).not.toHaveBeenCalled()
     expect(deleteUserMock).toHaveBeenCalledTimes(1)
     expect(isSaving.value).toBe(false)
+  })
+
+  it("garde-fou en échec GraphQL/@auth (Veterinarian.list résout `{ data: null, errors }`, pas d'exception JS) -- ne supprime PAS la Clinic non plus", async () => {
+    const { deleteAccount } = await primeVetAndClinic()
+
+    vetListMock.mockResolvedValue({
+      data: null,
+      errors: [{ message: 'Not Authorized to access veterinariansByClinicID' }],
+    })
+    vetDeleteMock.mockResolvedValue({ data: { id: 'vet-1' }, errors: undefined })
+
+    await expect(deleteAccount()).resolves.toBeUndefined()
+
+    expect(vetDeleteMock).toHaveBeenCalledWith({ id: 'vet-1' })
+    expect(clinicDeleteMock).not.toHaveBeenCalled()
+    expect(deleteUserMock).toHaveBeenCalledTimes(1)
   })
 })

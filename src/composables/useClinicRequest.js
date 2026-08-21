@@ -1,15 +1,29 @@
 import { ref } from 'vue'
-import { generateClient } from 'aws-amplify/api'
+import { generateClient } from 'aws-amplify/data'
 import { useRouter } from 'vue-router'
 import { getCurrentUser } from 'aws-amplify/auth'
-
-// 👇 On garde vos requêtes existantes
-import { getVeterinarian } from '@/graphql/queries'
-import { listRequestsByClinic } from '@/graphql/custom-queries'
-
-// 👇 On importe les mutations SIMPLES pour éviter les erreurs de sous-champs
-import { createRequestSimple, updateRequestStatusSimple } from '@/graphql/custom-mutations'
 import { Species, RequestStatus, RequestType } from '@/constants/enums'
+import { throwIfGraphqlError } from '@/services/graphql-error-service'
+
+// Phase 8, sous-tâche 5 (lot 2/3) : migré sur le client Gen2 (`aws-amplify/data`,
+// `client.models.Veterinarian.*`/`client.models.Request.*`). Plus d'import depuis
+// `@/graphql/queries`/`@/graphql/custom-queries`/`@/graphql/custom-mutations` -- le client
+// Gen2 sélectionne déjà les champs scalaires du modèle par défaut (`fetchClinicId()`), et
+// l'objet `input` passé à `create()`/`update()` limite déjà les champs envoyés (voir
+// CLAUDE.md/`amplify/data/resource.ts`).
+//
+// `listRequestsByClinic` (Gen1) sélectionnait explicitement la relation imbriquée
+// `mission.animal.ownerProfile` sur 3 niveaux -- son équivalent Gen2 est l'option
+// `selectionSet` (confirmé via context7, `/aws-amplify/amplify-data`, "Query Related Data
+// with Selection Set"), qui supporte les chemins pointés à plusieurs niveaux
+// (`mission.animal.ownerProfile.phone`), voir `fetchRequests()` ci-dessous.
+//
+// Sur le changement de comportement d'erreur Gen1 -> Gen2 (`client.models.X.*` résout
+// `{ data, errors }` au lieu de lever une exception) et sa traduction via
+// `throwIfGraphqlError` ci-dessous : voir le JSDoc de `src/services/graphql-error-service.js`.
+// `createNewRequest()`'s `catch` (bloc R-05/R-17) continue de lire `e.errors` sans
+// changement : l'exception synthétisée par `throwIfGraphqlError` porte cette même
+// propriété, exactement le format qu'attendait déjà ce bloc en Gen1.
 
 export function useClinicRequests() {
   const client = generateClient()
@@ -50,17 +64,14 @@ export function useClinicRequests() {
     const { userId } = await getCurrentUser()
     if (!userId) throw new Error('Utilisateur non connecté')
 
-    const { data } = await client.graphql({
-      query: getVeterinarian,
-      variables: { id: userId },
-      authMode: 'userPool',
-    })
+    const { data, errors } = await client.models.Veterinarian.get({ id: userId })
 
-    const vet = data.getVeterinarian
-    if (!vet || !vet.clinicID) return null
+    throwIfGraphqlError(errors, 'getVeterinarian')
 
-    clinicId.value = vet.clinicID
-    return vet.clinicID
+    if (!data || !data.clinicID) return null
+
+    clinicId.value = data.clinicID
+    return data.clinicID
   }
 
   const fetchRequests = async () => {
@@ -73,13 +84,36 @@ export function useClinicRequests() {
         return
       }
 
-      const { data } = await client.graphql({
-        query: listRequestsByClinic,
-        variables: { filter: { clinicID: { eq: cId } } },
-        authMode: 'userPool',
+      const { data, errors } = await client.models.Request.list({
+        filter: { clinicID: { eq: cId } },
+        selectionSet: [
+          'id',
+          'requestType',
+          'requiredSpecies',
+          'requiredBloodGroup',
+          'quantity',
+          'status',
+          'createdAt',
+          'updatedAt',
+          'clinicID',
+          'mission.id',
+          'mission.status',
+          'mission.animalID',
+          'mission.createdAt',
+          'mission.updatedAt',
+          'mission.animal.name',
+          'mission.animal.breed',
+          'mission.animal.weight',
+          'mission.animal.ownerID',
+          'mission.animal.ownerProfile.phone',
+          'mission.animal.ownerProfile.firstname',
+          'mission.animal.ownerProfile.lastname',
+        ],
       })
 
-      requests.value = data.listRequests.items.sort(
+      throwIfGraphqlError(errors, 'listRequests')
+
+      requests.value = (data || []).sort(
         (a, b) => new Date(b.createdAt) - new Date(a.createdAt),
       )
     } catch (e) {
@@ -132,12 +166,10 @@ export function useClinicRequests() {
         input.appointmentDatetime = new Date(formData.appointmentDatetime).toISOString()
       }
 
-      // 3. Appel de la mutation simple
-      await client.graphql({
-        query: createRequestSimple,
-        variables: { input },
-        authMode: 'userPool',
-      })
+      // 3. Appel de la mutation
+      const { errors } = await client.models.Request.create(input)
+
+      throwIfGraphqlError(errors, 'createRequest')
 
       await fetchRequests()
       await router.push('/dashboard/requests')
@@ -164,11 +196,13 @@ export function useClinicRequests() {
   const closeRequest = async (requestId) => {
     isClosing.value = true
     try {
-      await client.graphql({
-        query: updateRequestStatusSimple,
-        variables: { input: { id: requestId, status: RequestStatus.CLOSED } },
-        authMode: 'userPool',
+      const { errors } = await client.models.Request.update({
+        id: requestId,
+        status: RequestStatus.CLOSED,
       })
+
+      throwIfGraphqlError(errors, 'updateRequest')
+
       const req = requests.value.find((r) => r.id === requestId)
       if (req) req.status = RequestStatus.CLOSED
     } catch (e) {
@@ -184,19 +218,20 @@ export function useClinicRequests() {
    * `closeRequest()` : une Request CLOSED signifie qu'un don a eu lieu ou que le besoin a
    * été comblé (cycle de vie "normal"), une Request CANCELLED signifie une erreur de
    * saisie ou un besoin disparu avant tout don (cycle de vie "annulé"). Même mutation
-   * `*Simple` sous-jacente (`updateRequestStatusSimple`, custom-mutations.js, déjà
-   * existante — aucune nouvelle mutation ni changement de schéma nécessaire, `CANCELLED`
-   * est déjà une valeur acceptée par `enum RequestStatus` côté schema.graphql), seul le
-   * statut cible change.
+   * sous-jacente (`client.models.Request.update()`), seul le statut cible change --
+   * `CANCELLED` est déjà une valeur acceptée par `RequestStatus` côté
+   * `amplify/data/resource.ts`.
    */
   const cancelRequest = async (requestId) => {
     isCancelling.value = true
     try {
-      await client.graphql({
-        query: updateRequestStatusSimple,
-        variables: { input: { id: requestId, status: RequestStatus.CANCELLED } },
-        authMode: 'userPool',
+      const { errors } = await client.models.Request.update({
+        id: requestId,
+        status: RequestStatus.CANCELLED,
       })
+
+      throwIfGraphqlError(errors, 'updateRequest')
+
       const req = requests.value.find((r) => r.id === requestId)
       if (req) req.status = RequestStatus.CANCELLED
     } catch (e) {
