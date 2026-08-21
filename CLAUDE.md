@@ -49,6 +49,19 @@ architecturales) et `.cursorrules` (conventions détaillées pour l'éditeur).
   exige toujours un `belongsTo` apparié sur le modèle ciblé, avec un champ de
   référence identique des deux côtés — le processeur de schéma lève une
   erreur bloquante sinon (voir ADR-0010, `Request.mission`/`Mission.request`).
+  Prérequis au lot 3/3 : `defineData` Gen2 n'expose **aucun** argument
+  `condition` sur les mutations générées automatiquement
+  (`client.models.X.update()`) — pour une écriture qui a besoin d'une garde
+  DynamoDB conditionnelle (`ConditionExpression`, ex. écriture atomique
+  anti-course, ADR-0001), le chemin Gen2 est une **mutation custom** +
+  resolver JS AppSync (`a.handler.custom({ dataSource: a.ref('ModelName'),
+  entry: './resolvers/....js' })`, `ddb.update({ key, condition, update })`
+  de `@aws-appsync/utils/dynamodb`) ciblant directement la table managée du
+  modèle — pas une traduction `a.model()`/`.authorization()`. Le resolver est
+  obligatoirement `.js` (pas `.ts` : `resolveEntryPath()` l'upload tel quel,
+  sans transpilation, vers le runtime `APPSYNC_JS`). Voir ADR-0011
+  (`linkRequestToMission`) pour l'exemple de référence si un futur besoin
+  similaire apparaît sur un autre composable.
   Sous-tâche 5 (bascule des composables) en cours, par lots : lots 1/3 et 2/3
   faits, 8/12 composables migrés (`useAnimals.js`, `useOwnerProfile.js`,
   `useOwnerAvailability.js`, `useRegistrationCompletion.js` — lot 1 ;

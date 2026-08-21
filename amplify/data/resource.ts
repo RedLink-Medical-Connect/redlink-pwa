@@ -31,6 +31,12 @@ import { type ClientSchema, a, defineData } from '@aws-amplify/backend'
  * des relations `hasMany`/`hasOne`/`belongsTo`, y compris deux champs de relation que le
  * validateur de schéma Gen2 impose d'ajouter -- absents de Gen1, voir cet ADR avant de
  * modifier `Request`/`Mission` ci-dessous).
+ *
+ * Prérequis Phase 8, lot 3/3 sous-tâche 5 : `linkRequestToMission` (section 4 ci-dessous) est
+ * une mutation CUSTOM (resolver JS `./resolvers/link-request-to-mission.js`), pas une traduction
+ * `a.model()`/`@auth` -- `defineData` Gen2 n'expose pas d'argument `condition` équivalent sur les
+ * mutations générées automatiquement. Voir
+ * `docs/adr/0011-gen2-custom-mutation-conditional-write.md`.
  */
 
 // Revue Lead Dev (cycle Phase 8 sous-tâche 4) : deux motifs `.authorization()` de champ
@@ -387,6 +393,59 @@ export const schema = a.schema({
       allow.owner().to(['create', 'read', 'delete']),
       allow.group('Veterinarians').to(['read', 'update']),
     ]),
+
+  // 4. MUTATIONS CUSTOM (logique non couverte par les mutations générées par défaut)
+  // ---------------------------------------------------------
+
+  // Prérequis Phase 8, lot 3/3 sous-tâche 5 (voir
+  // docs/adr/0011-gen2-custom-mutation-conditional-write.md) : `defineData` Gen2 n'expose
+  // AUCUN argument `condition` équivalent sur les mutations générées automatiquement
+  // (`client.models.Request.update()`) -- vérifié dans les types installés
+  // (`node_modules/@aws-amplify/data-schema-types/dist/esm/client/index.d.ts`, aucune trace de
+  // `condition`/`ConditionCheck`). Le Gen1 `linkRequestToMission` (`src/graphql/
+  // custom-mutations.js`) s'appuie pourtant sur un `updateRequest` conditionné
+  // (`condition: { status: { eq: OPEN } }`, Transformer v1 auto-généré) comme SEULE garde réelle
+  // contre la course concurrente entre deux Owners qui accepteraient la même Request d'urgence
+  // en même temps (ADR-0001, CdC §2.3 -- fan-out de notifications à plusieurs Owners
+  // compatibles). Une traduction mécanique naïve (`client.models.Request.update({...})` sans
+  // condition) réintroduirait cette fenêtre de course -- un vrai bug de correction métier.
+  //
+  // Mutation custom + resolver JS (`./resolvers/link-request-to-mission.js`) ciblant la table
+  // DynamoDB managée du modèle `Request` lui-même via `dataSource: a.ref('Request')` (pas une
+  // table externe) : `a.handler.custom({ dataSource, entry })` documente explicitement ce cas
+  // ("Can reference a model in the schema with a.ref('ModelName')",
+  // `node_modules/@aws-amplify/data-schema/src/Handler.ts`). Le resolver reproduit exactement la
+  // condition et les deux champs écrits par le Gen1 `linkRequestToMission` (voir ce fichier pour
+  // le détail : `ddb.update()` avec `condition: { status: { eq: 'OPEN' } }`).
+  //
+  // `.authorization(allow => [allow.authenticated()])` -- PAS `allow.authenticated().to([...])`
+  // (une mutation custom n'a pas d'ensemble d'opérations CRUD à restreindre, `.to()` n'existe
+  // même pas sur `AllowModifierForCustomOperation`, vérifié dans `Authorization.d.ts`). Choisi en
+  // relisant le raisonnement déjà écrit ci-dessus sur la règle de type `Request`
+  // (`allow.authenticated().to(['read', 'update'])`, commentaire "'update' est requis ici") :
+  // c'est exactement le même niveau qu'en Gen1 (`{ allow: private }` = tout utilisateur Cognito
+  // authentifié, peu importe le groupe). Point à vérifier soi-même plutôt qu'à recopier
+  // aveuglément : une mutation custom dont le resolver cible directement la table managée d'un
+  // modèle (`dataSource: a.ref('Request')`) BYPASSE entièrement les règles `@auth`
+  // (type ET champ) de ce modèle -- confirmé en lisant `CustomOperation.d.ts`
+  // (`AllowModifierForCustomOperation`, un builder d'autorisation entièrement distinct de celui
+  // des modèles). Contrairement au Gen1 (où le scoping champ-par-champ de `Request` ci-dessus --
+  // `status`/`activeMissionID` volontairement hors `.authorization()` de champ -- ET la règle de
+  // type `allow.authenticated().to(['read','update'])` coopéraient pour autoriser précisément
+  // cette écriture), ici la seule garde d'autorisation est celle posée directement sur CETTE
+  // mutation. Le resolver n'écrit que `status`/`activeMissionID` (jamais un champ arbitraire
+  // fourni par l'appelant -- les arguments sont `id`/`activeMissionID` uniquement, pas un input
+  // générique), donc le risque qu'un `update` générique aurait posé (n'importe quel champ
+  // réécrit) ne s'applique pas ici : la mutation elle-même ne PEUT physiquement écrire que ces
+  // deux champs, quel que soit l'appelant authentifié.
+  linkRequestToMission: a
+    .mutation()
+    .arguments({ id: a.id().required(), activeMissionID: a.id().required() })
+    .returns(a.ref('Request'))
+    .authorization((allow) => [allow.authenticated()])
+    .handler(
+      a.handler.custom({ dataSource: a.ref('Request'), entry: './resolvers/link-request-to-mission.js' }),
+    ),
 })
 
 export type Schema = ClientSchema<typeof schema>

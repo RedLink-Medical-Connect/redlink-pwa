@@ -120,3 +120,27 @@ describe('amplify/data/resource.ts — relations ADR-0010 (appariement obligatoi
     )
   })
 })
+
+describe('amplify/data/resource.ts — linkRequestToMission (prérequis Phase 8, lot 3/3 sous-tâche 5, ADR-0011)', () => {
+  // Portée volontairement limitée, comme le reste de ce fichier (voir l'en-tête) : ce test
+  // vérifie que la mutation custom compile avec les bons arguments/type de retour/règle
+  // d'autorisation déclarative -- pas que le resolver JS (`./resolvers/link-request-to-mission.js`,
+  // runtime AppSync JS, pas Node) applique réellement la condition DynamoDB en production. Voir
+  // docs/adr/0011, section 4, pour ce choix de portée.
+  it('compile en tant que mutation custom (arguments id/activeMissionID, retourne Request)', () => {
+    const mutationType = extractType('Mutation')
+    expect(mutationType).toContain('linkRequestToMission(id: ID!, activeMissionID: ID!): Request')
+  })
+
+  it('autorisation @aws_cognito_user_pools SANS restriction de groupe (équivalent Gen1 `{allow: private}`)', () => {
+    const mutationType = extractType('Mutation')
+    // `allow.authenticated()` (pas `allow.group('Veterinarians')`) -- reproduit le même niveau
+    // que la règle de type Gen1 `Request` (`allow: private` = tout utilisateur Cognito
+    // authentifié, peu importe le groupe), nécessaire pour que l'Owner puisse accepter une
+    // Mission. Contraste avec une règle de groupe, qui compilerait en
+    // `@aws_auth(cognito_groups: [...])` plutôt qu'un simple `@aws_cognito_user_pools` sans
+    // arguments -- voir docs/adr/0011, section 3.2.
+    expect(mutationType).toContain('linkRequestToMission(id: ID!, activeMissionID: ID!): Request @aws_cognito_user_pools')
+    expect(mutationType).not.toContain('@aws_auth')
+  })
+})
