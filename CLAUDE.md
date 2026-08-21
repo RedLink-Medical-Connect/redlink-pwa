@@ -62,16 +62,22 @@ architecturales) et `.cursorrules` (conventions détaillées pour l'éditeur).
   sans transpilation, vers le runtime `APPSYNC_JS`). Voir ADR-0011
   (`linkRequestToMission`) pour l'exemple de référence si un futur besoin
   similaire apparaît sur un autre composable.
-  Sous-tâche 5 (bascule des composables) en cours, par lots : lots 1/3 et 2/3
-  faits, 8/12 composables migrés (`useAnimals.js`, `useOwnerProfile.js`,
-  `useOwnerAvailability.js`, `useRegistrationCompletion.js` — lot 1 ;
+  **Sous-tâche 5 (bascule des composables) terminée** : les 12/12 composables/
+  services applicatifs qui parlaient GraphQL sont désormais sur `client.models.X`
+  (`aws-amplify/data`) — `useAnimals.js`, `useOwnerProfile.js`,
+  `useOwnerAvailability.js`, `useRegistrationCompletion.js` (lot 1),
   `useClinicDonors.js`, `useClinicRequest.js`, `useClinicSettings.js`,
-  `useClinicStats.js` — lot 2), désormais sur `client.models.X` —
-  `aws-amplify/data`. Lot 3/3 restant encore sur le client Gen1
-  (`generateClient().graphql(...)`, `aws-amplify/api`) : `useAnimalValidation.js`,
-  `useMatchingRequests.js`, `useMissionClosure.js`, `useOwnerMissions.js`. Ne pas
-  supposer `client.models.X` disponible sur un composable avant d'avoir vérifié
-  qu'il est bien listé comme migré ici. Changement de comportement central
+  `useClinicStats.js` (lot 2), `useAnimalValidation.js`, `useMatchingRequests.js`,
+  `useMissionClosure.js`, `useOwnerMissions.js` (lot 3, y compris
+  `client.mutations.linkRequestToMission`, ADR-0011). Les documents GraphQL Gen1
+  (`src/graphql/{queries,mutations,subscriptions,custom-queries,custom-mutations}.js`)
+  sont désormais **orphelins** — plus aucun composable ne les importe — mais
+  **pas supprimés** : leur suppression est différée à la sous-tâche 6 (une fois le
+  scénario de bout en bout revérifié sur Gen2). `src/main.js`
+  (`Amplify.configure(awsExports)`) reste sur la config Gen1 pour l'instant — le
+  basculement vers `amplify_outputs.json` (Gen2) est la prochaine étape,
+  nécessite un premier `ampx sandbox` (action du repo owner, aucun agent ne
+  déploie) avant de pouvoir tourner en local. Changement de comportement central
   à connaître avant de toucher un composable non encore migré : le client
   Gen2 ne lève PAS d'exception sur une erreur GraphQL/`@auth` (contrairement
   au client Gen1) — il résout normalement `{ data, errors }`. Voir

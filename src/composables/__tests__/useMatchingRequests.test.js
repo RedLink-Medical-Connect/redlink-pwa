@@ -204,7 +204,15 @@ describe('useMatchingRequests', () => {
   // relation `clinic` imbriquée (id/name/latitude/longitude) est un jour retirée de ce
   // selectionSet (régression du bug #3 documenté en tête de fichier), ce test échoue même si
   // les fixtures mockées ci-dessous continuent, elles, d'injecter `clinic` à la main.
-  it("interroge Request.list() avec un selectionSet qui inclut bien la relation clinic imbriquée (id/name/latitude/longitude)", async () => {
+  //
+  // Revue Lead Dev (lot 3/3) : assertion resserrée sur le tableau EXACT plutôt que
+  // `arrayContaining` -- un `arrayContaining` ne détecterait pas un futur réélargissement
+  // silencieux (ex. quelqu'un rajoute `clinic.address`/`clinic.phone` "au cas où") sur ce
+  // fichier qui ne sera plus revisité avant la fin de la Phase 8, alors que ce `selectionSet`
+  // a justement été resserré champ par champ dans ce même commit (9 champs, contre 14 dont 10
+  // sur Clinic en Gen1) en vérifiant ce qui est réellement consommé par
+  // eligibility-service.js/DashboardView.vue.
+  it("interroge Request.list() avec exactement le selectionSet minimal (scalaires + relation clinic imbriquée id/name/latitude/longitude)", async () => {
     mockGraphqlResponses({
       profile: buildOwnerProfile(),
       animals: [buildAnimal()],
@@ -216,7 +224,17 @@ describe('useMatchingRequests', () => {
 
     expect(requestListMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        selectionSet: expect.arrayContaining(['clinic.id', 'clinic.name', 'clinic.latitude', 'clinic.longitude']),
+        selectionSet: [
+          'id',
+          'requestType',
+          'requiredSpecies',
+          'requiredBloodGroup',
+          'appointmentDatetime',
+          'clinic.id',
+          'clinic.name',
+          'clinic.latitude',
+          'clinic.longitude',
+        ],
       }),
     )
   })
