@@ -121,6 +121,217 @@ describe('amplify/data/resource.ts — relations ADR-0010 (appariement obligatoi
   })
 })
 
+/**
+ * Portage des guarantees pin-testées par `src/graphql/__tests__/schema.test.js` (Gen1,
+ * supprimé Phase 8 sous-tâche 6 -- nettoyage post-migration) qui n'avaient pas encore
+ * d'équivalent ici : seules `ClinicOwnerRelation.ownerDefinedIn` (ADR-0009) et les relations
+ * ADR-0010/ADR-0011 étaient couvertes ci-dessus. Ce bloc couvre le reste (Animal ADR-0002/0003/
+ * ADR-0006, Request/Mission ADR-0004/0005) sur le SDL compilé Gen2 plutôt que le SDL Gen1 lu en
+ * texte brut -- mêmes assertions sémantiques, format `@auth(rules: [...])` légèrement différent
+ * (ex. terminaison `}])` au lieu de `])`, ordre `operations`/`ownerField` dans la règle owner).
+ * Sans ce portage, la suppression de schema.test.js aurait fait perdre silencieusement la
+ * détection de régression sur ces règles -- voir la consigne explicite du coordinateur pour
+ * cette sous-tâche de nettoyage (ne pas supprimer un pin sans équivalent Gen2).
+ */
+
+/** Extrait `<fieldName>: <Type> @auth(rules: [...}])` (jusqu'au premier `}])` après le champ). */
+function extractFieldAuthBlock(typeText: string, fieldName: string): string {
+  const startIdx = typeText.indexOf(`\n  ${fieldName}:`)
+  if (startIdx === -1) {
+    throw new Error(`champ ${fieldName} introuvable`)
+  }
+  const endIdx = typeText.indexOf('}])', startIdx)
+  if (endIdx === -1) {
+    throw new Error(`bloc @auth introuvable pour ${fieldName}`)
+  }
+  return typeText.slice(startIdx, endIdx + '}])'.length)
+}
+
+describe('amplify/data/resource.ts — Animal.isValidatedDonor / validationExpiresAt (équivalent Gen2 ADR-0002, ex-schema.test.js)', () => {
+  const animalType = extractType('Animal')
+
+  it('les deux champs de validation vivent bien dans le type Animal', () => {
+    expect(animalType).toContain('isValidatedDonor:')
+    expect(animalType).toContain('validationExpiresAt:')
+  })
+
+  it('isValidatedDonor est nullable (Boolean, pas Boolean!)', () => {
+    expect(animalType).toContain('isValidatedDonor: Boolean @auth(')
+  })
+
+  it('validationExpiresAt est nullable (AWSDateTime, pas AWSDateTime!)', () => {
+    expect(animalType).toContain('validationExpiresAt: AWSDateTime @auth(')
+  })
+
+  it.each(['isValidatedDonor', 'validationExpiresAt'])(
+    "%s : l'Owner n'a que 'read', jamais d'écriture",
+    (fieldName) => {
+      const block = extractFieldAuthBlock(animalType, fieldName)
+      expect(block).toContain('{allow: owner, operations: [read]')
+    },
+  )
+
+  it.each(['isValidatedDonor', 'validationExpiresAt'])(
+    '%s : les Veterinarians ont read+update, scopé au groupe Veterinarians',
+    (fieldName) => {
+      const block = extractFieldAuthBlock(animalType, fieldName)
+      expect(block).toContain(
+        '{allow: groups, operations: [read, update], groups: ["Veterinarians"]}',
+      )
+    },
+  )
+})
+
+describe('amplify/data/resource.ts — Animal.bloodGroup (équivalent Gen2 ADR-0006, ex-schema.test.js)', () => {
+  const animalType = extractType('Animal')
+
+  it("bloodGroup reste non-nullable (String!) et écrit par l'Owner à la création/édition -- pas de restriction d'opérations sur la règle owner (contrairement à isValidatedDonor/validationExpiresAt/lastDonationDate)", () => {
+    const block = extractFieldAuthBlock(animalType, 'bloodGroup')
+    expect(block).toContain('bloodGroup: String! @auth(')
+    expect(block).toContain('{allow: owner, ownerField: "owner"}')
+    expect(block).not.toContain('{allow: owner, operations: [read]')
+  })
+
+  it('les Veterinarians ont read+update sur bloodGroup (corrige un bloodGroup UNKNOWN saisi par erreur)', () => {
+    const block = extractFieldAuthBlock(animalType, 'bloodGroup')
+    expect(block).toContain(
+      '{allow: groups, operations: [read, update], groups: ["Veterinarians"]}',
+    )
+  })
+})
+
+describe('amplify/data/resource.ts — Animal.lastDonationDate (équivalent Gen2 ADR-0003, ex-schema.test.js)', () => {
+  const animalType = extractType('Animal')
+
+  it('lastDonationDate est nullable (AWSDate, pas AWSDate!)', () => {
+    expect(animalType).toContain('lastDonationDate: AWSDate @auth(')
+  })
+
+  it("l'Owner n'a que 'read' sur lastDonationDate, jamais d'écriture", () => {
+    const block = extractFieldAuthBlock(animalType, 'lastDonationDate')
+    expect(block).toContain('{allow: owner, operations: [read]')
+  })
+
+  it('les Veterinarians ont read+update sur lastDonationDate', () => {
+    const block = extractFieldAuthBlock(animalType, 'lastDonationDate')
+    expect(block).toContain(
+      '{allow: groups, operations: [read, update], groups: ["Veterinarians"]}',
+    )
+  })
+})
+
+describe('amplify/data/resource.ts — Request @auth au niveau champ (équivalent Gen2 ADR-0004/0005, durcissement Phase 5, ex-schema.test.js)', () => {
+  const requestType = extractType('Request')
+
+  it.each([
+    'requestType',
+    'requiredSpecies',
+    'requiredBloodGroup',
+    'quantity',
+    'appointmentDatetime',
+    'createdAt',
+    'clinicID',
+  ])(
+    "%s : l'Owner (règle 'private'/allow.authenticated()) n'a que 'read' -- sans ce scoping, la " +
+      "règle de type ('read'+'update', nécessaire à linkRequestToMission) aurait permis à " +
+      "N'IMPORTE QUEL Owner authentifié de réécrire ce champ sur N'IMPORTE QUELLE Request",
+    (fieldName) => {
+      const block = extractFieldAuthBlock(requestType, fieldName)
+      expect(block).toContain('{allow: private, operations: [read]}')
+    },
+  )
+
+  it.each([
+    'requestType',
+    'requiredSpecies',
+    'requiredBloodGroup',
+    'quantity',
+    'appointmentDatetime',
+    'createdAt',
+    'clinicID',
+  ])(
+    '%s : les Veterinarians ont create+read (pas update)',
+    (fieldName) => {
+      const block = extractFieldAuthBlock(requestType, fieldName)
+      expect(block).toContain(
+        '{allow: groups, operations: [create, read], groups: ["Veterinarians"]}',
+      )
+    },
+  )
+
+  it("status/activeMissionID n'ont AUCUN @auth au niveau champ -- ce sont les deux seuls champs que linkRequestToMission (Owner, à l'acceptation) doit pouvoir écrire via la règle de type", () => {
+    expect(requestType).toContain('status: RequestStatus!\n')
+    expect(requestType).toContain('activeMissionID: ID\n')
+  })
+
+  it("la règle de type porte bien 'private'/read+update (nécessaire à linkRequestToMission) et 'Veterinarians' sans restriction d'opérations", () => {
+    const typeAuthStart = compiledSdl.indexOf('type Request @model @auth(')
+    const typeAuthEnd = compiledSdl.indexOf('])\n{', typeAuthStart)
+    const typeAuthBlock = compiledSdl.slice(typeAuthStart, typeAuthEnd)
+    expect(typeAuthBlock).toContain('{allow: groups, groups: ["Veterinarians"]}')
+    expect(typeAuthBlock).toContain('{allow: private, operations: [read, update]}')
+  })
+})
+
+describe('amplify/data/resource.ts — Mission @auth (équivalent Gen2 ADR-0004, durcissement Phase 5, ex-schema.test.js)', () => {
+  const missionType = extractType('Mission')
+
+  it.each([
+    'validationCode',
+    'scannedAt',
+    'validatedByVeterinarianID',
+    'stripePaymentIntentId',
+    'stripePaymentStatus',
+  ])("%s : l'Owner n'a que 'read'", (fieldName) => {
+    const block = extractFieldAuthBlock(missionType, fieldName)
+    expect(block).toContain('{allow: owner, operations: [read]')
+  })
+
+  it.each([
+    'validationCode',
+    'scannedAt',
+    'validatedByVeterinarianID',
+    'stripePaymentIntentId',
+    'stripePaymentStatus',
+  ])('%s : les Veterinarians ont read+update (pas create)', (fieldName) => {
+    const block = extractFieldAuthBlock(missionType, fieldName)
+    expect(block).toContain(
+      '{allow: groups, operations: [read, update], groups: ["Veterinarians"]}',
+    )
+  })
+
+  it("status/requestID/animalID/appointmentDatetime n'ont AUCUN @auth au niveau champ -- createMissionSimple (Owner, à l'acceptation) doit pouvoir écrire status/requestID/animalID à la création", () => {
+    expect(missionType).toContain('status: MissionStatus!\n')
+    expect(missionType).toContain('requestID: ID!\n')
+    expect(missionType).toContain('animalID: ID!\n')
+  })
+
+  it("la règle de type Veterinarians garde 'update' -- rend une re-clôture (updateMission sur une Mission déjà COMPLETED/NO_SHOW) inoffensive côté serveur", () => {
+    const typeAuthStart = compiledSdl.indexOf('type Mission @model @auth(')
+    const typeAuthEnd = compiledSdl.indexOf('])\n{', typeAuthStart)
+    const typeAuthBlock = compiledSdl.slice(typeAuthStart, typeAuthEnd)
+    expect(typeAuthBlock).toContain(
+      '{allow: groups, operations: [read, update], groups: ["Veterinarians"]}',
+    )
+  })
+
+  it("la règle owner de Mission est restreinte à [create, read, delete] (pas 'update') -- un Owner ne peut pas s'auto-valider sa Mission comme terminée", () => {
+    const typeAuthStart = compiledSdl.indexOf('type Mission @model @auth(')
+    const typeAuthEnd = compiledSdl.indexOf('])\n{', typeAuthStart)
+    const typeAuthBlock = compiledSdl.slice(typeAuthStart, typeAuthEnd)
+    expect(typeAuthBlock).toContain('{allow: owner, operations: [create, read, delete]')
+  })
+})
+
+describe('amplify/data/resource.ts — ClinicOwnerRelation, aucun @auth au niveau champ (complément ADR-0009, ex-schema.test.js)', () => {
+  it('clinicID/ownerID/isPrimaryClinic sont tous écrits sans scoping champ-par-champ', () => {
+    const relationType = extractType('ClinicOwnerRelation')
+    const typeHeaderEnd = relationType.indexOf('\n{') + '\n{'.length
+    const relationFieldsOnly = relationType.slice(typeHeaderEnd)
+    expect(relationFieldsOnly).not.toContain('@auth(')
+  })
+})
+
 describe('amplify/data/resource.ts — linkRequestToMission (prérequis Phase 8, lot 3/3 sous-tâche 5, ADR-0011)', () => {
   // Portée volontairement limitée, comme le reste de ce fichier (voir l'en-tête) : ce test
   // vérifie que la mutation custom compile avec les bons arguments/type de retour/règle

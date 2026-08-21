@@ -1,9 +1,15 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
-import awsExports from '@/aws-exports.js'
+import outputs from '../amplify_outputs.json'
 import { Amplify } from 'aws-amplify'
 
-Amplify.configure(awsExports)
+// Phase 8, fin de la migration Gen1 -> Gen2 : `amplify_outputs.json` remplace
+// `aws-exports.js` (Gen1). Ce fichier est généré par `npx ampx sandbox` (ou
+// `ampx pipeline-deploy` en CI), gitignored (voir .gitignore, ajouté sous-tâche 1) --
+// n'existe pas tant que le repo owner n'a pas lancé un premier déploiement Gen2
+// (aucun agent ne déploie). `npm run dev`/`npm run build` échoueront avec un module
+// introuvable jusque-là -- attendu, pas un bug de cette migration.
+Amplify.configure(outputs)
 
 import router from '@/router'
 import i18n from '@/i18n.js'

@@ -14,8 +14,8 @@ Lead Dev review. You work on the same branch, on top of the Senior Dev's changes
 
 Before writing anything, read:
 - `CLAUDE.md` (repo root) — stack summary and the MCP usage notes below are the
-  short version of what's there; read it for the full picture (Amplify Gen1 vs
-  Gen2, tracked i18n debt, etc.).
+  short version of what's there; read it for the full picture (Amplify Gen2
+  backend, tracked i18n debt, etc.).
 - `CONTEXT.md` — domain glossary (Request, Mission, Eligibility, Validated Donor,
   Frequency Rule, Clinic Priority). Use these terms exactly in test descriptions.
 - `docs/adr/` — architectural decisions (ADR-0001: atomic conditional accept;
@@ -43,16 +43,12 @@ Before writing anything, read:
   vue-router, or vue-i18n APIs, verify the exact API through this MCP. This
   project has no TypeScript to catch a wrong API call at compile time.
 - **amplify-docs** — before writing a test that asserts anything about Amplify
-  behavior (GraphQL `@auth` semantics, generated mutation/query shape,
-  conditional writes) on code that's still Gen1, check this MCP. **Phase 8
-  migration in progress (Gen1 → Gen2, since 2026-08-18)**: a sub-task on
-  `feat/phase8-gen2-migration` may deliberately move a composable from
-  `generateClient().graphql({query, variables})` to `client.models.X.create()/
-  get()/list()/update()` (Gen2) — update that composable's mock and keep its
-  existing business-logic assertions running unchanged in the same PR (that's
-  what catches a migration regression); don't reason from Gen1 shape as if it
-  were still the only correct one. `amplify-docs`' index only covers Gen1 —
-  use `context7`/web search to verify a Gen2 claim instead.
+  behavior (`.authorization()` semantics, generated mutation/query shape,
+  conditional writes), check this MCP for confirmation, keeping in mind its
+  **permanent known limitation**: its index only covers Gen1 docs and can't
+  confirm anything about `defineAuth`/`defineData`/`client.models.X` (Gen2),
+  which is this repo's entire backend — use `context7`/web search instead for
+  any Gen2 claim.
 - **playwright** — do NOT launch this without explicit confirmation from the
   coordinator first. The one e2e test in this repo runs against a real,
   unmocked backend (Cognito/DynamoDB) — it can create or modify real data.
@@ -79,7 +75,8 @@ Before writing anything, read:
    bugs; if a failure reveals a real bug in the implementation, report it
    clearly rather than papering over it in the test.
 5. Mock/local only for this round — no live AWS/Amplify environment. Mock
-   `generateClient().graphql` calls rather than hitting a real backend.
+   `generateClient<Schema>()`'s `client.models.X`/`client.mutations.X` calls
+   rather than hitting a real backend.
 
 ## What NOT to do
 

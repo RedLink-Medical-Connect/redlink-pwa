@@ -17,87 +17,83 @@ architecturales) et `.cursorrules` (conventions détaillées pour l'éditeur).
   pur) — voir ADR-0007.
 
 **Backend / Infra**
-- **Migration Gen1 → Gen2 en cours (Phase 8, depuis le 2026-08-18)** — voir
-  `docs/adr/` et le plan de roadmap. Amplify Gen1 est en *maintenance mode*
-  depuis le 1er mai 2026 (fin de vie le 1er mai 2027) ; la Phase 8 réécrit le
-  backend en Gen2 (`ampx`, `defineAuth`, `defineData`, `backend.ts`) à la main
-  (pas l'outil CLI beta de migration), sous-tâche par sous-tâche, dans une
-  seule branche/PR exceptionnellement (migration, pas une feature incrémentale).
-  **Pendant la durée de la migration, ne plus rejeter un pattern Gen2 par
-  principe** — un agent doit distinguer "résidu Gen1 pas encore migré" de
-  "code Gen2 conforme à la sous-tâche en cours". Une fois la Phase 8 terminée
-  et vérifiée de bout en bout, ce bloc redevient "Gen2 uniquement" et les
-  lignes ci-dessous (Transformer v1, VTL, modèles `@model` Gen1) sont retirées.
-- AppSync/GraphQL, Transformer v1 (`@model`, `@auth` — y compris au niveau
-  champ), résolveurs VTL auto-générés — **legacy Gen1**, remplacé
-  progressivement par `defineData` (Gen2) pendant la Phase 8
-- Cognito (user pools, groupes `Veterinarians`/`Owners`) — migré vers
-  `defineAuth` (Gen2, `amplify/auth/resource.ts`), Phase 8 sous-tâche 3.
-  Groupes déclarés statiquement (`groups: [...]`), contrairement à Gen1 où ils
-  étaient créés paresseusement au premier signup — voir ADR-0008.
-- Lambda (Node.js, un trigger PostConfirmation) — migré vers le modèle de
-  fonctions Gen2 (`amplify/functions/post-confirmation/`, TypeScript), Phase 8
-  sous-tâche 3 ; l'équivalent Gen1 CommonJS reste en place le temps de la
-  migration (voir ADR-0008)
-- DynamoDB (via les modèles `@model` Gen1, puis `defineData` Gen2) — schéma de
-  données migré vers `defineData` (Gen2, `amplify/data/resource.ts`), Phase 8
-  sous-tâche 4 : les 8 types `@model` et leurs règles `@auth` (type et champ,
-  ADR-0002 à 0006) sont traduits en `.authorization()` (voir ADR-0009 — en
-  particulier `ClinicOwnerRelation.ownerDefinedIn("ownerID")`, la traduction
-  Gen2 du pattern qui évite de reproduire le bug `d27f204`). Un piège Gen2
-  découvert pendant cette sous-tâche, pas présent en Gen1 : `hasOne`/`hasMany`
-  exige toujours un `belongsTo` apparié sur le modèle ciblé, avec un champ de
-  référence identique des deux côtés — le processeur de schéma lève une
-  erreur bloquante sinon (voir ADR-0010, `Request.mission`/`Mission.request`).
-  Prérequis au lot 3/3 : `defineData` Gen2 n'expose **aucun** argument
-  `condition` sur les mutations générées automatiquement
-  (`client.models.X.update()`) — pour une écriture qui a besoin d'une garde
-  DynamoDB conditionnelle (`ConditionExpression`, ex. écriture atomique
-  anti-course, ADR-0001), le chemin Gen2 est une **mutation custom** +
-  resolver JS AppSync (`a.handler.custom({ dataSource: a.ref('ModelName'),
-  entry: './resolvers/....js' })`, `ddb.update({ key, condition, update })`
-  de `@aws-appsync/utils/dynamodb`) ciblant directement la table managée du
+- **Amplify Gen2 uniquement** (`ampx`, `defineAuth`, `defineData`,
+  `backend.ts`) — la migration Gen1 → Gen2 (Phase 8, roadmap) est terminée
+  côté code. Amplify Gen1 était en *maintenance mode* depuis le 1er mai 2026
+  (fin de vie le 1er mai 2027) ; tout le code applicatif et l'infra déclarative
+  Gen1 (`amplify/backend/`, Transformer v1/VTL, `src/graphql/{queries,
+  mutations,subscriptions,custom-queries,custom-mutations}.js`) ont été
+  retirés du dépôt en sous-tâche 6 (récupérables via l'historique git si
+  besoin). Voir `docs/adr/0007` à `0011` — trace historique des décisions de
+  migration, jamais marqués "superseded" au sens où leur raisonnement serait
+  caduc (ADR-0001 à 0006 restent aussi la trace vivante des décisions de fond
+  Gen1, dont la *forme* seule a changé de syntaxe en Gen2, voir ADR-0009/0010).
+- AppSync/GraphQL via `defineData` — schéma déclaratif
+  (`amplify/data/resource.ts`, `a.model()`/`a.schema()`), pas de SDL écrit à
+  la main. Les 8 types `@model` et leurs règles d'autorisation (type et champ,
+  traduction des patterns ADR-0002 à 0006) vivent dans ce fichier, avec le
+  détail de la traduction `@auth` → `.authorization()` en commentaire et dans
+  ADR-0009 (en particulier `ClinicOwnerRelation.ownerDefinedIn("ownerID")`,
+  le pattern qui évite de reproduire le bug `d27f204`). `amplify/data/
+  __tests__/resource.transform.test.ts` pin-teste `schema.transform().schema`
+  (le SDL compilé) — c'est l'équivalent Gen2 de l'ancien
+  `src/graphql/__tests__/schema.test.js` (Gen1, supprimé en sous-tâche 6,
+  guaranties portées dans ce fichier plutôt que perdues).
+- Une relation `hasOne`/`hasMany` exige toujours un `belongsTo` apparié sur le
+  modèle ciblé, avec un champ de référence identique des deux côtés — le
+  processeur de schéma Gen2 lève une erreur bloquante sinon (contrainte
+  absente en Gen1/Transformer v1). Voir ADR-0010 (`Request.mission`/
+  `Mission.request`, `Mission.activeForRequest`/`Request.missions` — ces deux
+  derniers absents de Gen1, ajoutés uniquement pour satisfaire le validateur,
+  `Veterinarian.validatedMissions` câblé sur le vrai FK).
+- `defineData` n'expose **aucun** argument `condition` sur les mutations
+  générées automatiquement (`client.models.X.update()`) — pour une écriture
+  qui a besoin d'une garde DynamoDB conditionnelle (`ConditionExpression`, ex.
+  écriture atomique anti-course à l'acceptation d'une Mission, ADR-0001), le
+  chemin Gen2 est une **mutation custom** + resolver JS AppSync
+  (`a.handler.custom({ dataSource: a.ref('ModelName'), entry:
+  './resolvers/....js' })`, `ddb.update({ key, condition, update })` de
+  `@aws-appsync/utils/dynamodb`) ciblant directement la table managée du
   modèle — pas une traduction `a.model()`/`.authorization()`. Le resolver est
   obligatoirement `.js` (pas `.ts` : `resolveEntryPath()` l'upload tel quel,
   sans transpilation, vers le runtime `APPSYNC_JS`). Voir ADR-0011
-  (`linkRequestToMission`) pour l'exemple de référence si un futur besoin
-  similaire apparaît sur un autre composable.
-  **Sous-tâche 5 (bascule des composables) terminée** : les 12/12 composables/
-  services applicatifs qui parlaient GraphQL sont désormais sur `client.models.X`
-  (`aws-amplify/data`) — `useAnimals.js`, `useOwnerProfile.js`,
-  `useOwnerAvailability.js`, `useRegistrationCompletion.js` (lot 1),
-  `useClinicDonors.js`, `useClinicRequest.js`, `useClinicSettings.js`,
-  `useClinicStats.js` (lot 2), `useAnimalValidation.js`, `useMatchingRequests.js`,
-  `useMissionClosure.js`, `useOwnerMissions.js` (lot 3, y compris
-  `client.mutations.linkRequestToMission`, ADR-0011). Les documents GraphQL Gen1
-  (`src/graphql/{queries,mutations,subscriptions,custom-queries,custom-mutations}.js`)
-  sont désormais **orphelins** — plus aucun composable ne les importe — mais
-  **pas supprimés** : leur suppression est différée à la sous-tâche 6 (une fois le
-  scénario de bout en bout revérifié sur Gen2). `src/main.js`
-  (`Amplify.configure(awsExports)`) reste sur la config Gen1 pour l'instant — le
-  basculement vers `amplify_outputs.json` (Gen2) est la prochaine étape,
-  nécessite un premier `ampx sandbox` (action du repo owner, aucun agent ne
-  déploie) avant de pouvoir tourner en local. Changement de comportement central
-  à connaître avant de toucher un composable non encore migré : le client
-  Gen2 ne lève PAS d'exception sur une erreur GraphQL/`@auth` (contrairement
-  au client Gen1) — il résout normalement `{ data, errors }`. Voir
-  `src/services/graphql-error-service.js` (à partir du lot 2) pour le
-  helper partagé qui retransforme `errors` en exception là où le contrat
-  observable par l'appelant (vue, composable parent) doit rester inchangé.
-  Pattern `selectionSet` (depuis le lot 2, requêtes avec relation imbriquée type
-  Gen1 `getVetWithClinic`) : contrairement à une query Gen1 partagée entre
-  plusieurs composables, le `selectionSet` Gen2 est posé par CHAQUE appelant —
-  chacun ne demande que les champs qu'IL consomme réellement (ex.
+  (`linkRequestToMission`, `amplify/data/resolvers/link-request-to-mission.js`)
+  pour l'exemple de référence si un futur besoin similaire apparaît.
+- Cognito via `defineAuth` (`amplify/auth/resource.ts`) — user pools, groupes
+  `Veterinarians`/`Owners` déclarés statiquement (`groups: [...]`),
+  contrairement à Gen1 où ils étaient créés paresseusement au premier signup —
+  voir ADR-0008.
+- Lambda : trigger PostConfirmation sur le modèle de fonctions Gen2
+  (`amplify/functions/post-confirmation/`, TypeScript, `defineFunction`),
+  référencé depuis `amplify/auth/resource.ts` — voir ADR-0008.
+- DynamoDB via les modèles `defineData` (`@model`/`a.model()`).
+- Les 12 composables/services applicatifs qui parlent GraphQL sont sur
+  `client.models.X` (`aws-amplify/data`) : `useAnimals.js`,
+  `useOwnerProfile.js`, `useOwnerAvailability.js`,
+  `useRegistrationCompletion.js`, `useClinicDonors.js`, `useClinicRequest.js`,
+  `useClinicSettings.js`, `useClinicStats.js`, `useAnimalValidation.js`,
+  `useMatchingRequests.js`, `useMissionClosure.js`, `useOwnerMissions.js` (ce
+  dernier via `client.mutations.linkRequestToMission`, ADR-0011). `src/
+  main.js` importe `amplify_outputs.json` (généré par `npx ampx sandbox`,
+  gitignored — n'existe qu'après un premier déploiement réel, action du repo
+  owner, aucun agent ne déploie). Comportement central à connaître : le
+  client Gen2 ne lève PAS d'exception sur une erreur GraphQL/`@auth` — il
+  résout normalement `{ data, errors }`. Voir
+  `src/services/graphql-error-service.js` pour le helper partagé qui
+  retransforme `errors` en exception là où le contrat observable par
+  l'appelant (vue, composable parent) doit rester inchangé.
+  Pattern `selectionSet` (requêtes avec relation imbriquée, ex. `Clinic`
+  imbriqué dans `Veterinarian`) : le `selectionSet` Gen2 est posé par CHAQUE
+  appelant — chacun ne demande que les champs qu'IL consomme réellement (ex.
   `useClinicDonors.fetchClinicContext()` ne sélectionne que
   `clinic.latitude`/`clinic.longitude`, quand `useClinicSettings.fetchSettings()`
-  a besoin de tous les champs de `Clinic` pour son formulaire d'édition), plutôt
-  que de recopier aveuglément la sélection de la query Gen1 remplacée. Vaut aussi
-  pour un `.get()`/`.list()` sans relation imbriquée : ne pas laisser le
-  `selectionSet` par défaut (tous les champs scalaires) sur un appel qui ne lit
-  qu'un sous-ensemble des champs — surtout quand ce sous-ensemble appartient à
-  un autre utilisateur (ex. `useClinicSettings.deleteAccount`'s
-  garde-fou multi-vétérinaire, qui ne lit que `id` mais interrogeait par défaut
-  les coordonnées de collègues).
+  a besoin de tous les champs de `Clinic` pour son formulaire d'édition).
+  Vaut aussi pour un `.get()`/`.list()` sans relation imbriquée : ne pas
+  laisser le `selectionSet` par défaut (tous les champs scalaires) sur un
+  appel qui ne lit qu'un sous-ensemble des champs — surtout quand ce
+  sous-ensemble appartient à un autre utilisateur (ex.
+  `useClinicSettings.deleteAccount`'s garde-fou multi-vétérinaire, qui ne lit
+  que `id` mais interrogeait par défaut les coordonnées de collègues).
 
 **Tests**
 - Vitest (unitaire — le seul réellement utilisé)
@@ -127,13 +123,14 @@ configuré en dehors (global, par machine) — son binaire pointe vers un chemin
 local, pas encore packagé pour être partageable en l'état.
 
 - **amplify-docs** — à consulter avant tout code touchant Amplify (auth, API,
-  schema, functions). **Limitation connue depuis la Phase 8** : son index
-  local ne couvre que la doc Gen1 — inutilisable pour vérifier un pattern Gen2
-  (`defineAuth`, `defineData`, fonctions). Pour la durée de la migration,
-  s'appuyer sur `context7`/recherche web pour tout ce qui est Gen2, et
-  continuer à confirmer via `amplify-docs` uniquement les points encore Gen1
-  (code legacy pas encore migré). Repointer l'index vers la doc Gen2 dès qu'un
-  binaire à jour est disponible (pas fait à ce jour, pas bloquant).
+  schema, functions). **Limitation permanente de l'outil, pas liée à une
+  migration en cours** (la Phase 8 est terminée côté code) : son index local
+  ne couvre que la doc Gen1 — inutilisable pour vérifier un pattern Gen2
+  (`defineAuth`, `defineData`, fonctions) tant que le binaire n'est pas
+  repointé. S'appuyer sur `context7`/recherche web pour tout ce qui est Gen2
+  (c'est-à-dire tout le backend de ce repo désormais). Repointer l'index vers
+  la doc Gen2 dès qu'un binaire à jour est disponible (pas fait à ce jour, pas
+  bloquant).
 - **context7** — vérifie l'API exacte de Vue 3 / Pinia / PrimeVue / vue-router /
   vue-i18n avant d'écrire du code (pas de TypeScript ici pour rattraper les
   erreurs à la compilation).
@@ -153,8 +150,10 @@ local, pas encore packagé pour être partageable en l'état.
 
 Deux `PreToolUse` hooks bloquent l'édition par l'agent de fichiers sensibles :
 les GraphQL auto-générés (`src/graphql/{queries,mutations,subscriptions}.js` —
-un vrai bug de ce repo vient de là) et tout fichier `.env*` (historique de
-secrets committés par erreur). Voir `.claude/hooks/`.
+un vrai bug de ce repo vient de là ; ces fichiers Gen1 n'existent plus depuis
+la Phase 8 sous-tâche 6, le hook reste en place mais ne matche plus rien tant
+que Gen2 ne génère pas d'équivalent à ce chemin) et tout fichier `.env*`
+(historique de secrets committés par erreur). Voir `.claude/hooks/`.
 
 ## Subagents disponibles
 
@@ -181,13 +180,17 @@ touchés, en parallèle du reviewer principal).
 - **Services (deep modules)** : `src/services/xxx-service.js` — fonctions pures
   exportées, aucune réactivité Vue, aucun appel GraphQL, aucun accès DOM (voir
   `eligibility-service.js`).
-- **GraphQL** : `generateClient()` + `authMode: 'userPool'`, `try/catch/finally`
-  avec un ref de loading dédié. Pour une query/mutation dont les champs
-  dépassent le codegen par défaut : l'ajouter dans `custom-queries.js`/
-  `custom-mutations.js` — jamais éditer `queries.js`/`mutations.js`/
-  `subscriptions.js` à la main (fichiers auto-générés, écrasés au prochain
-  `amplify codegen`/`amplify push` ; un vrai bug a déjà eu cette cause exacte
-  dans ce repo).
+- **GraphQL (Gen2)** : `generateClient()` (`aws-amplify/data`),
+  `client.models.X.create()/get()/list()/update()/delete()` pour le CRUD
+  standard, `client.mutations.X()` pour une opération custom déclarée dans
+  `amplify/data/resource.ts` (une seule à ce jour, `linkRequestToMission`,
+  voir ADR-0011). `try/catch/finally` avec un ref de loading dédié — le
+  client Gen2 ne lève PAS d'exception sur une erreur GraphQL/`@auth`, il
+  résout `{ data, errors }` ; voir `src/services/graphql-error-service.js`
+  pour retransformer `errors` en exception là où l'appelant a besoin de ce
+  contrat. `selectionSet` explicite posé par chaque appelant pour toute
+  requête avec relation imbriquée ou qui ne lit qu'un sous-ensemble des
+  champs scalaires (voir la section Backend/Infra plus haut).
 - **i18n** : `$t()` est la norme, suivie dans toutes les vues/composants du
   repo (`DashboardView.vue` avait des chaînes françaises en dur — corrigé,
   roadmap Phase 7 section C).
@@ -202,16 +205,19 @@ touchés, en parallèle du reviewer principal).
   `RegisterOwnerView.vue` (roadmap Phase 6.B). Référence pour tout futur
   formulaire qui ne peut pas se permettre un `<label>` visible.
 - **Écriture Veterinarian scopée sur `Animal`/`Request`/`Mission`** : pattern
-  utilisé cinq fois (ADR-0002, ADR-0003, ADR-0004, ADR-0005) — `@auth` au niveau
-  champ (pas de mutation dédiée/Lambda) apparié à une mutation `*Simple`
-  n'envoyant que les champs autorisés. Référence pour tout futur champ
-  écrit par les Veterinarians **seuls** (règle owner restreinte à `[read]`).
-  Limite connue : le Transformer v1 ne restreint jamais une valeur (seulement
-  un ensemble d'opérations) — voir ADR-0004/ADR-0005 pour les cas où ça laisse
-  un résidu assumé. **Variante** quand le champ est déjà écrit par l'Owner
-  (règle owner alors laissée sans restriction d'opérations) : voir ADR-0006
-  (`Animal.bloodGroup`) — ne pas copier `[read]` pour l'Owner dans ce cas, ça
-  casserait la création/édition existante.
+  utilisé cinq fois (ADR-0002, ADR-0003, ADR-0004, ADR-0005 ; traduit en Gen2
+  par ADR-0009) — `.authorization()` au niveau champ dans
+  `amplify/data/resource.ts` (pas de mutation dédiée/Lambda), le composable
+  n'envoyant dans `input` que les champs qu'il a le droit d'écrire (plus
+  besoin d'une mutation `*Simple` séparée comme en Gen1 : le client Gen2
+  n'envoie que ce qu'on lui passe). Référence pour tout futur champ écrit par
+  les Veterinarians **seuls** (règle owner restreinte à `[read]`). Limite
+  connue, inchangée en Gen2 : `.authorization()` ne restreint jamais une
+  valeur (seulement un ensemble d'opérations) — voir ADR-0004/ADR-0005 pour
+  les cas où ça laisse un résidu assumé. **Variante** quand le champ est déjà
+  écrit par l'Owner (règle owner alors laissée sans restriction d'opérations) :
+  voir ADR-0006 (`Animal.bloodGroup`) — ne pas copier `[read]` pour l'Owner
+  dans ce cas, ça casserait la création/édition existante.
 - **Écriture secondaire best-effort** : une écriture non critique qui suit une
   écriture critique déjà réussie (nettoyage de Mission orpheline dans
   `useOwnerMissions.js`, upsert `ClinicOwnerRelation` dans
