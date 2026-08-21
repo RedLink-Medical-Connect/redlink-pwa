@@ -49,10 +49,19 @@ architecturales) et `.cursorrules` (conventions détaillées pour l'éditeur).
   exige toujours un `belongsTo` apparié sur le modèle ciblé, avec un champ de
   référence identique des deux côtés — le processeur de schéma lève une
   erreur bloquante sinon (voir ADR-0010, `Request.mission`/`Mission.request`).
-  Composables/services (`src/composables/*`, `src/services/*-service.js`)
-  restent sur le client Gen1 (`generateClient().graphql(...)`) jusqu'à la
-  sous-tâche 5 — ne pas supposer `client.models.X` disponible côté frontend
-  avant cette bascule.
+  Sous-tâche 5 (bascule des composables) en cours, par lots : lot 1/3 fait
+  (`useAnimals.js`, `useOwnerProfile.js`, `useOwnerAvailability.js`,
+  `useRegistrationCompletion.js`, désormais sur `client.models.X` —
+  `aws-amplify/data`), lots 2/3 restants encore sur le client Gen1
+  (`generateClient().graphql(...)`, `aws-amplify/api`). Ne pas supposer
+  `client.models.X` disponible sur un composable avant d'avoir vérifié
+  qu'il est bien listé comme migré ici. Changement de comportement central
+  à connaître avant de toucher un composable non encore migré : le client
+  Gen2 ne lève PAS d'exception sur une erreur GraphQL/`@auth` (contrairement
+  au client Gen1) — il résout normalement `{ data, errors }`. Voir
+  `src/services/graphql-error-service.js` (à partir du lot 2) pour le
+  helper partagé qui retransforme `errors` en exception là où le contrat
+  observable par l'appelant (vue, composable parent) doit rester inchangé.
 
 **Tests**
 - Vitest (unitaire — le seul réellement utilisé)
