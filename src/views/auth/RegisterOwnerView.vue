@@ -90,12 +90,13 @@ const handleRegister = async () => {
   auth.clearError()
 
   try {
-    await auth.register(
+    const success = await auth.register(
       form.value.email,
       password.value,
       `${form.value.firstname} ${form.value.lastname}`,
       'owner',
     )
+    if (!success) return
 
     const payload = {
       ...form.value,
@@ -242,14 +243,10 @@ const handleRegister = async () => {
             class="!bg-zinc-200 dark:!bg-zinc-800 !border-none !text-zinc-900 dark:!text-white !p-3 !rounded-md w-full"
           />
 
-          <Calendar
+          <AppDatePicker
             v-model="form.animal_birthDate"
-            date-format="dd/mm/yy"
             :placeholder="$t('auth.register_owner.fields.animal_birth_date')"
             :aria-label="$t('auth.register_owner.fields.animal_birth_date')"
-            :manual-input="false"
-            show-icon
-            icon-display="input"
             class="w-full"
             input-class="!bg-zinc-200 dark:!bg-zinc-800 !border-none !text-zinc-900 dark:!text-white !p-3 !rounded-md w-full placeholder:!text-zinc-500"
             :pt="{

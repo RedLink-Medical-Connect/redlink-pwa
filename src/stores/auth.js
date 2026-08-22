@@ -48,6 +48,29 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  async function redirectAfterLogin() {
+    if (currentRole.value === 'vet') {
+      await router.push('/dashboard/requests')
+    } else if (currentRole.value === 'owner') {
+      await router.push('/dashboard/profile')
+    } else {
+      await router.push('/')
+    }
+  }
+
+  // Bug réel trouvé en test de bout en bout (migration Gen1->Gen2, Phase 8) :
+  // un navigateur ayant déjà une session Amplify locale pour un Cognito User
+  // Pool remplacé depuis (ex. `ampx sandbox` relancé, nouveau pool) se
+  // retrouve dans un état incohérent -- `getCurrentUser()` échoue contre le
+  // pool actuel (l'utilisateur local n'y existe plus, cf. init() ci-dessus)
+  // donc l'app affiche "non connecté", MAIS Amplify garde en local un flag
+  // "déjà connecté" qui fait échouer tout nouveau `signIn()` avec
+  // `UserAlreadyAuthenticatedException` -- l'utilisateur reste bloqué sans
+  // pouvoir ni continuer sur l'ancienne session (invalide) ni s'authentifier
+  // à nouveau. `signOut()` purge cet état local orphelin puis on retente le
+  // `signIn()` une seule fois avec les identifiants fournis, plutôt que de
+  // laisser un message d'erreur sans issue (l'utilisateur ne peut pas "vider
+  // le localStorage" lui-même en usage normal).
   async function login(email, password) {
     isLoading.value = true
     error.value = null
@@ -55,23 +78,43 @@ export const useAuthStore = defineStore('auth', () => {
       const { isSignedIn } = await signIn({ username: email, password })
       if (isSignedIn) {
         await init()
-
-        if (currentRole.value === 'vet') {
-          await router.push('/dashboard/requests')
-        } else if (currentRole.value === 'owner') {
-          await router.push('/dashboard/profile')
-        } else {
-          await router.push('/')
-        }
+        await redirectAfterLogin()
       }
     } catch (err) {
       console.error(err)
+      if (err.name === 'UserAlreadyAuthenticatedException') {
+        try {
+          await signOut()
+          const { isSignedIn } = await signIn({ username: email, password })
+          if (isSignedIn) {
+            await init()
+            await redirectAfterLogin()
+            return
+          }
+        } catch (retryErr) {
+          console.error(retryErr)
+        }
+      }
       error.value = `errors.login_failed`
     } finally {
       isLoading.value = false
     }
   }
 
+  // Bug réel trouvé en test de bout en bout (ni ce fichier ni RegisterOwnerView.vue/
+  // RegisterClinicView.vue n'ont été touchés par la Phase 8) : cette fonction
+  // n'a jamais communiqué son échec à l'appelant (pas de `throw`, pas de valeur
+  // de retour) -- les deux vues appelantes continuaient donc TOUJOURS leur propre
+  // suite (construction du payload, `router.push('/verify-email...')`) juste après
+  // `await auth.register(...)`, même sur un `UsernameExistsException`. Le
+  // `router.push('/login?email=...')` ci-dessous s'exécutait bien en premier, mais
+  // était aussitôt écrasé par la navigation vers `/verify-email` de l'appelant --
+  // donnant l'impression que la redirection ne fonctionnait pas du tout. Retourne
+  // désormais `true`/`false` (même contrat que `forgotPass`/`deleteAccount`
+  // ci-dessous) pour que l'appelant sache s'il doit continuer. Retiré aussi : la
+  // navigation de succès vers `/verify-email` faite ici en double de celle déjà
+  // faite par les deux vues appelantes (même principe que le store qui ne doit
+  // pas naviguer lui-même, voir confirmRegistration()).
   async function register(email, password, name, roleType) {
     isLoading.value = true
     error.value = null
@@ -87,7 +130,7 @@ export const useAuthStore = defineStore('auth', () => {
           }
         }
       })
-      await router.push(`/verify-email?email=${encodeURIComponent(email)}`)
+      return true
     } catch (err) {
       console.error(err)
       if (err.name === 'UsernameExistsException') {
@@ -102,6 +145,7 @@ export const useAuthStore = defineStore('auth', () => {
       } else {
         error.value = `errors.registration_failed`
       }
+      return false
     } finally {
       isLoading.value = false
     }
