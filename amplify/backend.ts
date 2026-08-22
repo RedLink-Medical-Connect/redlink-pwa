@@ -160,17 +160,13 @@ const geoAccessPolicy = new Policy(geoStack, 'GeoAccessPolicy', {
   ],
 })
 
-// Ordonnancement explicite au niveau CloudFormation (`DependsOn`) :
-// `placeIndexArn` est une chaîne construite à la main, pas un token CDK
-// dérivé de `placeIndex` (plus d'objet `CfnPlaceIndex`/`.attrArn` comme en
-// première version) -- CDK ne peut donc pas déduire automatiquement l'ordre
-// de création. Une policy IAM peut être attachée avant que la ressource
-// qu'elle référence existe (IAM ne valide pas l'ARN à l'attache, seulement à
-// l'appel), donc sans risque d'échec de déploiement même sans cette ligne --
-// gardée par rigueur pour que l'index soit malgré tout créé avant que la
-// policy client ne devienne utilisable en pratique.
-geoAccessPolicy.node.addDependency(placeIndex)
-
+// Pas d'ordonnancement explicite `node.addDependency()` ici (retiré après un
+// premier déploiement réel, voir ADR-0013 §5) : IAM n'a jamais eu besoin de
+// cette dépendance pour fonctionner (une policy peut référencer un ARN qui
+// n'existe pas encore, non validé à l'attache -- seulement à l'appel réel,
+// déjà confirmé par la revue DevSecOps AWS avant le premier déploiement) --
+// et cet appel ajoutait du bruit (avertissements de dépréciation CDK internes,
+// répétés à chaque ressource L1 des deux constructs) sans bénéfice réel.
 geoAccessPolicy.attachToRole(backend.auth.resources.authenticatedUserIamRole)
 geoAccessPolicy.attachToRole(backend.auth.resources.unauthenticatedUserIamRole)
 

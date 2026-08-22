@@ -150,6 +150,39 @@ déploiement. `aws_region` est désormais `locationServiceRegion` (`'eu-west-1'`
   de déploiement réel -- un deuxième échec coûterait cher en temps au repo owner. À
   confirmer par le prochain `ampx sandbox` réel.
 
+## 6. Confirmé par un vrai déploiement, nettoyage mineur en retour
+
+`npx ampx sandbox` (région `eu-west-3`) a réussi avec cette version : `Deployment
+completed`, `amplify_outputs.json` généré. Le point resté non vérifiable offline
+(section 5) est donc confirmé -- `AwsCustomResource` fonctionne bien en pratique pour
+contourner l'indisponibilité régionale de Location Service.
+
+Le déploiement a fait remonter des centaines d'avertissements CDK répétés
+(`CfnResource#addDependency is deprecated`). Vérifié après coup (`grep` dans
+`node_modules`) : la quasi-totalité vient des paquets internes du framework Amplify
+Gen2 lui-même (`@aws-amplify/graphql-transformer-core`,
+`@aws-amplify/graphql-model-transformer`, `@aws-amplify/auth-construct` -- le câblage
+interne des dépendances entre les 8 tables DynamoDB, les résolveurs GraphQL et
+Cognito), pas du code de ce repo -- rien à corriger ici, ça se résoudra avec une
+future version de ces paquets AWS. La seule ligne de `amplify/backend.ts` qui aurait
+pu y contribuir (`geoAccessPolicy.node.addDependency(placeIndex)`, ajoutée par
+rigueur en section 3 ci-dessus) a été retirée : DevSecOps AWS avait déjà confirmé
+avant le déploiement qu'IAM ne valide jamais l'existence d'un ARN référencé à
+l'attache d'une policy (seulement à l'appel réel) -- cette dépendance n'était donc
+pas nécessaire à la correction du déploiement, seulement à un ordonnancement
+"esthétique" qui coûtait plus en bruit qu'il n'apportait.
+
+Un deuxième avertissement Amplify (`owners may reassign ownership for the following
+model(s)...`) est apparu au déploiement -- avertissement standard du CLI Gen2 pour
+tout modèle utilisant `allow.owner()` sans restriction supplémentaire sur le champ
+caché `owner`/`ownerID` (n'importe quel propriétaire actuel d'une ligne peut en
+théorie réassigner sa propre ligne à quelqu'un d'autre, perdant ainsi son propre
+accès). Ce n'est pas un bug ni une régression de cette Phase 8 : c'est le
+comportement Transformer standard, déjà accepté comme résidu assumé pour ce pilote
+(même logique que les limites déjà documentées dans ADR-0004/ADR-0005 -- Veterinarians/
+Owners de confiance, pas de garde-fou supplémentaire jugé nécessaire à ce stade).
+Non traité dans cette PR.
+
 ## Relation avec le reste des ADR
 
 Amende la **forme** d'ADR-0012 (Geo reste un échappatoire CDK dans `amplify/
