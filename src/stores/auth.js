@@ -92,6 +92,13 @@ export const useAuthStore = defineStore('auth', () => {
       console.error(err)
       if (err.name === 'UsernameExistsException') {
         error.value = `errors.email_exists`
+        // Comportement demandé (retour utilisateur, hors migration Phase 8 -- ce
+        // fichier n'a jamais été touché par elle) : un email déjà utilisé redirige
+        // vers /login (email pré-rempli) plutôt que de laisser l'Owner/Vet bloqué
+        // sur le formulaire d'inscription avec un message d'erreur seul. `error`
+        // reste posé dans le store (pas réinitialisé par la navigation elle-même) :
+        // LoginView.vue l'affiche déjà via son propre `<Message v-if="auth.error">`.
+        await router.push(`/login?email=${encodeURIComponent(email)}`)
       } else {
         error.value = `errors.registration_failed`
       }

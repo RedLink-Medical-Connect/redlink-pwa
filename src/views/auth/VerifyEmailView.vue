@@ -3,7 +3,7 @@ import { ref, onMounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useI18n } from 'vue-i18n'
-import { resendSignUpCode, getCurrentUser } from 'aws-amplify/auth'
+import { resendSignUpCode, getCurrentUser, signIn } from 'aws-amplify/auth'
 import {
   useRegistrationCompletion,
   shouldShowExpressDefaultsInfo,
@@ -74,7 +74,18 @@ const handleVerify = async () => {
     try {
       currentUser = await getCurrentUser()
     } catch {
-      await auth.login(email.value, pwd)
+      // Bug réel préexistant (pas introduit par la Phase 8, ni ce fichier ni
+      // src/stores/auth.js n'ont été touchés par la migration Gen1->Gen2) :
+      // `auth.login()` (le store) navigue lui-même vers /dashboard/... en cas de
+      // succès -- utilisé ici juste pour établir une session Cognito après la
+      // confirmation du code, ça redirigeait PRÉMATURÉMENT vers le dashboard avant
+      // que `completeRegistration()` ci-dessous n'ait eu la moindre chance de créer
+      // l'Owner/Veterinarian -- donnant l'impression que rien ne persiste (le
+      // dashboard se charge sur un profil qui n'existe pas encore, ou l'erreur de
+      // complétion d'inscription reste invisible sur un composant déjà démonté).
+      // `signIn()` brut établit la session sans navigation ; la redirection reste
+      // gérée explicitement plus bas, une fois `completeRegistration()` terminée.
+      await signIn({ username: email.value, password: pwd })
       currentUser = await getCurrentUser()
     }
 
