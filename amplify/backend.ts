@@ -167,8 +167,23 @@ const geoAccessPolicy = new Policy(geoStack, 'GeoAccessPolicy', {
 // déjà confirmé par la revue DevSecOps AWS avant le premier déploiement) --
 // et cet appel ajoutait du bruit (avertissements de dépréciation CDK internes,
 // répétés à chaque ressource L1 des deux constructs) sans bénéfice réel.
+// Bug réel post-déploiement (voir ADR-0013 §7) : `authenticatedUserIamRole` est le
+// rôle IAM générique de l'Identity Pool, mais `defineAuth({ groups: [...] })`
+// (amplify/auth/resource.ts) crée un rôle IAM DÉDIÉ par groupe Cognito
+// (`backend.auth.resources.groups[nom].role`) -- c'est CE rôle que l'Identity Pool
+// fait réellement assumer à un utilisateur membre d'un groupe (mapping "rôle depuis
+// le token"), pas le rôle authentifié générique. Puisque PostConfirmation ajoute
+// systématiquement chaque utilisateur à Veterinarians ou Owners, le rôle générique
+// n'est en pratique jamais utilisé une fois authentifié -- confirmé en production
+// (403 AccessDeniedException sur `amplifyAuthOwnersGroupRole...`, jamais sur
+// `authenticatedUserIamRole`). Accordée aux deux rôles de groupe en plus du rôle
+// générique (gardé par défense en profondeur, ex. un utilisateur PostConfirmation
+// pas encore assigné à un groupe) et du rôle non-authentifié (formulaires
+// d'inscription, remplis avant qu'un compte existe).
 geoAccessPolicy.attachToRole(backend.auth.resources.authenticatedUserIamRole)
 geoAccessPolicy.attachToRole(backend.auth.resources.unauthenticatedUserIamRole)
+geoAccessPolicy.attachToRole(backend.auth.resources.groups['Veterinarians'].role)
+geoAccessPolicy.attachToRole(backend.auth.resources.groups['Owners'].role)
 
 backend.addOutput({
   geo: {

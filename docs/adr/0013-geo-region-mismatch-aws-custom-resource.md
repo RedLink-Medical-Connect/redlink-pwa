@@ -183,6 +183,32 @@ comportement Transformer standard, déjà accepté comme résidu assumé pour ce
 Owners de confiance, pas de garde-fou supplémentaire jugé nécessaire à ce stade).
 Non traité dans cette PR.
 
+## 7. Bug réel post-déploiement n°2 : mauvais rôle IAM ciblé
+
+Test de bout en bout sur le backend déployé (autocomplétion d'adresse, `ProfileView.vue`,
+Owner déjà authentifié) : `403 AccessDeniedException` sur `geo:SearchPlaceIndexForText`,
+pour le rôle `arn:aws:sts::...:assumed-role/amplify-redlinkpwa-...-amplifyAuthOwnersGroupRol-...`
+-- PAS `authenticatedUserIamRole` (auquel la policy avait été accordée, section 3).
+
+Root cause : `defineAuth({ groups: ['Veterinarians', 'Owners'] })` (`amplify/auth/
+resource.ts`, ADR-0008) crée un rôle IAM DÉDIÉ par groupe Cognito
+(`backend.auth.resources.groups[nom].role`, confirmé dans
+`node_modules/@aws-amplify/plugin-types/lib/auth_resources.d.ts`) -- c'est ce rôle que
+l'Identity Pool fait réellement assumer à un utilisateur membre d'un groupe (mapping
+"rôle depuis le token"), pas `authenticatedUserIamRole` (le rôle authentifié
+générique, utilisé seulement par un utilisateur authentifié n'appartenant à AUCUN
+groupe). Puisque le trigger PostConfirmation (ADR-0008) ajoute systématiquement
+chaque utilisateur confirmé à `Veterinarians` ou `Owners`, le rôle générique n'est en
+pratique jamais utilisé une fois authentifié dans cette application -- accorder la
+policy Geo uniquement à `authenticatedUserIamRole` la rendait donc inopérante pour
+TOUT utilisateur authentifié réel.
+
+Corrigé : `geoAccessPolicy` attachée en plus aux deux rôles de groupe
+(`backend.auth.resources.groups['Veterinarians'].role`,
+`backend.auth.resources.groups['Owners'].role`). Le rôle générique et le rôle
+non-authentifié restent accordés (défense en profondeur / formulaires
+d'inscription pré-authentification, section 3).
+
 ## Relation avec le reste des ADR
 
 Amende la **forme** d'ADR-0012 (Geo reste un échappatoire CDK dans `amplify/
