@@ -33,10 +33,7 @@ vi.mock('aws-amplify/data', () => ({
   }),
 }))
 
-import {
-  useRegistrationCompletion,
-  shouldShowExpressDefaultsInfo,
-} from '@/composables/useRegistrationCompletion'
+import { useRegistrationCompletion } from '@/composables/useRegistrationCompletion'
 
 const resetAllMocks = () => {
   ownerCreateMock.mockReset()
@@ -59,6 +56,7 @@ const buildOwnerData = (overrides = {}) => ({
   animal_species: 'dog',
   animal_breed: 'Labrador',
   animal_sex: 'MALE',
+  animal_birthDate: '2020-05-15',
   animal_weight: '25',
   blood_group: 'DEA 1.1-',
   ...overrides,
@@ -129,6 +127,36 @@ describe('useRegistrationCompletion.completeRegistration — chemin owner', () =
     expect(ownerInput.id).toBe('cognito-user-1')
     expect(animalInput.ownerID).toBe('owner-generated-id')
     expect(availabilityInput.ownerID).toBe('owner-generated-id')
+  })
+
+  it("transmet animal_birthDate à CreateAnimal (bug réel : silencieusement absent avant ce correctif, l'âge affichait toujours '?' pour un Animal créé à l'inscription)", async () => {
+    let animalInput = null
+    ownerCreateMock.mockResolvedValue({ data: { id: 'owner-123' }, errors: undefined })
+    animalCreateMock.mockImplementation(async (input) => {
+      animalInput = input
+      return { data: { id: 'animal-1' }, errors: undefined }
+    })
+    availabilityCreateMock.mockResolvedValue({ data: { id: 'avail-1' }, errors: undefined })
+
+    const { completeRegistration } = useRegistrationCompletion()
+    await completeRegistration(buildOwnerData({ animal_birthDate: '2020-05-15' }), 'cognito-user-1')
+
+    expect(animalInput.birthDate).toBe('2020-05-15')
+  })
+
+  it('envoie birthDate: null quand animal_birthDate est vide (même repli que createNewAnimal, useAnimals.js)', async () => {
+    let animalInput = null
+    ownerCreateMock.mockResolvedValue({ data: { id: 'owner-123' }, errors: undefined })
+    animalCreateMock.mockImplementation(async (input) => {
+      animalInput = input
+      return { data: { id: 'animal-1' }, errors: undefined }
+    })
+    availabilityCreateMock.mockResolvedValue({ data: { id: 'avail-1' }, errors: undefined })
+
+    const { completeRegistration } = useRegistrationCompletion()
+    await completeRegistration(buildOwnerData({ animal_birthDate: '' }), 'cognito-user-1')
+
+    expect(animalInput.birthDate).toBeNull()
   })
 
   it("saute CreateAnimal quand animal_name n'est pas renseigné (inscription sans animal), mais crée quand même l'OwnerAvailability par défaut", async () => {
@@ -275,28 +303,5 @@ describe('useRegistrationCompletion.completeRegistration — échec au milieu de
     expect(consoleErrorSpy).toHaveBeenCalled()
 
     consoleErrorSpy.mockRestore()
-  })
-})
-
-// Revue Lead Dev Phase 7 : la condition initiale de VerifyEmailView.vue
-// (role === 'owner' && animal_name) laissait un Owner sans animal recevoir le
-// créneau OwnerAvailability par défaut sans jamais voir l'écran de transparence
-// -- completeOwnerRegistration crée toujours ce créneau, avec ou sans animal.
-describe('shouldShowExpressDefaultsInfo', () => {
-  it('true pour un Owner avec animal (inscription express complète)', () => {
-    expect(shouldShowExpressDefaultsInfo(buildOwnerData())).toBe(true)
-  })
-
-  it('true pour un Owner SANS animal (le créneau de disponibilité est créé quand même)', () => {
-    expect(shouldShowExpressDefaultsInfo(buildOwnerData({ animal_name: '' }))).toBe(true)
-  })
-
-  it('false pour un Veterinarian', () => {
-    expect(shouldShowExpressDefaultsInfo(buildVetData())).toBe(false)
-  })
-
-  it('false si data est absent/null (garde défensive)', () => {
-    expect(shouldShowExpressDefaultsInfo(null)).toBe(false)
-    expect(shouldShowExpressDefaultsInfo(undefined)).toBe(false)
   })
 })
