@@ -1,8 +1,28 @@
 import { ref } from 'vue'
-import { generateClient } from 'aws-amplify/api'
-import { listAnimalsForValidation } from '@/graphql/custom-queries'
-import { validateAnimalDonorSimple, updateAnimalBloodGroupSimple } from '@/graphql/custom-mutations'
+import { generateClient } from 'aws-amplify/data'
 import { isValidatedDonor } from '@/services/eligibility-service'
+import { throwIfGraphqlError } from '@/services/graphql-error-service'
+
+// Phase 8, sous-tâche 5 (lot 3/3) : migré sur le client Gen2 (`aws-amplify/data`,
+// `client.models.Animal.*`). `listAnimalsForValidation`/`validateAnimalDonorSimple`/
+// `updateAnimalBloodGroupSimple` (custom-queries.js/custom-mutations.js, Gen1) n'ont plus
+// lieu d'être ici -- voir CLAUDE.md / roadmap Phase 8 pour la méthodologie de migration.
+//
+// Sur le changement de comportement d'erreur Gen1 -> Gen2 et `throwIfGraphqlError` : voir le
+// JSDoc de `src/services/graphql-error-service.js`. Les trois appels de ce composable
+// (`Animal.list`/`Animal.update` x2) reprennent tous `throwIfGraphqlError` : le Gen1 d'origine
+// levait TOUJOURS sur une erreur GraphQL (simple `await client.graphql(...)`, jamais de
+// destructuration ni de notion de succès partiel côté appelant), donc aucun des trois n'a de
+// raison de traiter un succès partiel différemment.
+//
+// selectionSet de `fetchPendingValidations()` : reprend EXACTEMENT les champs sélectionnés par
+// `listAnimalsForValidation` (Gen1) -- id/name/species/breed/bloodGroup/isValidatedDonor/
+// validationExpiresAt/ownerID/ownerProfile.firstname/ownerProfile.lastname -- vérifiés un par un
+// contre ce que `ValidationsView.vue` consomme réellement (colonnes name/species/breed/
+// bloodGroup, badge owner firstname/lastname, `isValidatedDonor`/`validationExpiresAt` pour le
+// filtre côté client ci-dessous) : aucun champ Gen1 n'était déjà du sur-fetch pour cette vue,
+// donc rien à retirer par rapport à la sélection Gen1 d'origine (même discipline que
+// useClinicDonors.js, lot 2 -- ici elle ne change simplement rien à la liste de champs).
 
 // Durée d'une validation vétérinaire (CONTEXT.md, "Validated Donor") : 1 an, renouvelable
 // en consultation.
@@ -127,12 +147,24 @@ export function useAnimalValidation() {
     isLoading.value = true
     loadError.value = false
     try {
-      const { data } = await client.graphql({
-        query: listAnimalsForValidation,
-        authMode: 'userPool',
+      const { data, errors } = await client.models.Animal.list({
+        selectionSet: [
+          'id',
+          'name',
+          'species',
+          'breed',
+          'bloodGroup',
+          'isValidatedDonor',
+          'validationExpiresAt',
+          'ownerID',
+          'ownerProfile.firstname',
+          'ownerProfile.lastname',
+        ],
       })
 
-      const animals = data.listAnimals.items || []
+      throwIfGraphqlError(errors, 'listAnimals')
+
+      const animals = data || []
       pendingAnimals.value = animals.filter((animal) => !isValidatedDonor(animal))
     } catch (e) {
       console.error('Erreur chargement des animaux en attente de validation:', e)
@@ -166,17 +198,13 @@ export function useAnimalValidation() {
 
       const validationExpiresAt = new Date(Date.now() + VALIDATION_DURATION_MS).toISOString()
 
-      await client.graphql({
-        query: validateAnimalDonorSimple,
-        variables: {
-          input: {
-            id: animalId,
-            isValidatedDonor: true,
-            validationExpiresAt,
-          },
-        },
-        authMode: 'userPool',
+      const { errors } = await client.models.Animal.update({
+        id: animalId,
+        isValidatedDonor: true,
+        validationExpiresAt,
       })
+
+      throwIfGraphqlError(errors, 'updateAnimal')
 
       pendingAnimals.value = pendingAnimals.value.filter((animal) => animal.id !== animalId)
     } catch (e) {
@@ -215,16 +243,12 @@ export function useAnimalValidation() {
         throw new Error('BLOOD_GROUP_UNKNOWN')
       }
 
-      await client.graphql({
-        query: updateAnimalBloodGroupSimple,
-        variables: {
-          input: {
-            id: animalId,
-            bloodGroup,
-          },
-        },
-        authMode: 'userPool',
+      const { errors } = await client.models.Animal.update({
+        id: animalId,
+        bloodGroup,
       })
+
+      throwIfGraphqlError(errors, 'updateAnimal')
 
       const target = pendingAnimals.value.find((animal) => animal.id === animalId)
       if (target) {

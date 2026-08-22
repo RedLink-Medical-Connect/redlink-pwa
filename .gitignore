@@ -35,17 +35,23 @@ coverage
 # Vitest
 __screenshots__/
 
-#amplify-do-not-edit-begin
-amplify/\#current-cloud-backend
-amplify/.config/local-*
-amplify/logs
-amplify/mock-data
-amplify/mock-api-resources
-amplify/backend/amplify-meta.json
-amplify/backend/.temp
-build/
-dist/
-node_modules/
+# Amplify Gen1 (Amplify CLI, ex-bloc "amplify-do-not-edit" auto-géré par le CLI) :
+# retirées uniquement les entrées qui pointaient vers des chemins désormais
+# supprimés avec amplify/backend/ lui-même (Phase 8 sous-tâche 6, migration Gen2
+# terminée côté code) -- amplify/#current-cloud-backend, amplify/.config/local-*,
+# amplify/{logs,mock-data,mock-api-resources} (jamais créés dans ce repo),
+# amplify/backend/amplify-meta.json, amplify/backend/.temp. Si un `amplify init`/
+# `amplify pull` Gen1 tournait à nouveau ici (non prévu -- Gen1 CLI n'est plus
+# utilisé sur ce repo), le CLI régénérerait ces chemins-là lui-même : rien à
+# préserver "au cas où" pour ceux-ci spécifiquement, puisqu'ils vivaient tous
+# SOUS amplify/backend/, elle-même supprimée. `dist/`/`node_modules/` retirés
+# d'ici aussi (dupliqués avec les entrées génériques du haut de fichier).
+# CONSERVÉS par prudence (vérifié qu'au moins un existe réellement en local,
+# `src/amplifyconfiguration.json`, généré par un `amplify pull`/codegen Gen1
+# passé -- pas un chemin sous amplify/backend/, donc pas mort avec sa
+# suppression) : aws-exports.js, awsconfiguration.json, amplifyconfiguration.json/
+# .dart, amplify-build-config.json, amplify-gradle-config.json,
+# amplifytools.xcconfig, build/, .secret-*, **.sample.
 aws-exports.js
 awsconfiguration.json
 amplifyconfiguration.json
@@ -53,9 +59,14 @@ amplifyconfiguration.dart
 amplify-build-config.json
 amplify-gradle-config.json
 amplifytools.xcconfig
+build/
 .secret-*
 **.sample
-#amplify-do-not-edit-end
+
+# Amplify Gen2 (`ampx`) — état local du sandbox et config générée.
+.amplify/
+amplify_outputs.json
+amplify_outputs.d.ts
 
 # Playwright
 /test-results/

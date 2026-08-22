@@ -1,10 +1,25 @@
 import { ref } from 'vue'
-import { generateClient } from 'aws-amplify/api'
+import { generateClient } from 'aws-amplify/data'
 import { deleteUser, getCurrentUser } from 'aws-amplify/auth'
-import { getOwner, listAnimals } from '@/graphql/queries'
-import { updateOwner, deleteOwner, deleteAnimal } from '@/graphql/mutations'
 import { useAuthStore } from '@/stores/auth'
 import { useRouter } from 'vue-router'
+import { throwIfGraphqlError } from '@/services/graphql-error-service'
+
+// Phase 8, sous-tâche 5 (lot 1/3) : migré sur le client Gen2 (`aws-amplify/data`,
+// `client.models.Owner.*`/`client.models.Animal.*`). Plus d'import depuis
+// `@/graphql/queries`/`@/graphql/mutations` -- le client Gen2 sélectionne déjà les champs
+// scalaires du modèle par défaut, et `create()`/`update()` prennent l'objet `input`
+// directement (voir CLAUDE.md/`amplify/data/resource.ts`).
+//
+// Sur le changement de comportement d'erreur Gen1 -> Gen2 (`client.models.X.*` résout
+// `{ data, errors }` au lieu de lever une exception) et sa traduction via
+// `throwIfGraphqlError` ci-dessous : voir le JSDoc de `src/services/graphql-error-service.js`,
+// seule source de vérité sur le "pourquoi". Ce fichier n'avait AUCUN `catch` avant cette
+// migration (`fetchProfile`/`updateProfile` laissaient l'exception Gen1 se propager telle
+// quelle à l'appelant -- `ProfileView.vue` fait `fetchProfile().catch(...)`,
+// `useMatchingRequests.js` fait `await fetchProfile()` dans son propre `try/catch` qui pilote
+// `loadError`) : sans `throwIfGraphqlError`, ces deux appelants ne verraient plus jamais
+// d'échec sur ce chemin.
 
 export function useOwnerProfile() {
   const client = generateClient()
@@ -56,15 +71,14 @@ export function useOwnerProfile() {
 
       if (!userId) throw new Error("Impossible de récupérer l'ID utilisateur")
 
-      const { data } = await client.graphql({
-        query: getOwner,
-        variables: {
-          id: userId,
-        },
-        authMode: 'userPool',
-      })
+      const { data, errors } = await client.models.Owner.get({ id: userId })
 
-      const profile = data.getOwner
+      // `data === null` SANS `errors` (Owner pas encore créé) reste un cas légitime, pas une
+      // erreur -- `profile` reste falsy plus bas, `isLoaded` passe quand même à `true`, comme
+      // avant.
+      throwIfGraphqlError(errors, 'getOwner')
+
+      const profile = data
 
       if (profile) {
         ownerId.value = profile.id
@@ -100,11 +114,9 @@ export function useOwnerProfile() {
         maxTravelDistance: form.value.maxTravelDistance,
       }
 
-      await client.graphql({
-        query: updateOwner,
-        variables: { input },
-        authMode: 'userPool',
-      })
+      const { errors } = await client.models.Owner.update(input)
+
+      throwIfGraphqlError(errors, 'updateOwner')
     } finally {
       isSaving.value = false
     }
@@ -118,38 +130,39 @@ export function useOwnerProfile() {
    * une écriture secondaire qui précède l'action critique (`deleteUser()`) — son échec est
    * loggé mais jamais relancé, pour ne pas empêcher un Owner de supprimer son compte Cognito
    * à cause d'un animal/relation orphelin en base. Seul l'échec de `deleteUser()` (et de ce
-   * qui suit) doit remonter à l'appelant.
+   * qui suit) doit remonter à l'appelant. Ce bloc étant déjà best-effort (toute erreur est
+   * avalée par le `catch (dbError)` ci-dessous), `throwIfGraphqlError` (voir
+   * `graphql-error-service.js`) retombe naturellement dans ce même `catch`.
    */
   const deleteAccount = async () => {
     isSaving.value = true
     try {
       if (ownerId.value) {
         try {
-          const { data } = await client.graphql({
-            query: listAnimals,
-            authMode: 'userPool',
-          })
+          const { data, errors: listErrors } = await client.models.Animal.list()
 
-          const rawItems = data.listAnimals?.items || []
+          throwIfGraphqlError(listErrors, 'listAnimals')
+
+          const rawItems = data || []
+          // `_deleted` : résidu Gen1 (DataStore/conflict-resolution), voir useAnimals.js --
+          // toujours faux côté Gen2, laissé tel quel (comportement observable inchangé).
           const validAnimals = rawItems.filter((item) => item && item.id && !item._deleted)
 
           if (validAnimals.length > 0) {
-            await Promise.all(
-              validAnimals.map((a) =>
-                client.graphql({
-                  query: deleteAnimal,
-                  variables: { input: { id: a.id } },
-                  authMode: 'userPool',
-                }),
-              ),
+            const deleteResults = await Promise.all(
+              validAnimals.map((a) => client.models.Animal.delete({ id: a.id })),
             )
+            const failed = deleteResults.find((r) => r.errors)
+            if (failed) {
+              throwIfGraphqlError(failed.errors, 'deleteAnimal')
+            }
           }
 
-          await client.graphql({
-            query: deleteOwner,
-            variables: { input: { id: ownerId.value } },
-            authMode: 'userPool',
+          const { errors: deleteOwnerErrors } = await client.models.Owner.delete({
+            id: ownerId.value,
           })
+
+          throwIfGraphqlError(deleteOwnerErrors, 'deleteOwner')
         } catch (dbError) {
           console.error(
             'Erreur nettoyage DB (Animals/Owner) lors de la suppression du compte, ignorée (best-effort) :',

@@ -9,13 +9,38 @@ import { createPinia, setActivePinia } from 'pinia'
 // - `fetchProfile()` : ne recharge qu'une fois par session (`isLoaded`), sauf `force: true` ;
 // - `deleteAccount()` : succès complet, échec du nettoyage best-effort (n'empêche PAS la
 //   suppression Cognito), échec de `deleteUser()` (DOIT remonter à l'appelant).
+//
+// Phase 8, sous-tâche 5 (lot 1/3) : mock migré vers le client Gen2 (`aws-amplify/data`,
+// `client.models.Owner.*`/`client.models.Animal.*`) -- un mock dédié par méthode plutôt
+// qu'un unique `graphqlMock` discriminé par le texte de la query (`query.includes('...')`,
+// qui n'existe plus côté appelant en Gen2). Les assertions métier restent les mêmes
+// qu'avant la migration. Un cas supplémentaire est couvert (`fetchProfile` rejette sur une
+// erreur GraphQL/@auth *résolue*, pas seulement une exception JS -- absent du test Gen1 où
+// seule une exception JS pouvait modéliser un échec GraphQL) : voir useOwnerProfile.js pour
+// le raisonnement complet.
 
-const graphqlMock = vi.fn()
+const ownerGetMock = vi.fn()
+const ownerUpdateMock = vi.fn()
+const ownerDeleteMock = vi.fn()
+const animalListMock = vi.fn()
+const animalDeleteMock = vi.fn()
 const deleteUserMock = vi.fn()
 const signOutMock = vi.fn()
 
-vi.mock('aws-amplify/api', () => ({
-  generateClient: () => ({ graphql: graphqlMock }),
+vi.mock('aws-amplify/data', () => ({
+  generateClient: () => ({
+    models: {
+      Owner: {
+        get: (...args) => ownerGetMock(...args),
+        update: (...args) => ownerUpdateMock(...args),
+        delete: (...args) => ownerDeleteMock(...args),
+      },
+      Animal: {
+        list: (...args) => animalListMock(...args),
+        delete: (...args) => animalDeleteMock(...args),
+      },
+    },
+  }),
 }))
 
 vi.mock('aws-amplify/auth', () => ({
@@ -59,29 +84,37 @@ const buildProfile = (overrides = {}) => ({
   ...overrides,
 })
 
+const resetAllMocks = () => {
+  ownerGetMock.mockReset()
+  ownerUpdateMock.mockReset()
+  ownerDeleteMock.mockReset()
+  animalListMock.mockReset()
+  animalDeleteMock.mockReset()
+  deleteUserMock.mockReset()
+  signOutMock.mockReset()
+}
+
 describe('useOwnerProfile.fetchProfile (R-19 : cache par session)', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
-    graphqlMock.mockReset()
-    deleteUserMock.mockReset()
-    signOutMock.mockReset()
+    resetAllMocks()
   })
 
-  it("charge le profil au premier appel et remplit `form`", async () => {
-    graphqlMock.mockImplementation(async ({ query }) => {
-      expect(query).toContain('GetOwner')
-      return { data: { getOwner: buildProfile() } }
+  it('charge le profil au premier appel et remplit `form`', async () => {
+    ownerGetMock.mockImplementation(async ({ id }) => {
+      expect(id).toBe('owner-1')
+      return { data: buildProfile(), errors: undefined }
     })
 
     const { form, fetchProfile } = useOwnerProfile()
     await fetchProfile()
 
     expect(form.value.firstname).toBe('Jean')
-    expect(graphqlMock).toHaveBeenCalledTimes(1)
+    expect(ownerGetMock).toHaveBeenCalledTimes(1)
   })
 
   it("ne refait PAS l'aller-retour réseau GetOwner sur un second appel de la même session (R-19)", async () => {
-    graphqlMock.mockImplementation(async () => ({ data: { getOwner: buildProfile() } }))
+    ownerGetMock.mockImplementation(async () => ({ data: buildProfile(), errors: undefined }))
 
     const { fetchProfile } = useOwnerProfile()
     await fetchProfile()
@@ -90,37 +123,47 @@ describe('useOwnerProfile.fetchProfile (R-19 : cache par session)', () => {
 
     // Un seul appel réseau malgré 3 invocations de fetchProfile() -- exactement le
     // scénario "chaque tick de polling refait un GetOwner" relevé par R-19.
-    expect(graphqlMock).toHaveBeenCalledTimes(1)
+    expect(ownerGetMock).toHaveBeenCalledTimes(1)
   })
 
   it('recharge malgré le cache quand `force: true` est explicitement passé', async () => {
-    graphqlMock.mockImplementation(async () => ({ data: { getOwner: buildProfile() } }))
+    ownerGetMock.mockImplementation(async () => ({ data: buildProfile(), errors: undefined }))
 
     const { fetchProfile } = useOwnerProfile()
     await fetchProfile()
     await fetchProfile({ force: true })
 
-    expect(graphqlMock).toHaveBeenCalledTimes(2)
+    expect(ownerGetMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('relance (propage) une erreur GraphQL/@auth résolue par le client Gen2 (pas de exception JS)', async () => {
+    ownerGetMock.mockResolvedValue({
+      data: null,
+      errors: [{ message: 'Not Authorized to access getOwner' }],
+    })
+
+    const { fetchProfile, isLoading } = useOwnerProfile()
+
+    await expect(fetchProfile()).rejects.toThrow()
+    expect(isLoading.value).toBe(false)
   })
 })
 
 describe('useOwnerProfile.deleteAccount', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
-    graphqlMock.mockReset()
-    deleteUserMock.mockReset()
-    signOutMock.mockReset()
+    resetAllMocks()
     deleteUserMock.mockResolvedValue(undefined)
     signOutMock.mockResolvedValue(undefined)
   })
 
   /**
    * Charge un profil (nécessaire pour que `ownerId.value` soit défini, seul cas où
-   * `deleteAccount()` tente le nettoyage DB) avant de reconfigurer `graphqlMock` pour le
+   * `deleteAccount()` tente le nettoyage DB) avant de reconfigurer les mocks pour le
    * scénario testé.
    */
   const primeOwnerId = async () => {
-    graphqlMock.mockImplementationOnce(async () => ({ data: { getOwner: buildProfile() } }))
+    ownerGetMock.mockResolvedValueOnce({ data: buildProfile(), errors: undefined })
     const composable = useOwnerProfile()
     await composable.fetchProfile()
     return composable
@@ -129,26 +172,18 @@ describe('useOwnerProfile.deleteAccount', () => {
   it('supprime les Animals puis le Owner, puis le compte Cognito (succès complet)', async () => {
     const { deleteAccount } = await primeOwnerId()
 
-    const calledQueries = []
-    graphqlMock.mockImplementation(async ({ query }) => {
-      calledQueries.push(query)
-      if (query.includes('ListAnimals')) {
-        return { data: { listAnimals: { items: [{ id: 'animal-1' }, { id: 'animal-2' }] } } }
-      }
-      if (query.includes('DeleteAnimal')) {
-        return { data: { deleteAnimal: { id: 'animal-x' } } }
-      }
-      if (query.includes('DeleteOwner')) {
-        return { data: { deleteOwner: { id: 'owner-1' } } }
-      }
-      throw new Error(`Requête GraphQL inattendue dans ce test : ${query}`)
+    animalListMock.mockResolvedValue({
+      data: [{ id: 'animal-1' }, { id: 'animal-2' }],
+      errors: undefined,
     })
+    animalDeleteMock.mockResolvedValue({ data: { id: 'animal-x' }, errors: undefined })
+    ownerDeleteMock.mockResolvedValue({ data: { id: 'owner-1' }, errors: undefined })
 
     await expect(deleteAccount()).resolves.toBeUndefined()
 
-    expect(calledQueries.some((q) => q.includes('ListAnimals'))).toBe(true)
-    expect(calledQueries.filter((q) => q.includes('DeleteAnimal'))).toHaveLength(2)
-    expect(calledQueries.some((q) => q.includes('DeleteOwner'))).toBe(true)
+    expect(animalListMock).toHaveBeenCalledTimes(1)
+    expect(animalDeleteMock).toHaveBeenCalledTimes(2)
+    expect(ownerDeleteMock).toHaveBeenCalledTimes(1)
     expect(deleteUserMock).toHaveBeenCalledTimes(1)
     expect(signOutMock).toHaveBeenCalledTimes(1)
   })
@@ -156,13 +191,7 @@ describe('useOwnerProfile.deleteAccount', () => {
   it("n'échoue PAS si le nettoyage DB best-effort échoue -- deleteUser() Cognito est quand même appelé", async () => {
     const { deleteAccount, isSaving } = await primeOwnerId()
 
-    const dbError = new Error('Not Authorized to access deleteOwner on type Owner')
-    graphqlMock.mockImplementation(async ({ query }) => {
-      if (query.includes('ListAnimals')) {
-        return { data: { listAnimals: { items: [] } } }
-      }
-      throw dbError
-    })
+    animalListMock.mockRejectedValue(new Error('Not Authorized to access listAnimals'))
 
     await expect(deleteAccount()).resolves.toBeUndefined()
 
@@ -172,18 +201,26 @@ describe('useOwnerProfile.deleteAccount', () => {
     expect(isSaving.value).toBe(false)
   })
 
+  it("n'échoue PAS non plus quand le nettoyage DB échoue via une erreur GraphQL/@auth résolue (pas une exception JS)", async () => {
+    const { deleteAccount } = await primeOwnerId()
+
+    animalListMock.mockResolvedValue({ data: [], errors: undefined })
+    ownerDeleteMock.mockResolvedValue({
+      data: null,
+      errors: [{ message: 'Not Authorized to access deleteOwner' }],
+    })
+
+    await expect(deleteAccount()).resolves.toBeUndefined()
+
+    expect(deleteUserMock).toHaveBeenCalledTimes(1)
+    expect(signOutMock).toHaveBeenCalledTimes(1)
+  })
+
   it('relance (propage) une erreur de deleteUser() (Cognito) -- contrairement au nettoyage DB', async () => {
     const { deleteAccount, isSaving } = await primeOwnerId()
 
-    graphqlMock.mockImplementation(async ({ query }) => {
-      if (query.includes('ListAnimals')) {
-        return { data: { listAnimals: { items: [] } } }
-      }
-      if (query.includes('DeleteOwner')) {
-        return { data: { deleteOwner: { id: 'owner-1' } } }
-      }
-      throw new Error(`Requête GraphQL inattendue dans ce test : ${query}`)
-    })
+    animalListMock.mockResolvedValue({ data: [], errors: undefined })
+    ownerDeleteMock.mockResolvedValue({ data: { id: 'owner-1' }, errors: undefined })
 
     const cognitoError = new Error('Cognito: unable to delete user')
     deleteUserMock.mockRejectedValue(cognitoError)

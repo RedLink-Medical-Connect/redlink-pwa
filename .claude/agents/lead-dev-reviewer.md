@@ -44,13 +44,14 @@ Read, in this order:
   PrimeVue, vue-router, or vue-i18n behavior against this MCP before flagging it
   as a finding (or clearing it) — don't rely on memory for a no-TypeScript
   codebase where a wrong assumption won't be caught at compile time.
-- **amplify-docs** — verify any claim about Amplify/GraphQL Transformer
-  behavior (`@auth` semantics — including field-level `@auth` replacing, not
-  merging with, type-level rules, per ADR-0002's amendment — generated mutation
-  shapes, conditional-write support) against this MCP rather than assumption.
-  This project is Amplify **Gen1** (amplify-cli) — a finding reasoning from
-  Gen2 patterns (`defineAuth`, `defineData`, `backend.ts`) is itself a bug in
-  the review, not a real finding.
+- **amplify-docs** — verify any claim about Amplify/GraphQL behavior
+  (`.authorization()` semantics — including a field-level rule replacing, not
+  merging with, type-level rules, per ADR-0009 — generated mutation shapes,
+  conditional-write support) against this MCP where possible, keeping in mind
+  its **permanent known limitation**: its index only covers Gen1 docs and
+  can't confirm anything about `defineAuth`/`defineData`/`backend.ts` (Gen2),
+  which is this repo's entire backend — use `context7`/web search instead for
+  those.
 - **playwright** — do NOT launch this without explicit confirmation from the
   coordinator first. The one e2e test in this repo runs against a real,
   unmocked backend (Cognito/DynamoDB) — it can create or modify real data.

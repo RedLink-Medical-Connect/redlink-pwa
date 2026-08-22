@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { generateClient } from 'aws-amplify/api'
 import { getCurrentUser } from 'aws-amplify/auth'
 import { RequestStatus, MissionStatus } from '@/constants/enums'
 import {
@@ -13,9 +12,29 @@ import {
 // below without any GraphQL/composable involved. `useClinicHistory` itself is tested
 // through its reuse of `useClinicRequest.js` (mocked at the aws-amplify boundary, same
 // convention as useClinicRequest.spec.js).
+//
+// Phase 8, sous-tâche 5 (lot 2/3, correction post-migration) : useClinicRequest.js (réutilisé
+// en interne par useClinicHistory.js) migré sur le client Gen2 (`aws-amplify/data`,
+// `client.models.Veterinarian.get()`/`client.models.Request.list()`) -- ce fichier mockait
+// jusqu'ici uniquement `aws-amplify/api` (`generateClient().graphql`), qui n'est plus
+// intercepté par useClinicRequest.js depuis cette migration. Mock reconstruit sur
+// `{ data, errors }` par méthode de modèle, même convention que useClinicRequest.spec.js.
+// Aucune assertion métier changée (deriveHistoryEvents, tri, loadError).
 
-vi.mock('aws-amplify/api', () => ({
-  generateClient: vi.fn(),
+const vetGetMock = vi.fn()
+const requestListMock = vi.fn()
+
+vi.mock('aws-amplify/data', () => ({
+  generateClient: () => ({
+    models: {
+      Veterinarian: { get: (...args) => vetGetMock(...args) },
+      Request: {
+        list: (...args) => requestListMock(...args),
+        create: vi.fn(),
+        update: vi.fn(),
+      },
+    },
+  }),
 }))
 
 vi.mock('aws-amplify/auth', () => ({
@@ -172,50 +191,41 @@ describe('deriveHistoryEvents', () => {
 })
 
 describe('useClinicHistory > historyEvents', () => {
-  let mockGraphql
-
   beforeEach(() => {
     vi.clearAllMocks()
-    mockGraphql = vi.fn()
-    generateClient.mockReturnValue({ graphql: mockGraphql })
     getCurrentUser.mockResolvedValue({ userId: 'vet-cognito-id' })
   })
 
   it('flattens and sorts the full event list newest-first across a mixed batch of requests', async () => {
-    mockGraphql.mockResolvedValueOnce({
-      data: { getVeterinarian: { clinicID: 'clinic-1' } },
-    })
-    mockGraphql.mockResolvedValueOnce({
-      data: {
-        listRequests: {
-          items: [
-            {
-              id: 'req-old',
-              requiredSpecies: 'DOG',
-              requiredBloodGroup: 'DEA 1.1-',
-              status: RequestStatus.CLOSED,
-              createdAt: '2026-01-01T08:00:00.000Z',
-              updatedAt: '2026-01-01T09:00:00.000Z',
-              mission: null,
-            },
-            {
-              id: 'req-new',
-              requiredSpecies: 'CAT',
-              requiredBloodGroup: 'A',
-              status: RequestStatus.IN_PROGRESS,
-              createdAt: '2026-01-10T08:00:00.000Z',
-              updatedAt: '2026-01-10T08:00:00.000Z',
-              mission: {
-                id: 'mission-new',
-                status: MissionStatus.ACCEPTED,
-                createdAt: '2026-01-10T09:00:00.000Z',
-                updatedAt: '2026-01-10T09:00:00.000Z',
-                animal: { name: 'Mimi' },
-              },
-            },
-          ],
+    vetGetMock.mockResolvedValueOnce({ data: { clinicID: 'clinic-1' }, errors: undefined })
+    requestListMock.mockResolvedValueOnce({
+      data: [
+        {
+          id: 'req-old',
+          requiredSpecies: 'DOG',
+          requiredBloodGroup: 'DEA 1.1-',
+          status: RequestStatus.CLOSED,
+          createdAt: '2026-01-01T08:00:00.000Z',
+          updatedAt: '2026-01-01T09:00:00.000Z',
+          mission: null,
         },
-      },
+        {
+          id: 'req-new',
+          requiredSpecies: 'CAT',
+          requiredBloodGroup: 'A',
+          status: RequestStatus.IN_PROGRESS,
+          createdAt: '2026-01-10T08:00:00.000Z',
+          updatedAt: '2026-01-10T08:00:00.000Z',
+          mission: {
+            id: 'mission-new',
+            status: MissionStatus.ACCEPTED,
+            createdAt: '2026-01-10T09:00:00.000Z',
+            updatedAt: '2026-01-10T09:00:00.000Z',
+            animal: { name: 'Mimi' },
+          },
+        },
+      ],
+      errors: undefined,
     })
 
     const { historyEvents, fetchRequests } = useClinicHistory()
@@ -230,49 +240,44 @@ describe('useClinicHistory > historyEvents', () => {
   })
 
   it('sorts a genuinely interleaved 3-request batch, not just a reversal of insertion order', async () => {
-    mockGraphql.mockResolvedValueOnce({
-      data: { getVeterinarian: { clinicID: 'clinic-1' } },
-    })
-    mockGraphql.mockResolvedValueOnce({
-      data: {
-        listRequests: {
-          items: [
-            {
-              id: 'req-A',
-              requiredSpecies: 'DOG',
-              requiredBloodGroup: 'DEA 1.1-',
-              status: RequestStatus.OPEN,
-              createdAt: '2026-01-01T10:00:00.000Z',
-              updatedAt: '2026-01-01T10:00:00.000Z',
-              mission: null,
-            },
-            {
-              id: 'req-B',
-              requiredSpecies: 'CAT',
-              requiredBloodGroup: 'A',
-              status: RequestStatus.IN_PROGRESS,
-              createdAt: '2026-01-03T10:00:00.000Z',
-              updatedAt: '2026-01-03T10:00:00.000Z',
-              mission: {
-                id: 'mission-B',
-                status: MissionStatus.ACCEPTED,
-                createdAt: '2026-01-03T11:00:00.000Z',
-                updatedAt: '2026-01-03T11:00:00.000Z',
-                animal: { name: 'Nova' },
-              },
-            },
-            {
-              id: 'req-C',
-              requiredSpecies: 'DOG',
-              requiredBloodGroup: 'Dal',
-              status: RequestStatus.CLOSED,
-              createdAt: '2026-01-02T10:00:00.000Z',
-              updatedAt: '2026-01-04T10:00:00.000Z',
-              mission: null,
-            },
-          ],
+    vetGetMock.mockResolvedValueOnce({ data: { clinicID: 'clinic-1' }, errors: undefined })
+    requestListMock.mockResolvedValueOnce({
+      data: [
+        {
+          id: 'req-A',
+          requiredSpecies: 'DOG',
+          requiredBloodGroup: 'DEA 1.1-',
+          status: RequestStatus.OPEN,
+          createdAt: '2026-01-01T10:00:00.000Z',
+          updatedAt: '2026-01-01T10:00:00.000Z',
+          mission: null,
         },
-      },
+        {
+          id: 'req-B',
+          requiredSpecies: 'CAT',
+          requiredBloodGroup: 'A',
+          status: RequestStatus.IN_PROGRESS,
+          createdAt: '2026-01-03T10:00:00.000Z',
+          updatedAt: '2026-01-03T10:00:00.000Z',
+          mission: {
+            id: 'mission-B',
+            status: MissionStatus.ACCEPTED,
+            createdAt: '2026-01-03T11:00:00.000Z',
+            updatedAt: '2026-01-03T11:00:00.000Z',
+            animal: { name: 'Nova' },
+          },
+        },
+        {
+          id: 'req-C',
+          requiredSpecies: 'DOG',
+          requiredBloodGroup: 'Dal',
+          status: RequestStatus.CLOSED,
+          createdAt: '2026-01-02T10:00:00.000Z',
+          updatedAt: '2026-01-04T10:00:00.000Z',
+          mission: null,
+        },
+      ],
+      errors: undefined,
     })
 
     const { historyEvents, fetchRequests } = useClinicHistory()
@@ -293,10 +298,8 @@ describe('useClinicHistory > historyEvents', () => {
   })
 
   it('propagates loadError from the underlying useClinicRequest fetch failure', async () => {
-    mockGraphql.mockResolvedValueOnce({
-      data: { getVeterinarian: { clinicID: 'clinic-1' } },
-    })
-    mockGraphql.mockRejectedValueOnce(new Error('network down'))
+    vetGetMock.mockResolvedValueOnce({ data: { clinicID: 'clinic-1' }, errors: undefined })
+    requestListMock.mockRejectedValueOnce(new Error('network down'))
 
     const { loadError, fetchRequests } = useClinicHistory()
     expect(loadError.value).toBe(false)

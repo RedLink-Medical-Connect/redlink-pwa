@@ -1,9 +1,20 @@
 import { ref } from 'vue'
-import { generateClient } from 'aws-amplify/api'
+import { generateClient } from 'aws-amplify/data'
 import { getCurrentUser } from 'aws-amplify/auth'
-import { updateAnimal, deleteAnimal } from '@/graphql/mutations'
-import { createAnimalSimple } from '@/graphql/custom-mutations.js'
-import { listMyAnimalsByOwnerId } from '@/graphql/custom-queries.js'
+import { throwIfGraphqlError, resolveOrThrowOnFailure } from '@/services/graphql-error-service'
+
+// Phase 8, sous-tâche 5 (lot 1/3) : migré sur le client Gen2 (`aws-amplify/data`,
+// `client.models.Animal.*`). Les mutations `*Simple`/queries indexées Gen1
+// (`createAnimalSimple`, `listMyAnimalsByOwnerId`) n'ont plus lieu d'être ici -- le
+// SELECTION SET par défaut du client Gen2 (champs scalaires du modèle) correspond déjà à ce
+// que ces documents demandaient explicitement, et l'objet `input` passé à `create()`/
+// `update()` limite déjà les champs envoyés, sans avoir besoin d'un document GraphQL séparé
+// pour ça (voir CLAUDE.md/commentaire de tête d'`amplify/data/resource.ts`).
+//
+// Sur le changement de comportement d'erreur Gen1 -> Gen2 (`client.models.Animal.*` résout
+// `{ data, errors }` au lieu de lever une exception) et sa traduction via
+// `throwIfGraphqlError`/`resolveOrThrowOnFailure` ci-dessous : voir le JSDoc de
+// `src/services/graphql-error-service.js`, seule source de vérité sur le "pourquoi".
 
 export function useAnimals() {
   const client = generateClient()
@@ -42,14 +53,18 @@ export function useAnimals() {
 
       if (!userId) throw new Error("Impossible de récupérer l'ID utilisateur")
 
-      const { data } = await client.graphql({
-        query: listMyAnimalsByOwnerId,
-        variables: { ownerID: userId },
-        authMode: 'userPool',
+      const { data, errors } = await client.models.Animal.list({
+        filter: { ownerID: { eq: userId } },
       })
 
-      const rawAnimals = data.listAnimals?.items || []
+      throwIfGraphqlError(errors, 'listAnimals')
 
+      const rawAnimals = data || []
+
+      // `_deleted` : résidu Gen1 (DataStore/conflict-resolution) -- aucun item Gen2 ne porte ce
+      // champ, donc `!item._deleted` reste toujours vrai. Laissé tel quel plutôt que retiré (hors
+      // périmètre de cette migration composable-par-composable, comportement observable
+      // inchangé).
       const validItems = rawAnimals.filter((item) => item && !item._deleted)
 
       animals.value = validItems.map((animal) => ({
@@ -68,14 +83,11 @@ export function useAnimals() {
   }
 
   /**
-   * Met à jour les champs éditables d'un Animal (via `updateAnimal`, mutation complète --
-   * pas de scoping `@auth` particulier ici, l'Owner est propriétaire de la fiche) et
-   * synchronise `animals` avec la réponse serveur. Gère le succès partiel GraphQL (réponse
-   * contenant à la fois `data` et `errors` sans lever d'exception JS classique -- Amplify la
-   * remonte comme une erreur porteuse d'un `.data`) : si `error.data.updateAnimal` est
-   * présent malgré l'erreur, on traite comme un succès (même pattern que `deleteAnimalById`
-   * ci-dessous) plutôt que de relancer une erreur trompeuse pour une écriture qui a en
-   * réalité abouti côté serveur.
+   * Met à jour les champs éditables d'un Animal (via `client.models.Animal.update()`) et
+   * synchronise `animals` avec la réponse serveur. `resolveOrThrowOnFailure` traite un succès
+   * partiel (`data` exploitable malgré `errors`, ex. une relation annexe non résolue) comme un
+   * succès -- le `console.warn` ci-dessous, lui, reste local à cette fonction (ce n'est pas le
+   * rôle du service de décider quoi logger).
    *
    * @param {object} form Formulaire d'édition (voir `editForm` dans AnimalsView.vue) --
    *   doit au moins contenir `id`.
@@ -99,19 +111,12 @@ export function useAnimals() {
         donationFrequency: form.donationFrequency,
       }
 
-      const response = await client.graphql({
-        query: updateAnimal,
-        variables: { input },
-        authMode: 'userPool',
-      })
+      const { data, errors } = await client.models.Animal.update(input)
 
-      updatedItem = response.data?.updateAnimal
-    } catch (error) {
-      if (error.data && error.data.updateAnimal) {
-        console.warn('Update réussi (malgré erreurs relations)', error.errors)
-        updatedItem = error.data.updateAnimal
-      } else {
-        throw error
+      updatedItem = resolveOrThrowOnFailure({ data, errors }, 'updateAnimal')
+
+      if (errors) {
+        console.warn('Update réussi (malgré erreurs relations)', errors)
       }
     } finally {
       if (updatedItem) {
@@ -128,6 +133,13 @@ export function useAnimals() {
     }
   }
 
+  /**
+   * Supprime un Animal (retrait optimiste immédiat, rollback sur vraie erreur). Même
+   * traitement du succès partiel GraphQL qu'`updateAnimalDetails` ci-dessus via
+   * `resolveOrThrowOnFailure` (pas de rollback si `data` reste exploitable malgré `errors`) ;
+   * une vraie erreur (`errors` sans `data`, ou exception JS réseau/offline) retombe dans le
+   * même `catch` (rollback + relance).
+   */
   const deleteAnimalById = async (id) => {
     isSaving.value = true
     const previousAnimals = [...animals.value]
@@ -135,16 +147,10 @@ export function useAnimals() {
     try {
       animals.value = animals.value.filter((a) => a.id !== id)
 
-      await client.graphql({
-        query: deleteAnimal,
-        variables: { input: { id } },
-        authMode: 'userPool',
-      })
-    } catch (error) {
-      if (error.data && error.data.deleteAnimal) {
-        return
-      }
+      const { data, errors } = await client.models.Animal.delete({ id })
 
+      resolveOrThrowOnFailure({ data, errors }, 'deleteAnimal')
+    } catch (error) {
       console.error('Vraie erreur suppression:', error)
       animals.value = previousAnimals
       throw error
@@ -154,11 +160,11 @@ export function useAnimals() {
   }
 
   /**
-   * Crée un nouvel Animal pour `ownerID` via `createAnimalSimple` (custom-mutations.js) et
-   * l'ajoute localement à `animals` en cas de succès. `bloodGroup` retombe sur `'UNKNOWN'`
-   * quand non renseigné -- CONTEXT.md ("Validated Donor") interdit un groupe sanguin inconnu
-   * à la validation, mais pas à la création : un Owner peut déclarer un animal sans connaître
-   * son groupe, ce sera bloqué plus tard par `useAnimalValidation.js`.
+   * Crée un nouvel Animal pour `ownerID` via `client.models.Animal.create()` et l'ajoute
+   * localement à `animals` en cas de succès. `bloodGroup` retombe sur `'UNKNOWN'` quand non
+   * renseigné -- CONTEXT.md ("Validated Donor") interdit un groupe sanguin inconnu à la
+   * validation, mais pas à la création : un Owner peut déclarer un animal sans connaître son
+   * groupe, ce sera bloqué plus tard par `useAnimalValidation.js`.
    *
    * @param {object} form Formulaire de création (voir AddAnimalView.vue).
    * @param {string} ownerID Owner propriétaire de l'Animal créé.
@@ -184,21 +190,18 @@ export function useAnimals() {
         donationFrequency: form.donationFrequency,
       }
 
-      const { data } = await client.graphql({
-        query: createAnimalSimple,
-        variables: { input },
-        authMode: 'userPool',
-      })
+      const { data, errors } = await client.models.Animal.create(input)
 
-      if (data.createAnimal) {
+      const created = resolveOrThrowOnFailure({ data, errors }, 'createAnimal')
+
+      if (created) {
         animals.value.push({
-          ...data.createAnimal,
-          age: calculateAge(data.createAnimal.birthDate)
+          ...created,
+          age: calculateAge(created.birthDate),
         })
       }
 
-      return data.createAnimal
-
+      return created
     } finally {
       isSaving.value = false
     }

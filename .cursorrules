@@ -1,9 +1,12 @@
 # redlink-pwa — editor rules
 
-Vue 3 (`<script setup>`) + Vite PWA, plain JavaScript (no TypeScript in this repo —
-don't introduce `.ts`/`tsconfig.json` or TS-only syntax; there is no `any` to ban
-because there is no type system here). AWS Amplify (GraphQL) backend. Tailwind for
-styling, PrimeVue for UI components, vue-i18n for copy.
+Vue 3 (`<script setup>`) + Vite PWA, plain JavaScript (no TypeScript in `src/` —
+don't introduce `.ts` or TS-only syntax there; there is no `any` to ban because
+there is no type system in the frontend). Scoped exception: `amplify/**/*.ts`
+(Gen2 backend definition only, required by the Amplify Gen2 framework — see
+ADR-0007) — this doesn't reopen the "no TypeScript" rule for `src/`. AWS Amplify
+(GraphQL) backend. Tailwind for styling, PrimeVue for UI components, vue-i18n for
+copy.
 
 ## Naming
 
@@ -53,14 +56,25 @@ else. It must not call `useRouter()` or perform `router.push(...)` itself — th
 view owns navigation after `await`ing the composable's action. (Some existing
 composables violate this — don't copy that pattern into new code.)
 
-## GraphQL calls
+## GraphQL calls (Amplify Gen2)
 
-- Always go through `generateClient()` from `aws-amplify/api`, with an explicit
-  `authMode: 'userPool'`.
+- Always go through `generateClient<Schema>()` from `aws-amplify/data`
+  (`client.models.X.create()/get()/list()/update()/delete()`, `client.mutations.X()`
+  for custom operations). Schema declared in `amplify/data/resource.ts` — never a
+  hand-written `.graphql` document (Gen1 pattern, removed Phase 8).
 - Wrap every call in `try/catch/finally`, toggling a dedicated loading ref
-  (`isLoading`/`isSaving`/`isAccepting`) in `finally`.
-- Prefer the `*Simple` mutations in `src/graphql/custom-mutations.js` when a full
-  relation-graph mutation would otherwise error on nested fields.
+  (`isLoading`/`isSaving`/`isAccepting`) in `finally`. The Gen2 client does **not**
+  throw on a GraphQL/`@auth` error — it resolves `{ data, errors }` normally. Use
+  `src/services/graphql-error-service.js` to retransform `errors` into a thrown
+  exception where the caller's contract must stay "throws on failure".
+- Pass an explicit `selectionSet` on any call that needs a nested relation or that
+  doesn't need every scalar field on the model — posed by each caller for the
+  fields it actually consumes, not copy-pasted from another composable's query.
+- `client.mutations.linkRequestToMission({ id, activeMissionID })` is the one
+  custom mutation in this schema (atomic conditional write on `Request.status`,
+  ADR-0001/ADR-0011) — reach for a custom mutation + AppSync JS resolver only when
+  a write genuinely needs a DynamoDB `condition` that `client.models.X.update()`
+  can't express.
 - Log failures via `console.error('<French, contextual message>:', error)` before
   rethrowing or resetting state — match the existing French error-message style used
   throughout the composables.

@@ -6,11 +6,42 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 // les 3 gates d'Eligibility pertinents (isValidatedDonor, isBloodCompatible,
 // satisfiesFrequencyRule, dans cet ordre), puis conditionne l'écriture de liaison
 // Request -> Mission sur `Request.status = OPEN` au niveau DynamoDB.
+//
+// Phase 8, sous-tâche 5 (lot 3/3, le dernier) : mock migré vers le client Gen2
+// (`aws-amplify/data`, `client.models.{Request,Animal,Mission}.*` + `client.mutations.
+// linkRequestToMission`, ADR-0011), un mock dédié par méthode plutôt qu'un unique
+// `graphqlMock` discriminé par le texte de la query (même convention que les lots 1/2).
+// Assertions métier (codes d'erreur, ordre des gates d'Eligibility, nettoyage best-effort de
+// la Mission orpheline) inchangées -- seule la forme du mock/des assertions de câblage
+// réseau change. Point le plus sensible (voir le commentaire dédié plus bas) : le test de
+// course concurrente (REQUEST_ALREADY_TAKEN) doit désormais simuler l'échec de condition via
+// une réponse RÉSOLUE `{ data: null, errors: [...] }` sur `client.mutations.
+// linkRequestToMission`, PAS une exception JS rejetée -- c'est le nouveau contrat Gen2
+// (`client.models.X.*`/`client.mutations.*` ne lèvent plus pour une erreur GraphQL/@auth, ils
+// résolvent avec `{ data, errors }`, voir graphql-error-service.js). Un test dédié couvre en
+// plus le cas où l'appel rejette une vraie exception JS (panne réseau), pour ne pas perdre
+// cette couverture au passage.
 
-const graphqlMock = vi.fn()
+const requestGetMock = vi.fn()
+const animalListMock = vi.fn()
+const missionCreateMock = vi.fn()
+const missionDeleteMock = vi.fn()
+const linkRequestToMissionMock = vi.fn()
 
-vi.mock('aws-amplify/api', () => ({
-  generateClient: () => ({ graphql: graphqlMock }),
+vi.mock('aws-amplify/data', () => ({
+  generateClient: () => ({
+    models: {
+      Request: { get: (...args) => requestGetMock(...args) },
+      Animal: { list: (...args) => animalListMock(...args) },
+      Mission: {
+        create: (...args) => missionCreateMock(...args),
+        delete: (...args) => missionDeleteMock(...args),
+      },
+    },
+    mutations: {
+      linkRequestToMission: (...args) => linkRequestToMissionMock(...args),
+    },
+  }),
 }))
 
 vi.mock('aws-amplify/auth', () => ({
@@ -19,7 +50,7 @@ vi.mock('aws-amplify/auth', () => ({
 
 import { useOwnerMissions } from '@/composables/useOwnerMissions'
 
-// Une Request telle que renvoyée par getRequest.
+// Une Request telle que renvoyée par Request.get().
 const buildRequest = (overrides = {}) => ({
   id: 'request-1',
   requiredSpecies: 'DOG',
@@ -44,77 +75,62 @@ const buildEligibleAnimal = (overrides = {}) => ({
   ...overrides,
 })
 
+const resetAllMocks = () => {
+  requestGetMock.mockReset()
+  animalListMock.mockReset()
+  missionCreateMock.mockReset()
+  missionDeleteMock.mockReset()
+  linkRequestToMissionMock.mockReset()
+}
+
 const mockHappyPathBeforeLink = ({ request, animal }) => {
-  graphqlMock.mockImplementation(async ({ query, variables }) => {
-    if (query.includes('GetRequest')) {
-      expect(variables).toEqual({ id: request.id })
-      return { data: { getRequest: request } }
-    }
-    if (query.includes('ListMyAnimals')) {
-      return { data: { listAnimals: { items: [animal] } } }
-    }
-    throw new Error(`Unexpected graphql call in test: ${query.slice(0, 60)}`)
-  })
+  requestGetMock.mockResolvedValue({ data: request, errors: undefined })
+  animalListMock.mockResolvedValue({ data: [animal], errors: undefined })
 }
 
 describe('useOwnerMissions.acceptMission', () => {
-  beforeEach(() => {
-    graphqlMock.mockReset()
-  })
+  beforeEach(resetAllMocks)
 
   it('recharge la Request et l’Animal, crée la Mission (statut PENDING_ARRIVAL pour une Request EMERGENCY) puis lie la Request à la Mission', async () => {
     const request = buildRequest()
     const animal = buildEligibleAnimal()
 
-    graphqlMock.mockImplementation(async ({ query, variables }) => {
-      if (query.includes('GetRequest')) {
-        return { data: { getRequest: request } }
+    requestGetMock.mockResolvedValue({ data: request, errors: undefined })
+    animalListMock.mockResolvedValue({ data: [animal], errors: undefined })
+    missionCreateMock.mockImplementation(async (input) => {
+      expect(input).toMatchObject({
+        requestID: 'request-1',
+        animalID: 'animal-1',
+        status: 'PENDING_ARRIVAL',
+      })
+      return { data: { id: 'mission-1', status: 'PENDING_ARRIVAL' }, errors: undefined }
+    })
+    linkRequestToMissionMock.mockImplementation(async (args) => {
+      expect(args).toMatchObject({ id: 'request-1', activeMissionID: 'mission-1' })
+      return {
+        data: { id: 'request-1', status: 'IN_PROGRESS', activeMissionID: 'mission-1' },
+        errors: undefined,
       }
-      if (query.includes('ListMyAnimals')) {
-        return { data: { listAnimals: { items: [animal] } } }
-      }
-      if (query.includes('CreateMission')) {
-        expect(variables.input).toMatchObject({
-          requestID: 'request-1',
-          animalID: 'animal-1',
-          status: 'PENDING_ARRIVAL',
-        })
-        return { data: { createMission: { id: 'mission-1', status: 'PENDING_ARRIVAL' } } }
-      }
-      if (query.includes('LinkRequestToMission')) {
-        expect(variables).toMatchObject({ id: 'request-1', activeMissionID: 'mission-1' })
-        return { data: { updateRequest: { id: 'request-1', status: 'IN_PROGRESS', activeMissionID: 'mission-1' } } }
-      }
-      throw new Error(`Unexpected graphql call in test: ${query.slice(0, 60)}`)
     })
 
     const { acceptMission } = useOwnerMissions()
     const donorName = await acceptMission('request-1', 'animal-1')
 
     expect(donorName).toBe('Rex')
-    // getRequest, listMyAnimalsSimple, createMissionSimple, linkRequestToMission.
-    expect(graphqlMock).toHaveBeenCalledTimes(4)
+    expect(requestGetMock).toHaveBeenCalledTimes(1)
+    expect(animalListMock).toHaveBeenCalledTimes(1)
+    expect(missionCreateMock).toHaveBeenCalledTimes(1)
+    expect(linkRequestToMissionMock).toHaveBeenCalledTimes(1)
   })
 
   it('retire uniquement la Request acceptée de missions.value (les autres Requests OPEN restent affichées)', async () => {
     const request = buildRequest()
     const animal = buildEligibleAnimal()
     mockHappyPathBeforeLink({ request, animal })
-    // mockHappyPathBeforeLink ne mocke pas CreateMission/LinkRequestToMission ; on les
-    // rajoute par-dessus pour ce test.
-    const baseImpl = graphqlMock.getMockImplementation()
-    graphqlMock.mockImplementation(async (args) => {
-      if (args.query.includes('CreateMission')) {
-        return { data: { createMission: { id: 'mission-1', status: 'PENDING_ARRIVAL' } } }
-      }
-      if (args.query.includes('LinkRequestToMission')) {
-        return {
-          data: {
-            updateRequest: { id: 'request-1', status: 'IN_PROGRESS', activeMissionID: 'mission-1' },
-          },
-        }
-      }
-      return baseImpl(args)
+    missionCreateMock.mockResolvedValue({ data: { id: 'mission-1', status: 'PENDING_ARRIVAL' }, errors: undefined })
+    linkRequestToMissionMock.mockResolvedValue({
+      data: { id: 'request-1', status: 'IN_PROGRESS', activeMissionID: 'mission-1' },
+      errors: undefined,
     })
 
     const { acceptMission, missions } = useOwnerMissions()
@@ -135,17 +151,15 @@ describe('useOwnerMissions.acceptMission', () => {
     const request = buildRequest({ requestType: 'APPOINTMENT' })
     const animal = buildEligibleAnimal()
 
-    graphqlMock.mockImplementation(async ({ query, variables }) => {
-      if (query.includes('GetRequest')) return { data: { getRequest: request } }
-      if (query.includes('ListMyAnimals')) return { data: { listAnimals: { items: [animal] } } }
-      if (query.includes('CreateMission')) {
-        expect(variables.input.status).toBe('ACCEPTED')
-        return { data: { createMission: { id: 'mission-1', status: 'ACCEPTED' } } }
-      }
-      if (query.includes('LinkRequestToMission')) {
-        return { data: { updateRequest: { id: 'request-1', status: 'IN_PROGRESS', activeMissionID: 'mission-1' } } }
-      }
-      throw new Error(`Unexpected graphql call in test: ${query.slice(0, 60)}`)
+    requestGetMock.mockResolvedValue({ data: request, errors: undefined })
+    animalListMock.mockResolvedValue({ data: [animal], errors: undefined })
+    missionCreateMock.mockImplementation(async (input) => {
+      expect(input.status).toBe('ACCEPTED')
+      return { data: { id: 'mission-1', status: 'ACCEPTED' }, errors: undefined }
+    })
+    linkRequestToMissionMock.mockResolvedValue({
+      data: { id: 'request-1', status: 'IN_PROGRESS', activeMissionID: 'mission-1' },
+      errors: undefined,
     })
 
     const { acceptMission } = useOwnerMissions()
@@ -153,24 +167,17 @@ describe('useOwnerMissions.acceptMission', () => {
   })
 
   it('rejette avec REQUEST_NOT_OPEN sans aller plus loin si la Request rechargée n’est pas OPEN', async () => {
-    graphqlMock.mockImplementation(async ({ query }) => {
-      if (query.includes('GetRequest')) {
-        return { data: { getRequest: buildRequest({ status: 'IN_PROGRESS' }) } }
-      }
-      throw new Error(`Unexpected graphql call in test: ${query.slice(0, 60)}`)
-    })
+    requestGetMock.mockResolvedValue({ data: buildRequest({ status: 'IN_PROGRESS' }), errors: undefined })
 
     const { acceptMission } = useOwnerMissions()
 
     await expect(acceptMission('request-1', 'animal-1')).rejects.toThrow('REQUEST_NOT_OPEN')
-    expect(graphqlMock).toHaveBeenCalledTimes(1)
+    expect(requestGetMock).toHaveBeenCalledTimes(1)
+    expect(animalListMock).not.toHaveBeenCalled()
   })
 
   it('rejette avec REQUEST_NOT_OPEN si la Request n’existe plus (getRequest renvoie null)', async () => {
-    graphqlMock.mockImplementation(async ({ query }) => {
-      if (query.includes('GetRequest')) return { data: { getRequest: null } }
-      throw new Error(`Unexpected graphql call in test: ${query.slice(0, 60)}`)
-    })
+    requestGetMock.mockResolvedValue({ data: null, errors: undefined })
 
     const { acceptMission } = useOwnerMissions()
 
@@ -186,7 +193,9 @@ describe('useOwnerMissions.acceptMission', () => {
     const { acceptMission } = useOwnerMissions()
 
     await expect(acceptMission('request-1', 'animal-1')).rejects.toThrow('ANIMAL_NOT_FOUND')
-    expect(graphqlMock).toHaveBeenCalledTimes(2)
+    expect(requestGetMock).toHaveBeenCalledTimes(1)
+    expect(animalListMock).toHaveBeenCalledTimes(1)
+    expect(missionCreateMock).not.toHaveBeenCalled()
   })
 
   it('rejette avec NOT_VALIDATED_DONOR (critère 1) avant même de vérifier la compatibilité sanguine', async () => {
@@ -278,16 +287,12 @@ describe('useOwnerMissions.acceptMission', () => {
     const request = buildRequest({ requiredBloodGroup: 'UNKNOWN' })
     const animal = buildEligibleAnimal()
 
-    graphqlMock.mockImplementation(async ({ query }) => {
-      if (query.includes('GetRequest')) return { data: { getRequest: request } }
-      if (query.includes('ListMyAnimals')) return { data: { listAnimals: { items: [animal] } } }
-      if (query.includes('CreateMission')) {
-        return { data: { createMission: { id: 'mission-1', status: 'PENDING_ARRIVAL' } } }
-      }
-      if (query.includes('LinkRequestToMission')) {
-        return { data: { updateRequest: { id: 'request-1', status: 'IN_PROGRESS', activeMissionID: 'mission-1' } } }
-      }
-      throw new Error(`Unexpected graphql call in test: ${query.slice(0, 60)}`)
+    requestGetMock.mockResolvedValue({ data: request, errors: undefined })
+    animalListMock.mockResolvedValue({ data: [animal], errors: undefined })
+    missionCreateMock.mockResolvedValue({ data: { id: 'mission-1', status: 'PENDING_ARRIVAL' }, errors: undefined })
+    linkRequestToMissionMock.mockResolvedValue({
+      data: { id: 'request-1', status: 'IN_PROGRESS', activeMissionID: 'mission-1' },
+      errors: undefined,
     })
 
     const { acceptMission } = useOwnerMissions()
@@ -295,36 +300,34 @@ describe('useOwnerMissions.acceptMission', () => {
     await expect(acceptMission('request-1', 'animal-1')).resolves.toBe('Rex')
   })
 
-  it('REQUEST_ALREADY_TAKEN : si linkRequestToMission échoue avec une erreur de type ConditionalCheckFailedException, nettoie la Mission orpheline (deleteMission) puis remonte REQUEST_ALREADY_TAKEN', async () => {
+  // Point le plus sensible de ce lot (voir le commentaire en tête de fichier) : sous Gen2,
+  // `client.mutations.linkRequestToMission(...)` ne LÈVE PAS pour un échec de condition
+  // DynamoDB -- il RÉSOUT normalement avec `{ data: null, errors: [...] }`
+  // (`errors[0].errorType === 'DynamoDB:ConditionalCheckFailedException'`). C'est
+  // `throwIfGraphqlError` (useOwnerMissions.js) qui synthétise l'exception que
+  // `isConditionalCheckFailure` détecte ensuite dans le `catch` -- pas une exception JS
+  // rejetée directement par l'appel réseau (voir le test séparé plus bas pour CE cas-là).
+  it('REQUEST_ALREADY_TAKEN : si linkRequestToMission résout avec une erreur de type ConditionalCheckFailedException, nettoie la Mission orpheline (deleteMission) puis remonte REQUEST_ALREADY_TAKEN', async () => {
     const request = buildRequest()
     const animal = buildEligibleAnimal()
     let deleteMissionCalled = false
 
-    const conditionalCheckError = {
-      data: { updateRequest: null },
+    requestGetMock.mockResolvedValue({ data: request, errors: undefined })
+    animalListMock.mockResolvedValue({ data: [animal], errors: undefined })
+    missionCreateMock.mockResolvedValue({ data: { id: 'mission-1', status: 'PENDING_ARRIVAL' }, errors: undefined })
+    linkRequestToMissionMock.mockResolvedValue({
+      data: null,
       errors: [
         {
           message: 'The conditional request failed',
           errorType: 'DynamoDB:ConditionalCheckFailedException',
         },
       ],
-    }
-
-    graphqlMock.mockImplementation(async ({ query, variables }) => {
-      if (query.includes('GetRequest')) return { data: { getRequest: request } }
-      if (query.includes('ListMyAnimals')) return { data: { listAnimals: { items: [animal] } } }
-      if (query.includes('CreateMission')) {
-        return { data: { createMission: { id: 'mission-1', status: 'PENDING_ARRIVAL' } } }
-      }
-      if (query.includes('LinkRequestToMission')) {
-        throw conditionalCheckError
-      }
-      if (query.includes('DeleteMission')) {
-        deleteMissionCalled = true
-        expect(variables).toEqual({ input: { id: 'mission-1' } })
-        return { data: { deleteMission: { id: 'mission-1' } } }
-      }
-      throw new Error(`Unexpected graphql call in test: ${query.slice(0, 60)}`)
+    })
+    missionDeleteMock.mockImplementation(async (args) => {
+      deleteMissionCalled = true
+      expect(args).toEqual({ id: 'mission-1' })
+      return { data: { id: 'mission-1' }, errors: undefined }
     })
 
     const { acceptMission, isAccepting } = useOwnerMissions()
@@ -338,40 +341,34 @@ describe('useOwnerMissions.acceptMission', () => {
     const request = buildRequest()
     const animal = buildEligibleAnimal()
 
-    const conditionalCheckError = {
+    requestGetMock.mockResolvedValue({ data: request, errors: undefined })
+    animalListMock.mockResolvedValue({ data: [animal], errors: undefined })
+    missionCreateMock.mockResolvedValue({ data: { id: 'mission-1', status: 'PENDING_ARRIVAL' }, errors: undefined })
+    linkRequestToMissionMock.mockResolvedValue({
+      data: null,
       errors: [{ errorType: 'DynamoDB:ConditionalCheckFailedException', message: 'The conditional request failed' }],
-    }
-
-    graphqlMock.mockImplementation(async ({ query }) => {
-      if (query.includes('GetRequest')) return { data: { getRequest: request } }
-      if (query.includes('ListMyAnimals')) return { data: { listAnimals: { items: [animal] } } }
-      if (query.includes('CreateMission')) {
-        return { data: { createMission: { id: 'mission-1', status: 'PENDING_ARRIVAL' } } }
-      }
-      if (query.includes('LinkRequestToMission')) throw conditionalCheckError
-      if (query.includes('DeleteMission')) throw new Error('boom: cleanup also failed')
-      throw new Error(`Unexpected graphql call in test: ${query.slice(0, 60)}`)
     })
+    missionDeleteMock.mockRejectedValue(new Error('boom: cleanup also failed'))
 
     const { acceptMission } = useOwnerMissions()
 
     await expect(acceptMission('request-1', 'animal-1')).rejects.toThrow('REQUEST_ALREADY_TAKEN')
   })
 
-  it('propage (sans la travestir en REQUEST_ALREADY_TAKEN) une erreur linkRequestToMission qui n’est pas un échec de condition', async () => {
+  // Cas distinct du test REQUEST_ALREADY_TAKEN ci-dessus : ici l'appel réseau LUI-MÊME
+  // rejette une exception JS (panne réseau) plutôt que de résoudre `{ data, errors }` --
+  // `isConditionalCheckFailure` doit rester `false` sur une simple `Error` JS sans `.errors`,
+  // et l'erreur d'origine doit être propagée telle quelle (pas de nettoyage best-effort
+  // tenté, ce n'est pas un échec de condition).
+  it("propage (sans la travestir en REQUEST_ALREADY_TAKEN) une exception JS rejetée par linkRequestToMission (panne réseau, pas une réponse { errors } résolue)", async () => {
     const request = buildRequest()
     const animal = buildEligibleAnimal()
     const authError = new Error('Not Authorized to access updateRequest on type Request')
 
-    graphqlMock.mockImplementation(async ({ query }) => {
-      if (query.includes('GetRequest')) return { data: { getRequest: request } }
-      if (query.includes('ListMyAnimals')) return { data: { listAnimals: { items: [animal] } } }
-      if (query.includes('CreateMission')) {
-        return { data: { createMission: { id: 'mission-1', status: 'PENDING_ARRIVAL' } } }
-      }
-      if (query.includes('LinkRequestToMission')) throw authError
-      throw new Error(`Unexpected graphql call in test: ${query.slice(0, 60)}`)
-    })
+    requestGetMock.mockResolvedValue({ data: request, errors: undefined })
+    animalListMock.mockResolvedValue({ data: [animal], errors: undefined })
+    missionCreateMock.mockResolvedValue({ data: { id: 'mission-1', status: 'PENDING_ARRIVAL' }, errors: undefined })
+    linkRequestToMissionMock.mockRejectedValue(authError)
 
     const { acceptMission } = useOwnerMissions()
 
@@ -379,47 +376,37 @@ describe('useOwnerMissions.acceptMission', () => {
       'Not Authorized to access updateRequest on type Request',
     )
     // Pas de deleteMission tenté : ce n'est pas un échec de condition.
-    expect(graphqlMock).toHaveBeenCalledTimes(4)
+    expect(missionDeleteMock).not.toHaveBeenCalled()
   })
 
-  // Scrutin spécifique de isConditionalCheckFailure (cf. commentaire en tête de fichier
-  // useOwnerMissions.js) : une erreur qui A BIEN la forme `{ data, errors: [...] }` produite
-  // par client.graphql() (donc pas juste une Error JS simple, cf. le test précédent) mais
-  // dont l'errorType/message ne correspond pas à un ConditionalCheckFailedException ne doit
-  // PAS être traitée comme REQUEST_ALREADY_TAKEN. Forme reprise de
-  // node_modules/@aws-amplify/api-graphql/dist/cjs/utils/errors/repackageAuthError.js
-  // (repackageUnauthorizedError) pour une erreur Unauthorized réelle.
-  it('ne confond pas une erreur Unauthorized (même forme { errors: [...] } que le succès) avec un échec de condition', async () => {
+  // Pendant du test précédent pour le nouveau contrat Gen2 : une réponse RÉSOLUE portant
+  // `errors` (même forme que le succès partiel) dont le contenu ne correspond à AUCUN
+  // ConditionalCheckFailedException (ici une erreur Unauthorized) ne doit pas non plus être
+  // confondue avec un échec de condition. `throwIfGraphqlError` synthétise une NOUVELLE
+  // exception (voir graphql-error-service.js) -- contrairement à Gen1 où l'objet rejeté par
+  // `client.graphql()` était directement celui contenant `errors`, donc cette version teste
+  // le contenu (`.errors`, `.message`) plutôt que l'identité de l'objet.
+  it("ne confond pas une erreur Unauthorized résolue (même forme { errors: [...] } que le succès partiel) avec un échec de condition", async () => {
     const request = buildRequest()
     const animal = buildEligibleAnimal()
+    const unauthorizedErrors = [{ message: 'Unauthorized', originalError: { name: 'UnauthorizedException' } }]
 
-    const unauthorizedError = {
-      data: { updateRequest: null },
-      errors: [
-        {
-          message: 'Unauthorized',
-          originalError: { name: 'UnauthorizedException' },
-        },
-      ],
-    }
-
-    graphqlMock.mockImplementation(async ({ query }) => {
-      if (query.includes('GetRequest')) return { data: { getRequest: request } }
-      if (query.includes('ListMyAnimals')) return { data: { listAnimals: { items: [animal] } } }
-      if (query.includes('CreateMission')) {
-        return { data: { createMission: { id: 'mission-1', status: 'PENDING_ARRIVAL' } } }
-      }
-      if (query.includes('LinkRequestToMission')) throw unauthorizedError
-      throw new Error(`Unexpected graphql call in test: ${query.slice(0, 60)}`)
-    })
+    requestGetMock.mockResolvedValue({ data: request, errors: undefined })
+    animalListMock.mockResolvedValue({ data: [animal], errors: undefined })
+    missionCreateMock.mockResolvedValue({ data: { id: 'mission-1', status: 'PENDING_ARRIVAL' }, errors: undefined })
+    linkRequestToMissionMock.mockResolvedValue({ data: null, errors: unauthorizedErrors })
 
     const { acceptMission } = useOwnerMissions()
 
-    // Propage l'erreur Unauthorized telle quelle plutôt que de la travestir en
-    // REQUEST_ALREADY_TAKEN.
-    await expect(acceptMission('request-1', 'animal-1')).rejects.toBe(unauthorizedError)
+    const error = await acceptMission('request-1', 'animal-1').catch((e) => e)
+
+    // Propage l'erreur (synthétisée par throwIfGraphqlError à partir des `errors` d'origine)
+    // telle quelle plutôt que de la travestir en REQUEST_ALREADY_TAKEN.
+    expect(error).toBeInstanceOf(Error)
+    expect(error.message).not.toBe('REQUEST_ALREADY_TAKEN')
+    expect(error.errors).toEqual(unauthorizedErrors)
     // Pas de deleteMission tenté : ce n'est pas un échec de condition, donc pas de Mission
     // orpheline à nettoyer selon la logique de l'implémentation.
-    expect(graphqlMock).toHaveBeenCalledTimes(4)
+    expect(missionDeleteMock).not.toHaveBeenCalled()
   })
 })

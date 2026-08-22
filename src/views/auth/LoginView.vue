@@ -1,11 +1,18 @@
 <script setup>
 import { ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useI18n } from 'vue-i18n'
 
 const auth = useAuthStore()
+const route = useRoute()
 const { t } = useI18n()
-const email = ref('')
+// Pré-rempli depuis la redirection /login?email=... (email déjà utilisé à
+// l'inscription, voir src/stores/auth.js register()) -- initialisé directement
+// dans `ref(...)`, pas dans `onMounted()` : une affectation après coup
+// déclencherait le `watch` juste en dessous et effacerait `auth.error` (le
+// message "email déjà utilisé") avant que l'utilisateur ne le voie.
+const email = ref(route.query.email || '')
 const password = ref('')
 
 watch([email, password], () => {

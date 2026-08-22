@@ -1,19 +1,23 @@
 import { ref } from 'vue'
-import { generateClient } from 'aws-amplify/api'
-import {
-  createOwnerSimple,
-  createAnimalSimple,
-  createOwnerAvailabilitySimple,
-  createClinicSimple,
-  createVeterinarianSimple,
-} from '@/graphql/custom-mutations'
+import { generateClient } from 'aws-amplify/data'
 import { Species, DonationFrequency } from '@/constants/enums'
+import { throwIfGraphqlError } from '@/services/graphql-error-service'
 
 /**
  * Phase 7.7 : composable regroupant la logique métier + les 5 appels `client.graphql()`
  * de complétion d'inscription, extraits de `VerifyEmailView.vue` pour respecter la
  * convention "logique métier et appels GraphQL dans les composables, jamais dans les
  * composants" (CLAUDE.md).
+ *
+ * Phase 8, sous-tâche 5 (lot 1/3) : migré sur le client Gen2 (`aws-amplify/data`,
+ * `client.models.Owner.create()`/`client.models.Animal.create()`/etc.). Plus d'import depuis
+ * `@/graphql/custom-mutations` -- voir le commentaire équivalent dans useAnimals.js. Sur le
+ * changement de comportement d'erreur Gen1 -> Gen2 et `throwIfGraphqlError` ci-dessous : voir
+ * le JSDoc de `src/services/graphql-error-service.js`, seule source de vérité sur le
+ * "pourquoi" (aucun des 5 appels de ce fichier n'avait de `catch` dédié en Gen1 -- seul
+ * `completeRegistration()`, plus bas, entoure l'ensemble d'un `try/catch` qui logue et
+ * relance -- `throwIfGraphqlError` continue de faire remonter l'échec jusqu'à ce `try/catch`
+ * englobant, exactement le contrat qu'attend `VerifyEmailView.vue`, `err.errors`).
  *
  * Intervient APRÈS la vérification du code Cognito (`auth.confirmRegistration`, restée
  * dans la vue — ce n'est pas un appel `client.graphql()`, et hors du périmètre de cette
@@ -41,7 +45,10 @@ import { Species, DonationFrequency } from '@/constants/enums'
  * `useRegistrationCompletion.test.js`) : c'est un bug réel préexistant à cette
  * extraction, PAS introduit ni corrigé par elle — le comportement d'origine (déjà
  * non-transactionnel dans `VerifyEmailView.vue`) est reproduit à l'identique. Signalé
- * dans le rapport de la Phase 7.7 pour arbitrage par le coordinateur/Lead Dev.
+ * dans le rapport de la Phase 7.7 pour arbitrage par le coordinateur/Lead Dev. Toujours vrai
+ * en Gen2 (R-25) : `a.model()` sans contrainte d'unicité personnalisée applique la même
+ * condition implicite `attribute_not_exists(id)` que le Transformer v1 sur une création avec
+ * `id` explicite.
  *
  * Contrairement à `mapAcceptMissionError`/`mapValidationErrorKey`, ce composable n'a pas
  * de fonction de mapping erreur -> clé i18n dédiée : il n'existait déjà aucune
@@ -80,65 +87,53 @@ export function useRegistrationCompletion() {
    * par défaut.
    */
   const completeOwnerRegistration = async (data, cognitoUserId) => {
-    const ownerRes = await client.graphql({
-      query: createOwnerSimple,
-      variables: {
-        input: {
-          id: cognitoUserId,
-          firstname: data.firstname,
-          lastname: data.lastname,
-          email: data.email,
-          phone: data.phone || '',
-          address: data.address || '',
-          latitude: parseFloat(data.latitude || 0),
-          longitude: parseFloat(data.longitude || 0),
-          maxTravelDistance: 50,
-          totalDonations: 0,
-        },
-      },
-      authMode: 'userPool',
+    const { data: owner, errors: ownerErrors } = await client.models.Owner.create({
+      id: cognitoUserId,
+      firstname: data.firstname,
+      lastname: data.lastname,
+      email: data.email,
+      phone: data.phone || '',
+      address: data.address || '',
+      latitude: parseFloat(data.latitude || 0),
+      longitude: parseFloat(data.longitude || 0),
+      maxTravelDistance: 50,
+      totalDonations: 0,
     })
 
-    const ownerID = ownerRes.data.createOwner.id
+    throwIfGraphqlError(ownerErrors, 'createOwner')
+
+    const ownerID = owner.id
 
     if (data.animal_name) {
-      await client.graphql({
-        query: createAnimalSimple,
-        variables: {
-          input: {
-            ownerID: ownerID,
-            name: data.animal_name,
-            species: (data.animal_species || Species.DOG).toUpperCase(),
-            breed: data.animal_breed || '',
-            // Sous-tâche 6.8 : champ informatif uniquement, optionnel (voir schema.graphql).
-            sex: data.animal_sex || null,
-            weight: parseFloat(data.animal_weight || 0),
-            // Pas d'entrée d'enum dédiée pour 'UNKNOWN' dans src/constants/enums.js (les
-            // groupes sanguins connus sont listés par espèce dans BloodGroupsBySpecies,
-            // sans valeur "inconnu") — littéral laissé tel quel, hors périmètre de la
-            // substitution Species/DonationFrequency demandée pour la Phase 7.7/R-14.
-            bloodGroup: data.blood_group || 'UNKNOWN',
-            isVaccinated: true,
-            isSterilized: false,
-            donationFrequency: DonationFrequency.ASAP,
-          },
-        },
-        authMode: 'userPool',
+      const { errors: animalErrors } = await client.models.Animal.create({
+        ownerID: ownerID,
+        name: data.animal_name,
+        species: (data.animal_species || Species.DOG).toUpperCase(),
+        breed: data.animal_breed || '',
+        // Sous-tâche 6.8 : champ informatif uniquement, optionnel (voir schema.graphql).
+        sex: data.animal_sex || null,
+        weight: parseFloat(data.animal_weight || 0),
+        // Pas d'entrée d'enum dédiée pour 'UNKNOWN' dans src/constants/enums.js (les
+        // groupes sanguins connus sont listés par espèce dans BloodGroupsBySpecies,
+        // sans valeur "inconnu") — littéral laissé tel quel, hors périmètre de la
+        // substitution Species/DonationFrequency demandée pour la Phase 7.7/R-14.
+        bloodGroup: data.blood_group || 'UNKNOWN',
+        isVaccinated: true,
+        isSterilized: false,
+        donationFrequency: DonationFrequency.ASAP,
       })
+
+      throwIfGraphqlError(animalErrors, 'createAnimal')
     }
 
-    await client.graphql({
-      query: createOwnerAvailabilitySimple,
-      variables: {
-        input: {
-          ownerID: ownerID,
-          dayOfWeek: 6,
-          startTime: '09:00Z',
-          endTime: '12:00Z',
-        },
-      },
-      authMode: 'userPool',
+    const { errors: availabilityErrors } = await client.models.OwnerAvailability.create({
+      ownerID: ownerID,
+      dayOfWeek: 6,
+      startTime: '09:00Z',
+      endTime: '12:00Z',
     })
+
+    throwIfGraphqlError(availabilityErrors, 'createOwnerAvailability')
   }
 
   /**
@@ -148,38 +143,30 @@ export function useRegistrationCompletion() {
     // Clinic.id est un identifiant propre généré côté backend (comme Animal/OwnerAvailability) :
     // Clinic.veterinarians est une relation @hasMany, un Clinic peut donc avoir plusieurs
     // Veterinarian, et Clinic.id ne doit jamais être aliasé sur le cognitoUserId d'un vétérinaire.
-    const clinicRes = await client.graphql({
-      query: createClinicSimple,
-      variables: {
-        input: {
-          name: data.clinic_name,
-          rpps: data.rpps,
-          email: data.email,
-          phone: data.phone || '',
-          address: data.address,
-          latitude: parseFloat(data.latitude || 0),
-          longitude: parseFloat(data.longitude || 0),
-          hasEmergencyService: false,
-          transfusionsDone: 0,
-          donorOwnersCount: 0,
-        },
-      },
-      authMode: 'userPool',
+    const { data: clinic, errors: clinicErrors } = await client.models.Clinic.create({
+      name: data.clinic_name,
+      rpps: data.rpps,
+      email: data.email,
+      phone: data.phone || '',
+      address: data.address,
+      latitude: parseFloat(data.latitude || 0),
+      longitude: parseFloat(data.longitude || 0),
+      hasEmergencyService: false,
+      transfusionsDone: 0,
+      donorOwnersCount: 0,
     })
 
-    await client.graphql({
-      query: createVeterinarianSimple,
-      variables: {
-        input: {
-          id: cognitoUserId,
-          clinicID: clinicRes.data.createClinic.id,
-          firstname: data.firstname,
-          lastname: data.lastname,
-          email: data.email,
-        },
-      },
-      authMode: 'userPool',
+    throwIfGraphqlError(clinicErrors, 'createClinic')
+
+    const { errors: vetErrors } = await client.models.Veterinarian.create({
+      id: cognitoUserId,
+      clinicID: clinic.id,
+      firstname: data.firstname,
+      lastname: data.lastname,
+      email: data.email,
     })
+
+    throwIfGraphqlError(vetErrors, 'createVeterinarian')
   }
 
   /**

@@ -1,12 +1,34 @@
 import { ref } from 'vue'
-import { generateClient } from 'aws-amplify/api'
+import { generateClient } from 'aws-amplify/data'
 import { getCurrentUser } from 'aws-amplify/auth'
-import { listOpenRequestsWithClinic, myClinicRelationsByOwnerID } from '@/graphql/custom-queries'
 import { checkEligibility, matchesAvailability } from '@/services/eligibility-service'
+import { throwIfGraphqlError } from '@/services/graphql-error-service'
 import { useAnimals } from '@/composables/useAnimals'
 import { useOwnerProfile } from '@/composables/useOwnerProfile'
 import { useOwnerAvailability } from '@/composables/useOwnerAvailability'
 import { RequestStatus, RequestType } from '@/constants/enums'
+
+// Phase 8, sous-tâche 5 (lot 3/3, le dernier) : migré sur le client Gen2 (`aws-amplify/data`,
+// `client.models.ClinicOwnerRelation.*`/`client.models.Request.*`). `myClinicRelationsByOwnerID`/
+// `listOpenRequestsWithClinic` (custom-queries.js, Gen1) n'ont plus lieu d'être ici -- voir
+// CLAUDE.md / roadmap Phase 8. `useAnimals()`/`useOwnerProfile()`/`useOwnerAvailability()`
+// (instanciés ci-dessous) sont déjà migrés depuis le lot 1/3, aucun changement requis ici.
+//
+// Sur le changement de comportement d'erreur Gen1 -> Gen2 et `throwIfGraphqlError` : voir le
+// JSDoc de `src/services/graphql-error-service.js`. Les deux appels ci-dessous reprennent
+// `throwIfGraphqlError` : le Gen1 d'origine faisait un simple `await client.graphql(...)` sans
+// jamais destructurer/inspecter `errors` (aucune notion de succès partiel).
+//
+// selectionSet de `listOpenRequestsWithClinic` (remplacé par `client.models.Request.list()`) :
+// construit en vérifiant EXACTEMENT quels champs `clinic.*` sont consommés (pas les 10 champs
+// sélectionnés par la query Gen1 -- même discipline que `useClinicDonors.js`, lot 2). Vérifié en
+// lisant `eligibility-service.js` (checkEligibility()/hasClinicPriority() ne lisent que
+// `request.clinic.id`/`request.clinic.latitude`/`request.clinic.longitude`) ET l'unique vue
+// consommatrice de `matches` (DashboardView.vue, qui n'affiche que `req.clinic?.name` -- ni
+// address/phone/rpps/email/hasEmergencyService/transfusionsDone/donorOwnersCount/timestamps,
+// tous sélectionnés par la query Gen1 mais jamais lus par ce flux). `requestType`/
+// `requiredSpecies`/`requiredBloodGroup`/`appointmentDatetime` restent des scalaires top-niveau
+// de Request, tous consommés par ce composable ou DashboardView.vue -- reproduits tels quels.
 
 // Rayon (en km) sous lequel Clinic Priority (critère 5 de l'Eligibility, CONTEXT.md)
 // peut faire passer une Request en tête de tri (voir le comparateur dans
@@ -123,27 +145,36 @@ export function useMatchingRequests() {
       let ownerClinicIds = []
       try {
         const { userId } = await getCurrentUser()
-        const { data: relationsData } = await client.graphql({
-          query: myClinicRelationsByOwnerID,
-          variables: { ownerID: userId },
-          authMode: 'userPool',
+        const { data: relations, errors: relationsErrors } = await client.models.ClinicOwnerRelation.list({
+          filter: { ownerID: { eq: userId } },
+          selectionSet: ['clinicID'],
         })
-        ownerClinicIds = (relationsData.clinicOwnerRelationsByOwnerID?.items || []).map(
-          (item) => item.clinicID,
-        )
+        throwIfGraphqlError(relationsErrors, 'clinicOwnerRelationsByOwnerID')
+        ownerClinicIds = (relations || []).map((item) => item.clinicID)
       } catch (e) {
         console.error('Erreur chargement des cliniques déjà liées (Clinic Priority) :', e)
       }
 
       // 3. Récupérer TOUTES les demandes ouvertes
       // Note : Pour un MVP, filtrer côté client est acceptable et plus simple
-      const { data } = await client.graphql({
-        query: listOpenRequestsWithClinic,
-        variables: { filter: { status: { eq: RequestStatus.OPEN } } },
-        authMode: 'userPool'
+      const { data, errors } = await client.models.Request.list({
+        filter: { status: { eq: RequestStatus.OPEN } },
+        selectionSet: [
+          'id',
+          'requestType',
+          'requiredSpecies',
+          'requiredBloodGroup',
+          'appointmentDatetime',
+          'clinic.id',
+          'clinic.name',
+          'clinic.latitude',
+          'clinic.longitude',
+        ],
       })
 
-      const allRequests = data.listRequests.items
+      throwIfGraphqlError(errors, 'listRequests')
+
+      const allRequests = data || []
 
       // 3.5. Phase 6.5 (ADR-0005) : les Requests APPOINTMENT ont besoin des
       // OwnerAvailability de l'Owner pour un filtre EXCLUSIF supplémentaire

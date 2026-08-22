@@ -92,6 +92,13 @@ export const useAuthStore = defineStore('auth', () => {
       console.error(err)
       if (err.name === 'UsernameExistsException') {
         error.value = `errors.email_exists`
+        // Comportement demandé (retour utilisateur, hors migration Phase 8 -- ce
+        // fichier n'a jamais été touché par elle) : un email déjà utilisé redirige
+        // vers /login (email pré-rempli) plutôt que de laisser l'Owner/Vet bloqué
+        // sur le formulaire d'inscription avec un message d'erreur seul. `error`
+        // reste posé dans le store (pas réinitialisé par la navigation elle-même) :
+        // LoginView.vue l'affiche déjà via son propre `<Message v-if="auth.error">`.
+        await router.push(`/login?email=${encodeURIComponent(email)}`)
       } else {
         error.value = `errors.registration_failed`
       }
@@ -100,20 +107,32 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  // Bug réel trouvé en test de bout en bout (ni ce fichier ni VerifyEmailView.vue
+  // n'ont été touchés par la Phase 8) : un code de vérification erroné/expiré était
+  // avalé ici (`error.value` posé, jamais relancé) -- l'appelant (VerifyEmailView.vue,
+  // `try { await auth.confirmRegistration(...) } catch (e) { if (!e.message?.includes(
+  // 'Current status is CONFIRMED')) throw e }`) ne recevait donc JAMAIS d'exception à
+  // examiner, quel que soit le code entré, et continuait la suite du flux
+  // (signIn/completeRegistration) comme si la confirmation avait réussi -- créant les
+  // entités DynamoDB même sur un code invalide. `throw err` ci-dessous restaure le
+  // contrat attendu par cet appelant.
+  //
+  // Retiré aussi : le `router.push('/login')` sur succès. VerifyEmailView.vue pilote
+  // déjà toute la navigation post-confirmation (connexion, complétion du profil, puis
+  // dashboard) -- ce store ne doit pas naviguer lui-même (même principe que le bug
+  // corrigé sur `login()`/VerifyEmailView.vue précédemment).
   async function confirmRegistration(email, code) {
     isLoading.value = true
     error.value = null
     try {
-      const { isSignUpComplete } = await confirmSignUp({
+      await confirmSignUp({
         username: email,
         confirmationCode: code
       });
-      if (isSignUpComplete) {
-        await router.push('/login');
-      }
     } catch (err) {
       console.error(err)
       error.value = `errors.invalid_code`
+      throw err
     } finally {
       isLoading.value = false
     }
