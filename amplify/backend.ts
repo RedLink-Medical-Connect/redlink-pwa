@@ -1,6 +1,6 @@
 import { defineBackend } from '@aws-amplify/backend'
-import { CfnPlaceIndex } from 'aws-cdk-lib/aws-location'
 import { Policy, PolicyStatement } from 'aws-cdk-lib/aws-iam'
+import { AwsCustomResource, AwsCustomResourcePolicy, PhysicalResourceId } from 'aws-cdk-lib/custom-resources'
 import { auth } from './auth/resource'
 import { data } from './data/resource'
 import { postConfirmation } from './functions/post-confirmation/resource'
@@ -53,41 +53,97 @@ cfnUserPool.policies = {
  * famille de pattern que la mutation custom conditionnelle (ADR-0011) et la
  * politique de mot de passe ci-dessus (ADR-0008).
  *
- * Config reproduite à l'identique de Gen1
- * (`amplify/backend/geo/placeIndex/parameters.json` et
- * `placeIndex-cloudformation-template.json`, récupérés depuis l'historique git à
- * `dc55236~1` -- voir ADR-0012 pour le détail) : `indexName: "placeIndex"`,
- * `dataSource: "Here"` (le prop CDK s'appelle `dataSource`, pas `dataProvider`
- * malgré le nom du paramètre CLI Gen1), `dataSourceConfiguration.intendedUse:
- * "SingleUse"`, `pricingPlan: "RequestBasedUsage"`. Les 4 actions IAM accordées
- * sont EXACTEMENT celles du template Gen1 (`geo:SearchPlaceIndexForPosition`,
- * `geo:SearchPlaceIndexForText`, `geo:SearchPlaceIndexForSuggestions`,
- * `geo:GetPlace`), scopées à l'ARN de cet index précis -- jamais de wildcard.
- *
- * Accordée aux DEUX rôles IAM (authentifié ET non-authentifié) : le Gen1
- * `parameters.json` référence à la fois `authRoleName` et `unauthRoleName`, et
- * `AddressAutocomplete.vue` est utilisé dans `RegisterOwnerView.vue`/
- * `RegisterClinicView.vue` -- des formulaires remplis avant qu'un compte Cognito
- * existe (donc non-authentifié au sens Identity Pool). Sans la policy sur le rôle
- * non-authentifié, l'autocomplétion resterait cassée sur ces deux vues précises
- * même après la migration. L'accès invité (identités non-authentifiées) est déjà
- * actif par défaut sur l'Identity Pool généré par `defineAuth`
- * (`allowUnauthenticatedIdentities: true` par défaut) -- rien à faire côté
- * `amplify/auth/resource.ts`, confirmé qu'aucun override ne le désactive (voir
- * ADR-0012, qui referme le point laissé ouvert par la sous-tâche 3/ADR-0008).
+ * Correctif post-déploiement réel (voir ADR-0013) : un premier `ampx sandbox`
+ * (région du projet : `eu-west-3`, Paris) a échoué avec
+ * `Unrecognized resource types: [AWS::Location::PlaceIndex]` -- Amazon Location
+ * Service n'est pas reconnu comme type de ressource CloudFormation natif dans
+ * `eu-west-3`. Gen1 avait déjà ce problème et le contournait (`amplify/backend/
+ * geo/placeIndex/placeIndex-cloudformation-template.json`, récupéré depuis
+ * l'historique git à `dc55236~1`) via un `Mappings.RegionMapping` (`eu-west-3`
+ * -> `eu-west-1`) et un custom resource CloudFormation backé par une Lambda
+ * appelant le SDK Location avec une région explicite -- CloudFormation ne
+ * valide jamais le type d'un appel SDK fait depuis l'intérieur d'une Lambda,
+ * seulement celui d'une ressource déclarée directement dans le template.
+ * `AwsCustomResource` (`aws-cdk-lib/custom-resources`) est l'équivalent CDK de
+ * ce même mécanisme (`AwsSdkCall.region` explicite par appel).
  */
 const geoStack = backend.createStack('geo-stack')
 
-const placeIndex = new CfnPlaceIndex(geoStack, 'PlaceIndex', {
-  indexName: 'placeIndex',
-  dataSource: 'Here',
-  dataSourceConfiguration: {
-    intendedUse: 'SingleUse',
+const indexName = 'placeIndex'
+
+/**
+ * Constante simple plutôt que la table `Mappings.RegionMapping` à 20 entrées
+ * de Gen1 : ce projet ne déploie que dans `eu-west-3`, reproduire une table
+ * générique pour toutes les régions AWS serait de la sur-ingénierie pour un
+ * besoin à une seule entrée réelle -- voir ADR-0013.
+ */
+const locationServiceRegion = 'eu-west-1'
+
+const placeIndexArn = `arn:aws:geo:${locationServiceRegion}:${geoStack.account}:place-index/${indexName}`
+
+/**
+ * Équivalent Gen2 du custom resource Lambda Gen1 : CloudFormation ne voit ici
+ * que le type générique du custom resource (`Custom::AWS`, reconnu dans toute
+ * région), jamais `AWS::Location::PlaceIndex` -- la Lambda sous-jacente
+ * (managée par CDK) exécute l'appel SDK dans `locationServiceRegion` via
+ * `AwsSdkCall.region`. `DataSourceConfiguration.IntendedUse: "SingleUse"`
+ * reproduit la config Gen1. Pas de `PricingPlan` : champ marqué "No longer
+ * used" côté SDK (`@aws-sdk/client-location`) -- Gen1 le passait par souci de
+ * parité, ici on l'omet plutôt que de reproduire un champ optionnel déprécié
+ * (ADR-0013).
+ */
+const placeIndex = new AwsCustomResource(geoStack, 'PlaceIndexCustomResource', {
+  onCreate: {
+    service: 'Location',
+    action: 'createPlaceIndex',
+    parameters: {
+      IndexName: indexName,
+      DataSource: 'Here',
+      DataSourceConfiguration: {
+        IntendedUse: 'SingleUse',
+      },
+    },
+    region: locationServiceRegion,
+    physicalResourceId: PhysicalResourceId.of(indexName),
   },
-  // "No longer used" côté CDK (l'API AWS a cessé de facturer par plan), mais
-  // reproduit à l'identique de Gen1 par souci de parité -- valeur autorisée
-  // unique de toute façon si le prop est fourni.
-  pricingPlan: 'RequestBasedUsage',
+  onUpdate: {
+    service: 'Location',
+    action: 'updatePlaceIndex',
+    parameters: {
+      IndexName: indexName,
+    },
+    region: locationServiceRegion,
+    physicalResourceId: PhysicalResourceId.of(indexName),
+  },
+  onDelete: {
+    service: 'Location',
+    action: 'deletePlaceIndex',
+    parameters: {
+      IndexName: indexName,
+    },
+    region: locationServiceRegion,
+  },
+  // Policy IAM du Lambda custom-resource lui-même (PAS celle des rôles
+  // auth/unauth client ci-dessous) -- même distinction que le template Gen1
+  // supprimé (`CustomPlaceIndexLambdaServiceRoleDefaultPolicy...` dans
+  // `dc55236~1`) : `geo:CreatePlaceIndex` ne peut pas être scopé à l'ARN
+  // (l'index n'existe pas encore au moment de la création), `geo:
+  // UpdatePlaceIndex`/`geo:DeletePlaceIndex` le sont une fois l'index créé.
+  // `AwsCustomResourcePolicy.fromSdkCalls()` applique la même liste de
+  // `resources` à TOUS les appels SDK configurés sur ce custom resource --
+  // insuffisant pour garder cette distinction, d'où `fromStatements` avec
+  // deux `PolicyStatement` séparées plutôt qu'un wildcard partout par
+  // facilité.
+  policy: AwsCustomResourcePolicy.fromStatements([
+    new PolicyStatement({
+      actions: ['geo:CreatePlaceIndex'],
+      resources: ['*'],
+    }),
+    new PolicyStatement({
+      actions: ['geo:UpdatePlaceIndex', 'geo:DeletePlaceIndex'],
+      resources: [placeIndexArn],
+    }),
+  ]),
 })
 
 const geoAccessPolicy = new Policy(geoStack, 'GeoAccessPolicy', {
@@ -99,20 +155,36 @@ const geoAccessPolicy = new Policy(geoStack, 'GeoAccessPolicy', {
         'geo:SearchPlaceIndexForSuggestions',
         'geo:GetPlace',
       ],
-      resources: [placeIndex.attrArn],
+      resources: [placeIndexArn],
     }),
   ],
 })
+
+// Ordonnancement explicite au niveau CloudFormation (`DependsOn`) :
+// `placeIndexArn` est une chaîne construite à la main, pas un token CDK
+// dérivé de `placeIndex` (plus d'objet `CfnPlaceIndex`/`.attrArn` comme en
+// première version) -- CDK ne peut donc pas déduire automatiquement l'ordre
+// de création. Une policy IAM peut être attachée avant que la ressource
+// qu'elle référence existe (IAM ne valide pas l'ARN à l'attache, seulement à
+// l'appel), donc sans risque d'échec de déploiement même sans cette ligne --
+// gardée par rigueur pour que l'index soit malgré tout créé avant que la
+// policy client ne devienne utilisable en pratique.
+geoAccessPolicy.node.addDependency(placeIndex)
 
 geoAccessPolicy.attachToRole(backend.auth.resources.authenticatedUserIamRole)
 geoAccessPolicy.attachToRole(backend.auth.resources.unauthenticatedUserIamRole)
 
 backend.addOutput({
   geo: {
-    aws_region: geoStack.region,
+    // `locationServiceRegion` ('eu-west-1'), où l'index EXISTE réellement --
+    // PAS `geoStack.region` ('eu-west-3', la région de déploiement de la
+    // stack CloudFormation elle-même). Sinon `Geo.searchByText()` côté
+    // frontend interrogerait l'API Location Service dans la mauvaise région
+    // et ne trouverait jamais l'index, même une fois déployé (ADR-0013).
+    aws_region: locationServiceRegion,
     search_indices: {
-      items: [placeIndex.indexName],
-      default: placeIndex.indexName,
+      items: [indexName],
+      default: indexName,
     },
   },
 })
