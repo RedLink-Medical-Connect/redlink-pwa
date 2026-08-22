@@ -6,7 +6,7 @@ import { usePassword } from '@/composables/usePassword'
 import { useI18n } from 'vue-i18n'
 import AddressAutocomplete from '@/components/common/AddressAutocomplete.vue'
 import PhoneInput from '@/components/common/PhoneInput.vue'
-import { Species, BloodGroupsBySpecies, AnimalSex } from '@/constants/enums.js'
+import { Species, BloodGroupsBySpecies, AnimalSex, formatBloodGroupLabel } from '@/constants/enums.js'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -43,6 +43,14 @@ const form = ref({
 const bloodOptions = computed(() => {
   return BloodGroupsBySpecies[form.value.animal_species] || []
 })
+
+// Harmonisé avec AddAnimalView.vue (même forme {label, value}) -- remplace le <select>
+// HTML brut d'origine, seul endroit du repo qui n'utilisait pas le composant PrimeVue
+// Select pour ce choix.
+const speciesOptions = computed(() => [
+  { label: t('request.species.dog'), value: Species.DOG },
+  { label: t('request.species.cat'), value: Species.CAT },
+])
 
 const sexOptions = computed(() => [
   { label: t('dashboard.owner.animals.sex.male'), value: AnimalSex.MALE },
@@ -258,14 +266,14 @@ const handleRegister = async () => {
         </div>
 
         <div class="grid grid-cols-2 gap-4">
-          <select
+          <Select
             v-model="form.animal_species"
+            :options="speciesOptions"
+            option-label="label"
+            option-value="value"
             :aria-label="$t('auth.register_owner.fields.animal_species')"
-            class="bg-zinc-200 dark:bg-zinc-800 border-none text-zinc-900 dark:text-white p-3 rounded-md w-full appearance-none"
-          >
-            <option :value="Species.DOG">{{ $t('request.species.dog') }}</option>
-            <option :value="Species.CAT">{{ $t('request.species.cat') }}</option>
-          </select>
+            class="!bg-zinc-200 dark:!bg-zinc-800 !border-none !text-zinc-900 dark:!text-white !p-3 !rounded-md w-full"
+          />
           <InputText
             v-model="form.animal_breed"
             :placeholder="$t('auth.register_owner.fields.animal_breed')"
@@ -291,7 +299,25 @@ const handleRegister = async () => {
             :aria-label="$t('auth.register_owner.fields.blood_group')"
             required
             class="!bg-zinc-200 dark:!bg-zinc-800 !border-none !text-zinc-900 dark:!text-white !p-3 !rounded-md"
-          />
+          >
+            <template #value="slotProps">
+              <span v-if="slotProps.value">{{
+                formatBloodGroupLabel(
+                  slotProps.value,
+                  $t('dashboard.owner.animals.form.blood_group_unknown_option'),
+                )
+              }}</span>
+              <span v-else>{{ slotProps.placeholder }}</span>
+            </template>
+            <template #option="slotProps">
+              {{
+                formatBloodGroupLabel(
+                  slotProps.option,
+                  $t('dashboard.owner.animals.form.blood_group_unknown_option'),
+                )
+              }}
+            </template>
+          </Select>
         </div>
 
         <Select

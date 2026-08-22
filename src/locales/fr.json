@@ -424,7 +424,8 @@
           "donation_frequency": "Fréquence de don",
           "vaccinated": "Vacciné",
           "vaccinated_required": "Vaccinations à jour (Obligatoire)",
-          "sterilized": "Stérilisé"
+          "sterilized": "Stérilisé",
+          "blood_group_unknown_option": "Je ne sais pas"
         },
         "toasts": {
           "load_failed": "Impossible de charger la liste des animaux.",

@@ -19,9 +19,13 @@ const { availabilities, isLoading, fetchAvailabilities, addAvailabilityForDays, 
 const WEEK_DAYS = [1, 2, 3, 4, 5]
 const WEEKEND_DAYS = [6, 0]
 
-// Bornes validées avec le repo owner (2026-08-17) : 8h-12h / 12h-18h / 18h-22h. Un clic
-// pré-remplit juste Début/Fin ci-dessous -- ce ne sont pas un mode séparé, les champs
-// restent éditables pour qui veut une heure exacte différente.
+// Bornes validées avec le repo owner (2026-08-17) : 8h-12h / 12h-18h / 18h-22h.
+// Demande produit (2026-08-23) : combinables entre eux (matin ET après-midi ET soir en une
+// seule sauvegarde), pas exclusifs -- avant ce correctif, cliquer un second preset écrasait
+// juste Début/Fin du premier au lieu de s'y ajouter. `selectedPresets` est maintenant un
+// multi-select (même pattern que `selectedDays` ci-dessus, boutons togglables) ; l'heure
+// exacte manuelle (Début/Fin ci-dessous) reste un moyen alternatif d'ajouter UN créneau
+// précis, mutuellement exclusif avec les presets (voir handleAdd).
 const TIME_PRESETS = [
   { key: 'morning', startHour: 8, endHour: 12 },
   { key: 'afternoon', startHour: 12, endHour: 18 },
@@ -29,6 +33,7 @@ const TIME_PRESETS = [
 ]
 
 const selectedDays = ref([])
+const selectedPresets = ref([])
 const startTime = ref(null)
 const endTime = ref(null)
 const isSubmitting = ref(false)
@@ -47,10 +52,18 @@ const selectDayGroup = (days) => {
   selectedDays.value = [...days]
 }
 
-const applyTimePreset = (startHour, endHour) => {
-  const base = new Date()
-  startTime.value = new Date(base.getFullYear(), base.getMonth(), base.getDate(), startHour, 0)
-  endTime.value = new Date(base.getFullYear(), base.getMonth(), base.getDate(), endHour, 0)
+// Togglable (voir toggleDay ci-dessus) au lieu d'un simple `@click` qui écrasait
+// Début/Fin -- sélectionner un preset désarme l'heure exacte manuelle (mutuellement
+// exclusifs, voir handleAdd) plutôt que de laisser les deux se contredire silencieusement.
+const togglePreset = (key) => {
+  selectedPresets.value = selectedPresets.value.includes(key)
+    ? selectedPresets.value.filter((p) => p !== key)
+    : [...selectedPresets.value, key]
+
+  if (selectedPresets.value.length > 0) {
+    startTime.value = null
+    endTime.value = null
+  }
 }
 
 onMounted(() => {
@@ -62,8 +75,28 @@ const formatTime = (date) => {
   return date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
 }
 
+// Résout les plages horaires (Début/Fin) à soumettre pour ce clic sur "Enregistrer" --
+// un preset sélectionné par plage cochée (`selectedPresets`, combinables), sinon la
+// plage manuelle (Début/Fin), jamais les deux (voir togglePreset ci-dessus).
+const rangesToSubmit = () => {
+  if (selectedPresets.value.length > 0) {
+    return TIME_PRESETS.filter((preset) => selectedPresets.value.includes(preset.key)).map(
+      (preset) => ({
+        start: `${String(preset.startHour).padStart(2, '0')}:00`,
+        end: `${String(preset.endHour).padStart(2, '0')}:00`,
+      }),
+    )
+  }
+  if (startTime.value && endTime.value) {
+    return [{ start: formatTime(startTime.value), end: formatTime(endTime.value) }]
+  }
+  return []
+}
+
 const handleAdd = async () => {
-  if (selectedDays.value.length === 0 || !startTime.value || !endTime.value) {
+  const ranges = rangesToSubmit()
+
+  if (selectedDays.value.length === 0 || ranges.length === 0) {
     toast.add({
       severity: 'warn',
       summary: t('dashboard.owner.availability.toasts.missing_fields'),
@@ -73,7 +106,7 @@ const handleAdd = async () => {
     return
   }
 
-  if (startTime.value >= endTime.value) {
+  if (selectedPresets.value.length === 0 && startTime.value >= endTime.value) {
     toast.add({
       severity: 'error',
       summary: t('dashboard.owner.availability.toasts.error'),
@@ -85,11 +118,15 @@ const handleAdd = async () => {
 
   isSubmitting.value = true
   try {
-    const { succeeded, failed, total } = await addAvailabilityForDays(
-      selectedDays.value,
-      formatTime(startTime.value),
-      formatTime(endTime.value),
+    // Un appel par plage (best-effort, comme addAvailabilityForDays lui-même) --
+    // combiner matin+après-midi+soir crée donc jusqu'à 3 créneaux par jour sélectionné en
+    // une seule action utilisateur.
+    const results = await Promise.all(
+      ranges.map((range) => addAvailabilityForDays(selectedDays.value, range.start, range.end)),
     )
+    const succeeded = results.reduce((sum, r) => sum + r.succeeded, 0)
+    const failed = results.reduce((sum, r) => sum + r.failed, 0)
+    const total = results.reduce((sum, r) => sum + r.total, 0)
 
     if (succeeded === 0) {
       toast.add({
@@ -118,6 +155,7 @@ const handleAdd = async () => {
     }
 
     selectedDays.value = []
+    selectedPresets.value = []
     startTime.value = null
     endTime.value = null
   } catch {
@@ -228,13 +266,23 @@ const handleRemove = async (id) => {
                   <label class="text-xs font-bold uppercase text-zinc-500">
                     {{ $t('dashboard.owner.availability.form.time_presets_label') }}
                   </label>
-                  <div class="flex flex-wrap gap-1.5">
+                  <div
+                    class="flex flex-wrap gap-1.5"
+                    role="group"
+                    :aria-label="$t('dashboard.owner.availability.form.time_presets_label')"
+                  >
                     <button
                       v-for="preset in TIME_PRESETS"
                       :key="preset.key"
                       type="button"
-                      class="px-3 py-1.5 rounded-full text-xs font-bold border border-zinc-300 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300 bg-transparent hover:border-[#ff3b4e] hover:text-[#ff3b4e] transition-colors"
-                      @click="applyTimePreset(preset.startHour, preset.endHour)"
+                      :aria-pressed="selectedPresets.includes(preset.key)"
+                      class="px-3 py-1.5 rounded-full text-xs font-bold border transition-colors"
+                      :class="
+                        selectedPresets.includes(preset.key)
+                          ? 'bg-[#ff3b4e] border-[#ff3b4e] text-white'
+                          : 'bg-transparent border-zinc-300 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300 hover:border-[#ff3b4e] hover:text-[#ff3b4e]'
+                      "
+                      @click="togglePreset(preset.key)"
                     >
                       {{ $t(`dashboard.owner.availability.form.time_preset_${preset.key}`) }}
                     </button>

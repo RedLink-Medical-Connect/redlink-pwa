@@ -4,7 +4,13 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { getCurrentUser } from 'aws-amplify/auth'
 import { useAnimals } from '@/composables/useAnimals'
-import { Species, DonationFrequency, BloodGroupsBySpecies, AnimalSex } from '@/constants/enums.js'
+import {
+  Species,
+  DonationFrequency,
+  BloodGroupsBySpecies,
+  AnimalSex,
+  formatBloodGroupLabel,
+} from '@/constants/enums.js'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -207,7 +213,25 @@ const handleSubmit = async () => {
               :placeholder="$t('dashboard.owner.animals.form.blood_group_placeholder')"
               required
               class="!bg-zinc-50 dark:!bg-zinc-950 !border-zinc-300 dark:!border-zinc-800 !p-3 focus:!border-[#ff3b4e]"
-            />
+            >
+              <template #value="slotProps">
+                <span v-if="slotProps.value">{{
+                  formatBloodGroupLabel(
+                    slotProps.value,
+                    $t('dashboard.owner.animals.form.blood_group_unknown_option'),
+                  )
+                }}</span>
+                <span v-else>{{ slotProps.placeholder }}</span>
+              </template>
+              <template #option="slotProps">
+                {{
+                  formatBloodGroupLabel(
+                    slotProps.option,
+                    $t('dashboard.owner.animals.form.blood_group_unknown_option'),
+                  )
+                }}
+              </template>
+            </Select>
           </div>
 
           <div class="flex flex-col gap-2">

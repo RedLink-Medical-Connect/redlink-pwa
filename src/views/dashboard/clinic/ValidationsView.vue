@@ -68,8 +68,13 @@ const handleValidate = async (animal) => {
 
 // Options du Select alimentées par BloodGroupsBySpecies (constants/enums.js), jamais de
 // liste en dur (voir R-15, BACKLOG.md, pour l'exemple précis de dette que ça évite) —
-// dépend de l'espèce de la ligne éditée, pas un computed global.
-const bloodGroupOptionsFor = (animal) => BloodGroupsBySpecies[animal.species] || []
+// dépend de l'espèce de la ligne éditée, pas un computed global. 'UNKNOWN' exclu
+// délibérément ici (contrairement aux Selects owner) : cette action sert À corriger un
+// bloodGroup inconnu vers une vraie valeur -- `correctBloodGroup` (useAnimalValidation.js)
+// rejette de toute façon 'UNKNOWN' comme correction, l'exclure de la liste évite un
+// aller-retour d'erreur inutile pour le vétérinaire.
+const bloodGroupOptionsFor = (animal) =>
+  (BloodGroupsBySpecies[animal.species] || []).filter((group) => group !== 'UNKNOWN')
 
 const startEditBloodGroup = (animal) => {
   editingBloodGroupId.value = animal.id

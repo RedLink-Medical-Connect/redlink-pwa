@@ -126,8 +126,8 @@ export function useMatchingRequests() {
 
       const myLat = ownerProfile.value.latitude
       const myLon = ownerProfile.value.longitude
-      // Par défaut 50km si non renseigné
-      const maxDist = ownerProfile.value.maxTravelDistance || 50
+      // Par défaut 5km si non renseigné
+      const maxDist = ownerProfile.value.maxTravelDistance || 5
 
       // 2. Récupérer les Clinic déjà liées à cet Owner (ClinicOwnerRelation), pour le
       // critère 5 de l'Eligibility (Clinic Priority, CONTEXT.md). Refetché à chaque appel
