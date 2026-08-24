@@ -426,7 +426,8 @@
           "vaccinated": "Vaccinated",
           "vaccinated_required": "Vaccinations up to date (Required)",
           "sterilized": "Sterilized",
-          "blood_group_unknown_option": "I don't know"
+          "blood_group_unknown_option": "I don't know",
+          "locked_after_creation": "This information is checked and corrected if needed by the vet when validating your animal as a donor — you can no longer edit it yourself."
         },
         "toasts": {
           "load_failed": "Unable to load the animal list.",
@@ -679,15 +680,22 @@
         "action": "ACTION"
       },
       "validate_btn": "Validate",
+      "edit_btn": "Correct",
       "empty": "No animal is pending validation.",
       "load_error": "Couldn't load the list — try again.",
       "retry": "Retry",
+      "dialog": {
+        "title": "First check-up — {name}",
+        "subtitle": "Correct this information before validating this animal as a donor."
+      },
       "toasts": {
         "success": "{name} is now a validated donor.",
         "blood_group_unknown": "Unknown blood group — cannot be validated.",
         "generic_error": "Unable to validate this animal.",
         "blood_group_corrected": "{name}'s blood group has been corrected.",
-        "blood_group_correction_error": "Unable to correct this animal's blood group."
+        "blood_group_correction_error": "Unable to correct this animal's blood group.",
+        "critical_fields_corrected": "{name}'s information has been corrected.",
+        "critical_fields_correction_error": "Unable to correct this animal's information."
       }
     },
     "history": {

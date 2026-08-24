@@ -7,8 +7,9 @@ import { resolve } from 'node:path'
 // validation elle-même — écriture scopée à isValidatedDonor + validationExpiresAt
 // uniquement (validateAnimalDonorSimple).
 //
-// Phase 6 (section B) : `correctBloodGroup` + `mapBloodGroupCorrectionErrorKey`,
-// couverts par les describe() dédiés en bas de fichier.
+// Phase 6 (section B) : `correctCriticalFields` + `mapCriticalFieldsCorrectionErrorKey`
+// (bloodGroup seul à l'origine, étendu à species/weight/isVaccinated -- demande produit
+// 2026-08-23, amende ADR-0006), couverts par les describe() dédiés en bas de fichier.
 //
 // Phase 8, sous-tâche 5 (lot 3/3) : mock migré vers le client Gen2 (`aws-amplify/data`,
 // `client.models.Animal.list/update`), un mock dédié par méthode plutôt qu'un unique
@@ -21,6 +22,10 @@ import { resolve } from 'node:path'
 
 const animalListMock = vi.fn()
 const animalUpdateMock = vi.fn()
+const vetGetMock = vi.fn()
+const relationListMock = vi.fn()
+const relationCreateMock = vi.fn()
+const getCurrentUserMock = vi.fn()
 
 vi.mock('aws-amplify/data', () => ({
   generateClient: () => ({
@@ -29,14 +34,25 @@ vi.mock('aws-amplify/data', () => ({
         list: (...args) => animalListMock(...args),
         update: (...args) => animalUpdateMock(...args),
       },
+      Veterinarian: {
+        get: (...args) => vetGetMock(...args),
+      },
+      ClinicOwnerRelation: {
+        list: (...args) => relationListMock(...args),
+        create: (...args) => relationCreateMock(...args),
+      },
     },
   }),
+}))
+
+vi.mock('aws-amplify/auth', () => ({
+  getCurrentUser: (...args) => getCurrentUserMock(...args),
 }))
 
 import {
   useAnimalValidation,
   mapValidationErrorKey,
-  mapBloodGroupCorrectionErrorKey,
+  mapCriticalFieldsCorrectionErrorKey,
 } from '@/composables/useAnimalValidation'
 
 const buildAnimal = (overrides = {}) => ({
@@ -55,6 +71,10 @@ const buildAnimal = (overrides = {}) => ({
 const resetAllMocks = () => {
   animalListMock.mockReset()
   animalUpdateMock.mockReset()
+  vetGetMock.mockReset()
+  relationListMock.mockReset()
+  relationCreateMock.mockReset()
+  getCurrentUserMock.mockReset()
 }
 
 describe('useAnimalValidation.fetchPendingValidations', () => {
@@ -112,14 +132,17 @@ describe('useAnimalValidation.fetchPendingValidations', () => {
     // Aucun `filter` (ownerID/clinicID) : la restriction de portée ne peut venir que
     // d'@auth côté schéma, jamais d'un filtre client.
     expect(callArgs.filter).toBeUndefined()
-    // selectionSet reprend EXACTEMENT les champs de la query Gen1 d'origine (voir
-    // useAnimalValidation.js) — vérifié ici plutôt que supposé.
+    // selectionSet — weight/isVaccinated ajoutés (demande produit 2026-08-23) pour
+    // préremplir le dialogue de correction des champs critiques ; le reste reprend
+    // EXACTEMENT les champs de la query Gen1 d'origine (voir useAnimalValidation.js).
     expect(callArgs.selectionSet).toEqual([
       'id',
       'name',
       'species',
       'breed',
       'bloodGroup',
+      'weight',
+      'isVaccinated',
       'isValidatedDonor',
       'validationExpiresAt',
       'ownerID',
@@ -421,6 +444,83 @@ describe('useAnimalValidation.validateAnimal', () => {
   })
 })
 
+// Demande produit 2026-08-23 (amende Phase 3) : validateAnimal() rattache best-effort le
+// donneur à la clinique du vétérinaire validateur (ClinicOwnerRelation), en plus de son
+// effet principal (isValidatedDonor/validationExpiresAt). Fonction de décision pure
+// partagée avec useMissionClosure.js, testée séparément dans
+// clinic-owner-relation-service.test.js -- ici, seul le câblage best-effort est vérifié.
+describe('useAnimalValidation.validateAnimal — rattachement ClinicOwnerRelation (best-effort)', () => {
+  beforeEach(resetAllMocks)
+
+  it("crée une ClinicOwnerRelation(clinicID du vétérinaire, ownerID de l'animal) après une validation réussie, isPrimaryClinic à true si l'Owner n'a encore aucune relation", async () => {
+    animalUpdateMock.mockResolvedValue({ data: {}, errors: undefined })
+    getCurrentUserMock.mockResolvedValue({ userId: 'vet-1' })
+    vetGetMock.mockResolvedValue({ data: { clinicID: 'clinic-1' }, errors: undefined })
+    relationListMock.mockResolvedValue({ data: [], errors: undefined })
+    relationCreateMock.mockResolvedValue({ data: { id: 'relation-1' }, errors: undefined })
+
+    const { validateAnimal, pendingAnimals } = useAnimalValidation()
+    pendingAnimals.value = [buildAnimal({ id: 'animal-1', ownerID: 'owner-1' })]
+
+    await validateAnimal('animal-1')
+
+    expect(relationListMock).toHaveBeenCalledWith({ filter: { ownerID: { eq: 'owner-1' } } })
+    expect(relationCreateMock).toHaveBeenCalledWith({
+      clinicID: 'clinic-1',
+      ownerID: 'owner-1',
+      isPrimaryClinic: true,
+    })
+  })
+
+  it("ne crée pas de ClinicOwnerRelation si l'Owner est déjà rattaché à cette clinique (no-op, pas de doublon)", async () => {
+    animalUpdateMock.mockResolvedValue({ data: {}, errors: undefined })
+    getCurrentUserMock.mockResolvedValue({ userId: 'vet-1' })
+    vetGetMock.mockResolvedValue({ data: { clinicID: 'clinic-1' }, errors: undefined })
+    relationListMock.mockResolvedValue({
+      data: [{ clinicID: 'clinic-1', isPrimaryClinic: true }],
+      errors: undefined,
+    })
+
+    const { validateAnimal, pendingAnimals } = useAnimalValidation()
+    pendingAnimals.value = [buildAnimal({ id: 'animal-1', ownerID: 'owner-1' })]
+
+    await validateAnimal('animal-1')
+
+    expect(relationCreateMock).not.toHaveBeenCalled()
+  })
+
+  it("saute silencieusement le rattachement si l'Animal n'est pas (plus) dans pendingAnimals (pas d'ownerID connu) -- ne bloque pas la validation", async () => {
+    animalUpdateMock.mockResolvedValue({ data: {}, errors: undefined })
+
+    const { validateAnimal, pendingAnimals } = useAnimalValidation()
+    // pendingAnimals.value reste vide -- knownAnimal introuvable.
+
+    await expect(validateAnimal('animal-1')).resolves.toBeUndefined()
+
+    expect(getCurrentUserMock).not.toHaveBeenCalled()
+    expect(relationCreateMock).not.toHaveBeenCalled()
+    expect(pendingAnimals.value).toEqual([])
+  })
+
+  it('ne fait jamais échouer validateAnimal si le rattachement ClinicOwnerRelation échoue (best-effort, la validation elle-même a déjà réussi)', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    animalUpdateMock.mockResolvedValue({ data: {}, errors: undefined })
+    getCurrentUserMock.mockRejectedValue(new Error('network down'))
+
+    const { validateAnimal, pendingAnimals } = useAnimalValidation()
+    pendingAnimals.value = [buildAnimal({ id: 'animal-1', ownerID: 'owner-1' })]
+
+    await expect(validateAnimal('animal-1')).resolves.toBeUndefined()
+    expect(pendingAnimals.value).toEqual([])
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('ClinicOwnerRelation'),
+      expect.any(Error),
+    )
+
+    consoleErrorSpy.mockRestore()
+  })
+})
+
 // Extraite de ValidationsView.vue pendant la QA pass de feat/animal-validation-ui : ce repo
 // n'a aucun précédent de test de composant `.vue` (voir la Lead Dev review de
 // feat/wire-eligibility-engine), donc le mapping code-d'erreur -> clé i18n vit ici comme
@@ -459,22 +559,23 @@ describe('mapValidationErrorKey', () => {
   })
 })
 
-// Phase 6 (section B) : useAnimalValidation.correctBloodGroup — corrige un
-// Animal.bloodGroup saisi par erreur par l'Owner (nouvelle règle @auth au niveau champ
-// sur bloodGroup, voir schema.graphql). N'écrit QUE bloodGroup
-// (updateAnimalBloodGroupSimple) — jamais isValidatedDonor/validationExpiresAt, qui
-// restent le rôle exclusif de validateAnimal (voir describe ci-dessus).
-describe('useAnimalValidation.correctBloodGroup', () => {
+// Phase 6 (section B) : useAnimalValidation.correctCriticalFields — corrige les champs
+// médicaux saisis par erreur par l'Owner (verrouillés côté @auth, voir amplify/data/
+// resource.ts, ownerCreateReadOnlyVetReadUpdate). N'écrit QUE les champs fournis — jamais
+// isValidatedDonor/validationExpiresAt, qui restent le rôle exclusif de validateAnimal
+// (voir describe ci-dessus). Étendu de bloodGroup seul (Phase 6 section B) à
+// species/weight/isVaccinated (demande produit 2026-08-23, amende ADR-0006).
+describe('useAnimalValidation.correctCriticalFields', () => {
   beforeEach(resetAllMocks)
 
-  it('appelle la mutation avec un input contenant EXACTEMENT id/bloodGroup (rien d’autre, surtout pas isValidatedDonor/validationExpiresAt)', async () => {
+  it('appelle la mutation avec un input contenant EXACTEMENT id + les champs fournis (rien d’autre, surtout pas isValidatedDonor/validationExpiresAt)', async () => {
     animalUpdateMock.mockImplementation(async (input) => ({
       data: { ...input },
       errors: undefined,
     }))
 
-    const { correctBloodGroup } = useAnimalValidation()
-    await correctBloodGroup('animal-1', 'DEA 1.1-')
+    const { correctCriticalFields } = useAnimalValidation()
+    await correctCriticalFields('animal-1', { bloodGroup: 'DEA 1.1-' })
 
     expect(animalUpdateMock).toHaveBeenCalledTimes(1)
     const capturedInput = animalUpdateMock.mock.calls[0][0]
@@ -483,39 +584,79 @@ describe('useAnimalValidation.correctBloodGroup', () => {
     expect(capturedInput.bloodGroup).toBe('DEA 1.1-')
   })
 
-  it.each([
-    ['absent (chaîne vide)', ''],
-    ['non renseigné (null)', null],
-    ["littéral 'UNKNOWN'", 'UNKNOWN'],
-  ])(
-    'refuse la correction (BLOOD_GROUP_UNKNOWN) sans appeler la mutation quand la nouvelle valeur est %s',
-    async (_label, bloodGroup) => {
-      const { correctBloodGroup, isCorrectingBloodGroup } = useAnimalValidation()
-
-      await expect(correctBloodGroup('animal-1', bloodGroup)).rejects.toThrow(
-        'BLOOD_GROUP_UNKNOWN',
-      )
-
-      expect(animalUpdateMock).not.toHaveBeenCalled()
-      expect(isCorrectingBloodGroup.value).toBe(false)
-    },
-  )
-
-  it('met à jour pendingAnimals.value localement avec la nouvelle valeur au succès (les autres animaux restent inchangés)', async () => {
+  it('corrige species/weight/isVaccinated en une seule fois (dialogue "première analyse", ValidationsView.vue)', async () => {
     animalUpdateMock.mockImplementation(async (input) => ({
       data: { ...input },
       errors: undefined,
     }))
 
-    const { correctBloodGroup, pendingAnimals } = useAnimalValidation()
+    const { correctCriticalFields } = useAnimalValidation()
+    await correctCriticalFields('animal-1', {
+      species: 'CAT',
+      bloodGroup: 'A',
+      weight: 4.2,
+      isVaccinated: true,
+    })
+
+    const capturedInput = animalUpdateMock.mock.calls[0][0]
+    expect(capturedInput).toEqual({
+      id: 'animal-1',
+      species: 'CAT',
+      bloodGroup: 'A',
+      weight: 4.2,
+      isVaccinated: true,
+    })
+  })
+
+  it.each([
+    ['absent (chaîne vide)', ''],
+    ['non renseigné (null)', null],
+    ["littéral 'UNKNOWN'", 'UNKNOWN'],
+  ])(
+    'refuse la correction (BLOOD_GROUP_UNKNOWN) sans appeler la mutation quand bloodGroup est FOURNI et vaut %s',
+    async (_label, bloodGroup) => {
+      const { correctCriticalFields, isCorrectingCriticalFields } = useAnimalValidation()
+
+      await expect(
+        correctCriticalFields('animal-1', { bloodGroup }),
+      ).rejects.toThrow('BLOOD_GROUP_UNKNOWN')
+
+      expect(animalUpdateMock).not.toHaveBeenCalled()
+      expect(isCorrectingCriticalFields.value).toBe(false)
+    },
+  )
+
+  it("n'exige PAS bloodGroup : corriger uniquement weight/isVaccinated (bloodGroup absent du partiel) n'est jamais refusé", async () => {
+    animalUpdateMock.mockImplementation(async (input) => ({
+      data: { ...input },
+      errors: undefined,
+    }))
+
+    const { correctCriticalFields } = useAnimalValidation()
+    await expect(
+      correctCriticalFields('animal-1', { weight: 26, isVaccinated: true }),
+    ).resolves.toBeUndefined()
+
+    expect(animalUpdateMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('met à jour pendingAnimals.value localement avec les nouvelles valeurs au succès (les autres animaux restent inchangés)', async () => {
+    animalUpdateMock.mockImplementation(async (input) => ({
+      data: { ...input },
+      errors: undefined,
+    }))
+
+    const { correctCriticalFields, pendingAnimals } = useAnimalValidation()
     pendingAnimals.value = [
-      buildAnimal({ id: 'animal-1', bloodGroup: 'UNKNOWN' }),
+      buildAnimal({ id: 'animal-1', bloodGroup: 'UNKNOWN', weight: 10 }),
       buildAnimal({ id: 'animal-2', bloodGroup: 'A' }),
     ]
 
-    await correctBloodGroup('animal-1', 'DEA 1.1+')
+    await correctCriticalFields('animal-1', { bloodGroup: 'DEA 1.1+', weight: 12 })
 
-    expect(pendingAnimals.value.find((a) => a.id === 'animal-1').bloodGroup).toBe('DEA 1.1+')
+    const corrected = pendingAnimals.value.find((a) => a.id === 'animal-1')
+    expect(corrected.bloodGroup).toBe('DEA 1.1+')
+    expect(corrected.weight).toBe(12)
     expect(pendingAnimals.value.find((a) => a.id === 'animal-2').bloodGroup).toBe('A')
   })
 
@@ -525,66 +666,70 @@ describe('useAnimalValidation.correctBloodGroup', () => {
       errors: undefined,
     }))
 
-    const { correctBloodGroup, pendingAnimals } = useAnimalValidation()
+    const { correctCriticalFields, pendingAnimals } = useAnimalValidation()
     pendingAnimals.value = [buildAnimal({ id: 'animal-2' })]
 
-    await expect(correctBloodGroup('animal-absent-ailleurs', 'B')).resolves.toBeUndefined()
+    await expect(
+      correctCriticalFields('animal-absent-ailleurs', { bloodGroup: 'B' }),
+    ).resolves.toBeUndefined()
 
     const capturedInput = animalUpdateMock.mock.calls[0][0]
     expect(capturedInput.id).toBe('animal-absent-ailleurs')
     expect(pendingAnimals.value.map((a) => a.id)).toEqual(['animal-2'])
   })
 
-  it('isCorrectingBloodGroup true pendant l’appel puis false, propage l’erreur sans modifier pendingAnimals au échec', async () => {
+  it('isCorrectingCriticalFields true pendant l’appel puis false, propage l’erreur sans modifier pendingAnimals au échec', async () => {
     animalUpdateMock.mockImplementation(async () => {
       throw new Error('boom')
     })
 
     const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 
-    const { correctBloodGroup, isCorrectingBloodGroup, pendingAnimals } = useAnimalValidation()
+    const { correctCriticalFields, isCorrectingCriticalFields, pendingAnimals } =
+      useAnimalValidation()
     pendingAnimals.value = [buildAnimal({ id: 'animal-1', bloodGroup: 'UNKNOWN' })]
 
-    expect(isCorrectingBloodGroup.value).toBe(false)
-    const promise = correctBloodGroup('animal-1', 'DEA 1.1-')
-    expect(isCorrectingBloodGroup.value).toBe(true)
+    expect(isCorrectingCriticalFields.value).toBe(false)
+    const promise = correctCriticalFields('animal-1', { bloodGroup: 'DEA 1.1-' })
+    expect(isCorrectingCriticalFields.value).toBe(true)
 
     await expect(promise).rejects.toThrow('boom')
 
-    expect(isCorrectingBloodGroup.value).toBe(false)
+    expect(isCorrectingCriticalFields.value).toBe(false)
     expect(pendingAnimals.value.find((a) => a.id === 'animal-1').bloodGroup).toBe('UNKNOWN')
     expect(consoleErrorSpy).toHaveBeenCalled()
 
     consoleErrorSpy.mockRestore()
   })
 
-  it('isCorrectingBloodGroup est un ref distinct de isLoading et isValidating', () => {
-    const { isCorrectingBloodGroup, isLoading, isValidating } = useAnimalValidation()
-    expect(isCorrectingBloodGroup).not.toBe(isLoading)
-    expect(isCorrectingBloodGroup).not.toBe(isValidating)
+  it('isCorrectingCriticalFields est un ref distinct de isLoading et isValidating', () => {
+    const { isCorrectingCriticalFields, isLoading, isValidating } = useAnimalValidation()
+    expect(isCorrectingCriticalFields).not.toBe(isLoading)
+    expect(isCorrectingCriticalFields).not.toBe(isValidating)
   })
 
   it(
     'GAP RÉSIDUEL ASSUMÉ (Phase 6 section B, voir le commentaire au-dessus de bloodGroup ' +
-      'dans schema.graphql) : correctBloodGroup ne vérifie PAS isValidatedDonor — appelée ' +
-      "directement (comme le ferait n'importe quel appel GraphQL hors UI) sur un Animal " +
-      "DÉJÀ validé, la mutation part quand même et réussit, sans erreur ni déclenchement " +
-      "d'une re-validation. La seule protection existante contre ce cas est côté UI " +
-      "(ValidationsView.vue n'expose l'éditeur inline de bloodGroup que pour les lignes de " +
-      "pendingAnimals) — ce composable, lui, ne fait aucune différence entre un Animal en " +
-      "attente et un Animal déjà validé. Ce test documente le comportement actuel plutôt " +
-      "que de le supposer : s'il se met à échouer parce qu'un garde-fou a été ajouté, " +
-      "remplacer ce test par un test du nouveau comportement plutôt que le supprimer.",
+      'dans amplify/data/resource.ts) : correctCriticalFields ne vérifie PAS ' +
+      "isValidatedDonor — appelée directement (comme le ferait n'importe quel appel " +
+      'GraphQL hors UI) sur un Animal DÉJÀ validé, la mutation part quand même et réussit, ' +
+      "sans erreur ni déclenchement d'une re-validation. La seule protection existante " +
+      "contre ce cas est côté UI (ValidationsView.vue n'expose le dialogue de correction " +
+      "que pour les lignes de pendingAnimals) — ce composable, lui, ne fait aucune " +
+      "différence entre un Animal en attente et un Animal déjà validé. Ce test documente " +
+      "le comportement actuel plutôt que de le supposer : s'il se met à échouer parce " +
+      "qu'un garde-fou a été ajouté, remplacer ce test par un test du nouveau " +
+      'comportement plutôt que le supprimer.',
     async () => {
       animalUpdateMock.mockImplementation(async (input) => ({
         data: { ...input },
         errors: undefined,
       }))
 
-      const { correctBloodGroup, pendingAnimals } = useAnimalValidation()
+      const { correctCriticalFields, pendingAnimals } = useAnimalValidation()
       // Un Animal déjà validé ne devrait normalement jamais figurer dans pendingAnimals
       // (fetchPendingValidations ne charge que les Animals en attente) — mais rien
-      // n'empêche techniquement un appelant d'invoquer correctBloodGroup(animalId, ...)
+      // n'empêche techniquement un appelant d'invoquer correctCriticalFields(animalId, ...)
       // avec l'id d'un Animal déjà validé, hors de ce flux UI.
       pendingAnimals.value = [
         buildAnimal({
@@ -595,12 +740,14 @@ describe('useAnimalValidation.correctBloodGroup', () => {
         }),
       ]
 
-      await expect(correctBloodGroup('animal-deja-valide', 'DEA 1.1+')).resolves.toBeUndefined()
+      await expect(
+        correctCriticalFields('animal-deja-valide', { bloodGroup: 'DEA 1.1+' }),
+      ).resolves.toBeUndefined()
 
       const capturedInput = animalUpdateMock.mock.calls[0][0]
       expect(capturedInput).toEqual({ id: 'animal-deja-valide', bloodGroup: 'DEA 1.1+' })
       expect(pendingAnimals.value[0].bloodGroup).toBe('DEA 1.1+')
-      // isValidatedDonor n'est ni lu ni modifié par correctBloodGroup : le statut de
+      // isValidatedDonor n'est ni lu ni modifié par correctCriticalFields : le statut de
       // validation reste inchangé alors que le bloodGroup qu'il avait validé a changé
       // sous lui, sans déclencher de re-validation.
       expect(pendingAnimals.value[0].isValidatedDonor).toBe(true)
@@ -609,23 +756,25 @@ describe('useAnimalValidation.correctBloodGroup', () => {
 })
 
 // Même raisonnement que mapValidationErrorKey (voir sa doc ci-dessus) : fonction pure
-// dédiée à correctBloodGroup, extraite de ValidationsView.vue pour rester testable sans
-// monter de composant.
-describe('mapBloodGroupCorrectionErrorKey', () => {
+// dédiée à correctCriticalFields, extraite de ValidationsView.vue pour rester testable
+// sans monter de composant. Renommée depuis mapBloodGroupCorrectionErrorKey (demande
+// produit 2026-08-23, amende ADR-0006) : la clé générique de repli couvre désormais aussi
+// species/weight/isVaccinated, pas seulement bloodGroup.
+describe('mapCriticalFieldsCorrectionErrorKey', () => {
   it('mappe BLOOD_GROUP_UNKNOWN vers la même clé i18n que mapValidationErrorKey (même garde-fou, même message)', () => {
-    expect(mapBloodGroupCorrectionErrorKey('BLOOD_GROUP_UNKNOWN')).toBe(
+    expect(mapCriticalFieldsCorrectionErrorKey('BLOOD_GROUP_UNKNOWN')).toBe(
       'dashboard.validations.toasts.blood_group_unknown',
     )
   })
 
   it('retombe sur une clé générique DISTINCTE de celle de mapValidationErrorKey pour un code non reconnu (erreur réseau, @auth...) — la correction et la validation sont deux actions différentes', () => {
-    expect(mapBloodGroupCorrectionErrorKey('Network request failed')).toBe(
-      'dashboard.validations.toasts.blood_group_correction_error',
+    expect(mapCriticalFieldsCorrectionErrorKey('Network request failed')).toBe(
+      'dashboard.validations.toasts.critical_fields_correction_error',
     )
-    expect(mapBloodGroupCorrectionErrorKey(undefined)).toBe(
-      'dashboard.validations.toasts.blood_group_correction_error',
+    expect(mapCriticalFieldsCorrectionErrorKey(undefined)).toBe(
+      'dashboard.validations.toasts.critical_fields_correction_error',
     )
-    expect(mapBloodGroupCorrectionErrorKey('Network request failed')).not.toBe(
+    expect(mapCriticalFieldsCorrectionErrorKey('Network request failed')).not.toBe(
       mapValidationErrorKey('Network request failed'),
     )
   })
@@ -637,7 +786,7 @@ describe('mapBloodGroupCorrectionErrorKey', () => {
     const resolveKey = (obj, key) => key.split('.').reduce((acc, part) => acc?.[part], obj)
 
     for (const code of ['BLOOD_GROUP_UNKNOWN', 'SOME_UNKNOWN_CODE']) {
-      const key = mapBloodGroupCorrectionErrorKey(code)
+      const key = mapCriticalFieldsCorrectionErrorKey(code)
       expect(resolveKey(fr, key)).toBeTypeOf('string')
       expect(resolveKey(en, key)).toBeTypeOf('string')
     }

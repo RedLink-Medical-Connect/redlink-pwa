@@ -185,57 +185,68 @@ describe('amplify/data/resource.ts — Animal.isValidatedDonor / validationExpir
 describe('amplify/data/resource.ts — Animal, garde-fou de régression sur le reste du type (ex-schema.test.js)', () => {
   // Revue QA (sous-tâche 6, nettoyage) : ce garde-fou Gen1 n'avait pas été porté -- sans lui,
   // un futur `.authorization()` accidentellement ajouté sur un champ saisi par l'Owner (name,
-  // breed, weight...) ou situé après validationExpiresAt (ownerID, ownerProfile, missions...)
-  // passerait toute la suite Gen2 sans être détecté. Même principe que Gen1 : on retire du
-  // texte du type les seuls blocs `@auth` légitimes (bloodGroup ; lastDonationDate/
-  // donationFrequency/isValidatedDonor/validationExpiresAt, contigus) et on vérifie qu'aucun
-  // `@auth(` ne subsiste ailleurs. Part de `name:` pour exclure le `@auth` de niveau TYPE
-  // (`type Animal @model @auth(rules: [...])`), légitime et hors du périmètre de ce test.
-  it("aucun champ hors bloodGroup/lastDonationDate/isValidatedDonor/validationExpiresAt (name, weight, isVaccinated, sex, breed, birthDate, donationFrequency, isSterilized, ownerID, ownerProfile, missions...) ne porte de @auth au niveau champ", () => {
+  // breed...) ou situé après validationExpiresAt (ownerID, ownerProfile, missions...)
+  // passerait toute la suite Gen2 sans être détecté. Réécrit (demande produit 2026-08-23,
+  // amende ADR-0006) pour retirer un par un les blocs `@auth` légitimes désormais NON
+  // contigus (species juste après name ; weight juste avant bloodGroup ; bloodGroup et
+  // isVaccinated adjacents ; lastDonationDate/isValidatedDonor/validationExpiresAt
+  // contigus entre eux, séparés de isVaccinated par isSterilized/donationFrequency, sans
+  // auth) plutôt que de supposer un seul bloc contigu comme avant ce correctif. Part de
+  // `name:` pour exclure le `@auth` de niveau TYPE (`type Animal @model @auth(rules:
+  // [...])`), légitime et hors du périmètre de ce test.
+  it("aucun champ hors species/weight/bloodGroup/isVaccinated/lastDonationDate/isValidatedDonor/validationExpiresAt (name, breed, sex, birthDate, isSterilized, donationFrequency, ownerID, ownerProfile, missions...) ne porte de @auth au niveau champ", () => {
     const animalType = extractType('Animal')
     const nameFieldIdx = animalType.indexOf('name: String!')
-    const bloodGroupBlock = extractFieldAuthBlock(animalType, 'bloodGroup')
-    const lastDonationDateBlock = extractFieldAuthBlock(animalType, 'lastDonationDate')
-    const isValidatedDonorBlock = extractFieldAuthBlock(animalType, 'isValidatedDonor')
-    const validationExpiresAtBlock = extractFieldAuthBlock(animalType, 'validationExpiresAt')
 
-    const bloodGroupBlockStart = animalType.indexOf(bloodGroupBlock)
-    const bloodGroupBlockEnd = bloodGroupBlockStart + bloodGroupBlock.length
-    const lastDonationDateBlockStart = animalType.indexOf(lastDonationDateBlock)
-    const validationExpiresAtBlockEnd =
-      animalType.indexOf(validationExpiresAtBlock) + validationExpiresAtBlock.length
+    const fieldsWithLegitimateAuth = [
+      'species',
+      'weight',
+      'bloodGroup',
+      'isVaccinated',
+      'lastDonationDate',
+      'isValidatedDonor',
+      'validationExpiresAt',
+    ]
 
-    // Vérifie l'hypothèse d'ordonnancement plutôt que de la supposer silencieusement (comme
-    // Gen1) : bloodGroup précède weight->isVaccinated, PUIS lastDonationDate/donationFrequency/
-    // isValidatedDonor/validationExpiresAt restent contigus entre eux.
-    expect(bloodGroupBlockStart).toBeGreaterThan(-1)
-    expect(bloodGroupBlockEnd).toBeLessThan(lastDonationDateBlockStart)
-    expect(animalType.indexOf(isValidatedDonorBlock)).toBeGreaterThan(lastDonationDateBlockStart)
-
-    const restOfType =
-      animalType.slice(nameFieldIdx, bloodGroupBlockStart) +
-      animalType.slice(bloodGroupBlockEnd, lastDonationDateBlockStart) +
-      animalType.slice(validationExpiresAtBlockEnd)
+    let restOfType = animalType.slice(nameFieldIdx)
+    for (const fieldName of fieldsWithLegitimateAuth) {
+      const block = extractFieldAuthBlock(restOfType, fieldName)
+      restOfType = restOfType.replace(block, '')
+    }
 
     expect(restOfType).not.toContain('@auth(')
   })
 })
 
-describe('amplify/data/resource.ts — Animal.bloodGroup (équivalent Gen2 ADR-0006, ex-schema.test.js)', () => {
+describe('amplify/data/resource.ts — Animal.species/weight/bloodGroup/isVaccinated (verrouillage post-saisie Owner, demande produit 2026-08-23, amende ADR-0006)', () => {
   const animalType = extractType('Animal')
 
-  it("bloodGroup reste non-nullable (String!) et écrit par l'Owner à la création/édition -- pas de restriction d'opérations sur la règle owner (contrairement à isValidatedDonor/validationExpiresAt/lastDonationDate)", () => {
-    const block = extractFieldAuthBlock(animalType, 'bloodGroup')
-    expect(block).toContain('bloodGroup: String! @auth(')
-    expect(block).toContain('{allow: owner, ownerField: "owner"}')
-    expect(block).not.toContain('{allow: owner, operations: [read]')
-  })
+  // Amende le comportement pin-testé jusqu'ici (Owner sans restriction d'opérations sur
+  // bloodGroup) : ces quatre champs médicaux critiques sont désormais verrouillés dès la
+  // création -- l'Owner les saisit une fois (RegisterOwnerView.vue/AddAnimalView.vue) mais
+  // ne peut plus jamais les modifier ensuite (AnimalsView.vue les affiche en lecture
+  // seule) ; seul un Veterinarian peut les corriger, lors de sa "première analyse"
+  // (ValidationsView.vue) avant de valider l'Animal comme donneur.
+  it.each(['species', 'weight', 'bloodGroup', 'isVaccinated'])(
+    "%s : l'Owner a create+read, jamais update (verrouillé après la création)",
+    (fieldName) => {
+      const block = extractFieldAuthBlock(animalType, fieldName)
+      expect(block).toContain('{allow: owner, operations: [create, read]')
+    },
+  )
 
-  it('les Veterinarians ont read+update sur bloodGroup (corrige un bloodGroup UNKNOWN saisi par erreur)', () => {
-    const block = extractFieldAuthBlock(animalType, 'bloodGroup')
-    expect(block).toContain(
-      '{allow: groups, operations: [read, update], groups: ["Veterinarians"]}',
-    )
+  it.each(['species', 'weight', 'bloodGroup', 'isVaccinated'])(
+    '%s : les Veterinarians ont read+update, scopé au groupe Veterinarians',
+    (fieldName) => {
+      const block = extractFieldAuthBlock(animalType, fieldName)
+      expect(block).toContain(
+        '{allow: groups, operations: [read, update], groups: ["Veterinarians"]}',
+      )
+    },
+  )
+
+  it('bloodGroup reste non-nullable (String!)', () => {
+    expect(animalType).toContain('bloodGroup: String! @auth(')
   })
 })
 

@@ -9,10 +9,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 //   - Animal.lastDonationDate -> aujourd'hui, format AWSDate (YYYY-MM-DD), via
 //     updateAnimalLastDonationDateSimple.
 //   - Upsert best-effort d'une ClinicOwnerRelation(clinicID, ownerID) — voir
-//     resolveClinicOwnerRelationUpsert (fonction pure) plus bas pour la logique de décision,
-//     et le bloc "closeMission — upsert ClinicOwnerRelation (Phase 3.1)" pour le câblage
-//     bout-en-bout (requête clinicOwnerRelationsByOwnerID puis, si besoin,
-//     createClinicOwnerRelationSimple).
+//     resolveClinicOwnerRelationUpsert (fonction pure, testée séparément dans
+//     src/services/__tests__/clinic-owner-relation-service.test.js depuis son extraction
+//     vers ce service, demande produit 2026-08-23) pour la logique de décision, et le bloc
+//     "closeMission — upsert ClinicOwnerRelation (Phase 3.1)" pour le câblage bout-en-bout
+//     (requête clinicOwnerRelationsByOwnerID puis, si besoin, createClinicOwnerRelationSimple).
 // - NO_SHOW ne touche jamais Animal, ni ClinicOwnerRelation.
 // - outcome invalide -> throw INVALID_OUTCOME avant tout appel GraphQL.
 //
@@ -45,7 +46,7 @@ vi.mock('aws-amplify/data', () => ({
   }),
 }))
 
-import { useMissionClosure, resolveClinicOwnerRelationUpsert } from '@/composables/useMissionClosure'
+import { useMissionClosure } from '@/composables/useMissionClosure'
 import { MissionStatus } from '@/constants/enums'
 
 const resetAllMocks = () => {
@@ -578,50 +579,3 @@ describe('useMissionClosure — incrément des indicateurs Clinic (Phase 6.7, Cd
   })
 })
 
-describe('resolveClinicOwnerRelationUpsert (fonction pure, testable sans mock GraphQL)', () => {
-  it('retourne null si une relation existe déjà pour ce clinicID exact', () => {
-    const result = resolveClinicOwnerRelationUpsert(
-      [
-        { clinicID: 'clinic-1', isPrimaryClinic: true },
-        { clinicID: 'clinic-2', isPrimaryClinic: false },
-      ],
-      'clinic-1',
-    )
-    expect(result).toBeNull()
-  })
-
-  it('retourne isPrimaryClinic: true si existingRelations est vide (toute première relation de cet Owner)', () => {
-    const result = resolveClinicOwnerRelationUpsert([], 'clinic-1')
-    expect(result).toEqual({ clinicID: 'clinic-1', isPrimaryClinic: true })
-  })
-
-  it("retourne isPrimaryClinic: false si l'Owner a déjà au moins une relation, mais avec une AUTRE clinique", () => {
-    const result = resolveClinicOwnerRelationUpsert(
-      [{ clinicID: 'clinic-OTHER', isPrimaryClinic: true }],
-      'clinic-1',
-    )
-    expect(result).toEqual({ clinicID: 'clinic-1', isPrimaryClinic: false })
-  })
-
-  it("retourne null même quand l'Owner a une relation à CETTE clinique MÉLANGÉE avec des relations à d'autres cliniques (le check du clinicID exact doit court-circuiter, peu importe le reste du tableau, quelle que soit sa position — ici testé en 1ère ET en dernière position)", () => {
-    const clinicFirst = resolveClinicOwnerRelationUpsert(
-      [
-        { clinicID: 'clinic-1', isPrimaryClinic: true },
-        { clinicID: 'clinic-OTHER-A', isPrimaryClinic: false },
-        { clinicID: 'clinic-OTHER-B', isPrimaryClinic: false },
-      ],
-      'clinic-1',
-    )
-    expect(clinicFirst).toBeNull()
-
-    const clinicLast = resolveClinicOwnerRelationUpsert(
-      [
-        { clinicID: 'clinic-OTHER-A', isPrimaryClinic: true },
-        { clinicID: 'clinic-OTHER-B', isPrimaryClinic: false },
-        { clinicID: 'clinic-1', isPrimaryClinic: false },
-      ],
-      'clinic-1',
-    )
-    expect(clinicLast).toBeNull()
-  })
-})

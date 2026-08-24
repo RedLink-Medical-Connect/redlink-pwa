@@ -274,6 +274,34 @@ describe('useAnimals.updateAnimalDetails', () => {
 
     expect(animals.value[0].name).toBe('Rex')
   })
+
+  it("n'envoie jamais species/weight/bloodGroup/isVaccinated (verrouillés côté schéma à [create, read] pour l'Owner, demande produit 2026-08-23 -- amende ADR-0006) même si le formulaire les fournit", async () => {
+    animalUpdateMock.mockImplementation(async (input) => ({
+      data: { ...input },
+      errors: undefined,
+    }))
+
+    const { updateAnimalDetails } = useAnimals()
+    await updateAnimalDetails({
+      id: 'animal-1',
+      name: 'Rex modifié',
+      breed: 'Labrador',
+      birthDate: '2020-01-01',
+      isSterilized: true,
+      donationFrequency: 'ASAP',
+      // Champs verrouillés -- présents dans le formulaire (editForm garde ces valeurs pour
+      // l'affichage lecture seule, AnimalsView.vue) mais ne doivent jamais partir dans l'input.
+      species: 'CAT',
+      weight: 99,
+      bloodGroup: 'AB',
+      isVaccinated: false,
+    })
+
+    const input = animalUpdateMock.mock.calls[0][0]
+    expect(Object.keys(input).sort()).toEqual(
+      ['id', 'name', 'breed', 'birthDate', 'isSterilized', 'donationFrequency'].sort(),
+    )
+  })
 })
 
 describe('useAnimals.deleteAnimalById', () => {

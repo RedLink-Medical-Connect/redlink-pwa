@@ -90,7 +90,14 @@ export function useAnimals() {
    * rôle du service de décider quoi logger).
    *
    * @param {object} form Formulaire d'édition (voir `editForm` dans AnimalsView.vue) --
-   *   doit au moins contenir `id`.
+   *   doit au moins contenir `id`. Ne contient QUE les champs que l'Owner a encore le droit
+   *   d'écrire en édition (voir CLAUDE.md, "le composable n'envoie dans `input` que les
+   *   champs qu'il a le droit d'écrire") : `species`/`weight`/`bloodGroup`/`isVaccinated`
+   *   sont volontairement absents ici -- demande produit 2026-08-23 (amende ADR-0006),
+   *   verrouillés côté schéma à `[create, read]` pour l'Owner (`amplify/data/resource.ts`,
+   *   `ownerCreateReadOnlyVetReadUpdate`) une fois l'Animal créé. `createNewAnimal`
+   *   ci-dessous les envoie toujours, l'Owner conservant le droit de les saisir À LA
+   *   CRÉATION.
    * @returns {Promise<void>}
    */
   const updateAnimalDetails = async (form) => {
@@ -101,12 +108,8 @@ export function useAnimals() {
       const input = {
         id: form.id,
         name: form.name,
-        species: form.species,
         breed: form.breed,
         birthDate: form.birthDate,
-        weight: parseFloat(form.weight),
-        bloodGroup: form.bloodGroup,
-        isVaccinated: form.isVaccinated,
         isSterilized: form.isSterilized,
         donationFrequency: form.donationFrequency,
       }

@@ -14,6 +14,7 @@ import {
   BloodGroupsBySpecies,
   DonorStatus,
   AnimalSex,
+  formatBloodGroupLabel,
 } from '@/constants/enums.js'
 import { getDonorStatus } from '@/services/eligibility-service.js'
 
@@ -144,46 +145,73 @@ const onDelete = async () => {
       <div class="flex flex-col gap-4 pt-2">
         <InputText v-model="editForm.name" :placeholder="$t('dashboard.owner.animals.form.name')" />
         <div class="grid grid-cols-2 gap-2">
-          <Select
-            v-model="editForm.species"
-            :options="speciesOptions"
-            option-label="label"
-            option-value="value"
-          />
           <BreedAutocomplete v-model="editForm.breed" :species="editForm.species" />
-        </div>
-        <div class="grid grid-cols-2 gap-2">
-          <InputNumber
-            v-model="editForm.weight"
-            suffix=" kg"
-            :placeholder="$t('dashboard.owner.animals.form.weight')"
-            :min-fraction-digits="1"
-          />
           <AppDatePicker v-model="editForm.birthDate" date-format="dd/mm/yy" />
         </div>
         <div class="grid grid-cols-2 gap-2">
-          <Select
-            v-model="editForm.bloodGroup"
-            :options="bloodOptions"
-            :disabled="!editForm.species"
-            :placeholder="$t('dashboard.owner.animals.form.blood_group_placeholder')"
-          />
           <Select
             v-model="editForm.donationFrequency"
             :options="frequencyOptions"
             option-label="label"
             option-value="value"
           />
+          <div class="flex items-center gap-2">
+            <Checkbox v-model="editForm.isSterilized" :binary="true" input-id="edit-sterilized" />
+            <label for="edit-sterilized" class="cursor-pointer select-none">{{
+              $t('dashboard.owner.animals.form.sterilized')
+            }}</label>
+          </div>
         </div>
-        <div class="flex gap-4 mt-2 p-3 bg-zinc-50 dark:bg-zinc-800 rounded">
-          <div class="flex items-center gap-2">
-            <Checkbox v-model="editForm.isVaccinated" :binary="true" />
-            <label>{{ $t('dashboard.owner.animals.form.vaccinated') }}</label>
+
+        <!-- Demande produit 2026-08-23 (amende ADR-0006) : species/bloodGroup/weight/
+             isVaccinated sont verrouillés côté schéma pour l'Owner après la création
+             (`allow.owner().to(['create', 'read'])`, amplify/data/resource.ts) -- affichés
+             en lecture seule ici plutôt que retirés, pour que l'Owner voie ce qui a été
+             saisi/corrigé sans pouvoir le modifier lui-même. -->
+        <div class="p-3 bg-zinc-50 dark:bg-zinc-800 rounded flex flex-col gap-3">
+          <div class="grid grid-cols-2 gap-2">
+            <Select
+              v-model="editForm.species"
+              :options="speciesOptions"
+              option-label="label"
+              option-value="value"
+              disabled
+            />
+            <InputNumber
+              v-model="editForm.weight"
+              suffix=" kg"
+              :placeholder="$t('dashboard.owner.animals.form.weight')"
+              :min-fraction-digits="1"
+              disabled
+            />
           </div>
-          <div class="flex items-center gap-2">
-            <Checkbox v-model="editForm.isSterilized" :binary="true" />
-            <label>{{ $t('dashboard.owner.animals.form.sterilized') }}</label>
+          <div class="grid grid-cols-2 gap-2 items-center">
+            <Select
+              v-model="editForm.bloodGroup"
+              :options="bloodOptions"
+              :placeholder="$t('dashboard.owner.animals.form.blood_group_placeholder')"
+              disabled
+            >
+              <template #value="slotProps">
+                <span v-if="slotProps.value">{{
+                  formatBloodGroupLabel(
+                    slotProps.value,
+                    $t('dashboard.owner.animals.form.blood_group_unknown_option'),
+                  )
+                }}</span>
+                <span v-else>{{ slotProps.placeholder }}</span>
+              </template>
+            </Select>
+            <div class="flex items-center gap-2">
+              <Checkbox v-model="editForm.isVaccinated" :binary="true" disabled input-id="edit-vaccinated" />
+              <label for="edit-vaccinated" class="select-none">{{
+                $t('dashboard.owner.animals.form.vaccinated')
+              }}</label>
+            </div>
           </div>
+          <p class="text-xs text-zinc-500 dark:text-zinc-400">
+            {{ $t('dashboard.owner.animals.form.locked_after_creation') }}
+          </p>
         </div>
       </div>
       <template #footer>
