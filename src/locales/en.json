@@ -12,6 +12,7 @@
     "loading": "Loading...",
     "sending": "Sending...",
     "address_placeholder": "Enter your address...",
+    "breed_placeholder": "Search for a breed...",
     "error": "Error",
     "success": "Success",
     "deleted": "Deleted",

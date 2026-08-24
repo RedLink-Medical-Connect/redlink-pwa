@@ -7,6 +7,7 @@ import { useToast } from 'primevue/usetoast'
 import Dialog from 'primevue/dialog'
 
 import { useAnimals } from '@/composables/useAnimals'
+import BreedAutocomplete from '@/components/common/BreedAutocomplete.vue'
 import {
   Species,
   DonationFrequency,
@@ -149,10 +150,7 @@ const onDelete = async () => {
             option-label="label"
             option-value="value"
           />
-          <InputText
-            v-model="editForm.breed"
-            :placeholder="$t('dashboard.owner.animals.form.breed')"
-          />
+          <BreedAutocomplete v-model="editForm.breed" :species="editForm.species" />
         </div>
         <div class="grid grid-cols-2 gap-2">
           <InputNumber

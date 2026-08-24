@@ -59,6 +59,9 @@ const buildOwnerData = (overrides = {}) => ({
   animal_birthDate: '2020-05-15',
   animal_weight: '25',
   blood_group: 'DEA 1.1-',
+  animal_isVaccinated: true,
+  animal_isSterilized: true,
+  animal_donationFrequency: 'TWICE_YEAR',
   ...overrides,
 })
 
@@ -187,10 +190,37 @@ describe('useRegistrationCompletion.completeRegistration — chemin owner', () =
     availabilityCreateMock.mockResolvedValue({ data: { id: 'avail-1' }, errors: undefined })
 
     const { completeRegistration } = useRegistrationCompletion()
-    await completeRegistration(buildOwnerData({ animal_species: '' }), 'cognito-user-1')
+    await completeRegistration(
+      buildOwnerData({ animal_species: '', animal_donationFrequency: '' }),
+      'cognito-user-1',
+    )
 
     expect(animalInput.species).toBe('DOG')
     expect(animalInput.donationFrequency).toBe('ASAP')
+  })
+
+  it('transmet animal_isVaccinated/isSterilized/donationFrequency à CreateAnimal (harmonisation avec AddAnimalView.vue -- ces valeurs étaient fabriquées en silence avant ce correctif, isVaccinated forcé à true en particulier)', async () => {
+    let animalInput = null
+    ownerCreateMock.mockResolvedValue({ data: { id: 'owner-123' }, errors: undefined })
+    animalCreateMock.mockImplementation(async (input) => {
+      animalInput = input
+      return { data: { id: 'animal-1' }, errors: undefined }
+    })
+    availabilityCreateMock.mockResolvedValue({ data: { id: 'avail-1' }, errors: undefined })
+
+    const { completeRegistration } = useRegistrationCompletion()
+    await completeRegistration(
+      buildOwnerData({
+        animal_isVaccinated: false,
+        animal_isSterilized: true,
+        animal_donationFrequency: 'ONCE_YEAR',
+      }),
+      'cognito-user-1',
+    )
+
+    expect(animalInput.isVaccinated).toBe(false)
+    expect(animalInput.isSterilized).toBe(true)
+    expect(animalInput.donationFrequency).toBe('ONCE_YEAR')
   })
 
   it('relance (propage) une erreur GraphQL/@auth résolue par le client Gen2 (pas de exception JS) sur CreateOwner', async () => {

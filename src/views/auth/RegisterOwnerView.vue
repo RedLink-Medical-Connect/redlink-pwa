@@ -5,8 +5,15 @@ import { useAuthStore } from '@/stores/auth'
 import { usePassword } from '@/composables/usePassword'
 import { useI18n } from 'vue-i18n'
 import AddressAutocomplete from '@/components/common/AddressAutocomplete.vue'
+import BreedAutocomplete from '@/components/common/BreedAutocomplete.vue'
 import PhoneInput from '@/components/common/PhoneInput.vue'
-import { Species, BloodGroupsBySpecies, AnimalSex, formatBloodGroupLabel } from '@/constants/enums.js'
+import {
+  Species,
+  DonationFrequency,
+  BloodGroupsBySpecies,
+  AnimalSex,
+  formatBloodGroupLabel,
+} from '@/constants/enums.js'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -38,6 +45,13 @@ const form = ref({
   animal_birthDate: '',
   animal_weight: null,
   blood_group: '',
+  // Harmonisation avec AddAnimalView.vue (demande produit 2026-08-23) : mêmes champs,
+  // mêmes défauts (false/false/ASAP) -- avant ce correctif, ces trois valeurs étaient
+  // fabriquées en silence par useRegistrationCompletion.js, jamais montrées au
+  // propriétaire (isVaccinated forcé à true en particulier).
+  animal_isVaccinated: false,
+  animal_isSterilized: false,
+  animal_donationFrequency: DonationFrequency.ASAP,
 })
 
 const bloodOptions = computed(() => {
@@ -55,6 +69,15 @@ const speciesOptions = computed(() => [
 const sexOptions = computed(() => [
   { label: t('dashboard.owner.animals.sex.male'), value: AnimalSex.MALE },
   { label: t('dashboard.owner.animals.sex.female'), value: AnimalSex.FEMALE },
+])
+
+// Mêmes clés i18n qu'AddAnimalView.vue (dashboard.owner.animals.*) plutôt que d'en
+// dupliquer sous auth.register_owner.* -- les deux vues affichent littéralement le même
+// libellé pour le même champ.
+const frequencyOptions = computed(() => [
+  { label: t('dashboard.owner.animals.frequency.asap'), value: DonationFrequency.ASAP },
+  { label: t('dashboard.owner.animals.frequency.twice_year'), value: DonationFrequency.TWICE_YEAR },
+  { label: t('dashboard.owner.animals.frequency.once_year'), value: DonationFrequency.ONCE_YEAR },
 ])
 
 const nextStep = () => {
@@ -274,9 +297,9 @@ const handleRegister = async () => {
             :aria-label="$t('auth.register_owner.fields.animal_species')"
             class="!bg-zinc-200 dark:!bg-zinc-800 !border-none !text-zinc-900 dark:!text-white !p-3 !rounded-md w-full"
           />
-          <InputText
+          <BreedAutocomplete
             v-model="form.animal_breed"
-            :placeholder="$t('auth.register_owner.fields.animal_breed')"
+            :species="form.animal_species"
             :aria-label="$t('auth.register_owner.fields.animal_breed')"
             class="!bg-zinc-200 dark:!bg-zinc-800 !border-none !text-zinc-900 dark:!text-white !p-3 !rounded-md"
           />
@@ -330,6 +353,30 @@ const handleRegister = async () => {
           show-clear
           class="!bg-zinc-200 dark:!bg-zinc-800 !border-none !text-zinc-900 dark:!text-white !p-3 !rounded-md w-full"
         />
+
+        <Select
+          v-model="form.animal_donationFrequency"
+          :options="frequencyOptions"
+          option-label="label"
+          option-value="value"
+          :aria-label="$t('dashboard.owner.animals.form.donation_frequency')"
+          class="!bg-zinc-200 dark:!bg-zinc-800 !border-none !text-zinc-900 dark:!text-white !p-3 !rounded-md w-full"
+        />
+
+        <div class="flex gap-4 p-3 bg-zinc-100 dark:bg-zinc-800/50 rounded-md">
+          <div class="flex items-center gap-2">
+            <Checkbox v-model="form.animal_isVaccinated" :binary="true" input-id="reg-vaccinated" />
+            <label for="reg-vaccinated" class="text-sm cursor-pointer select-none">{{
+              $t('dashboard.owner.animals.form.vaccinated_required')
+            }}</label>
+          </div>
+          <div class="flex items-center gap-2">
+            <Checkbox v-model="form.animal_isSterilized" :binary="true" input-id="reg-sterilized" />
+            <label for="reg-sterilized" class="text-sm cursor-pointer select-none">{{
+              $t('dashboard.owner.animals.form.sterilized')
+            }}</label>
+          </div>
+        </div>
 
         <div class="flex gap-4 mt-4">
           <Button

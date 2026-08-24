@@ -79,7 +79,7 @@ export function useRegistrationCompletion() {
       address: data.address || '',
       latitude: parseFloat(data.latitude || 0),
       longitude: parseFloat(data.longitude || 0),
-      maxTravelDistance: 50,
+      maxTravelDistance: 5,
       totalDonations: 0,
     })
 
@@ -108,9 +108,15 @@ export function useRegistrationCompletion() {
         // sans valeur "inconnu") — littéral laissé tel quel, hors périmètre de la
         // substitution Species/DonationFrequency demandée pour la Phase 7.7/R-14.
         bloodGroup: data.blood_group || 'UNKNOWN',
-        isVaccinated: true,
-        isSterilized: false,
-        donationFrequency: DonationFrequency.ASAP,
+        // Harmonisation avec AddAnimalView.vue (demande produit 2026-08-23) : ces trois
+        // valeurs étaient fabriquées en silence (isVaccinated forcé à true en particulier,
+        // jamais réellement demandé au propriétaire) -- RegisterOwnerView.vue expose
+        // désormais les mêmes champs qu'AddAnimalView.vue, mêmes défauts (false/false/ASAP)
+        // si l'Owner ne les touche pas, plutôt que de prétendre un statut vaccinal jamais
+        // confirmé.
+        isVaccinated: data.animal_isVaccinated || false,
+        isSterilized: data.animal_isSterilized || false,
+        donationFrequency: data.animal_donationFrequency || DonationFrequency.ASAP,
       })
 
       throwIfGraphqlError(animalErrors, 'createAnimal')

@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { getCurrentUser } from 'aws-amplify/auth'
 import { useAnimals } from '@/composables/useAnimals'
+import BreedAutocomplete from '@/components/common/BreedAutocomplete.vue'
 import {
   Species,
   DonationFrequency,
@@ -152,9 +153,9 @@ const handleSubmit = async () => {
             <label class="text-xs font-bold text-zinc-500 uppercase">{{
               $t('dashboard.owner.animals.form.breed_optional')
             }}</label>
-            <InputText
+            <BreedAutocomplete
               v-model="form.breed"
-              :placeholder="$t('dashboard.owner.animals.form.breed_placeholder')"
+              :species="form.species"
               class="!bg-zinc-50 dark:!bg-zinc-950 !border-zinc-300 dark:!border-zinc-800 !p-3 focus:!border-[#ff3b4e]"
             />
           </div>
