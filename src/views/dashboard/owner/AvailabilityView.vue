@@ -4,6 +4,7 @@ import { useToast } from 'primevue/usetoast'
 import DashboardSidebar from '@/components/dashboard/DashboardSidebar.vue'
 import { useOwnerAvailability } from '@/composables/useOwnerAvailability'
 import { DAYS_OF_WEEK, getDayLabel } from '@/constants/date-constants'
+import { TIME_PRESETS, mergeConsecutiveHourRanges } from '@/services/availability-service'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
@@ -19,18 +20,13 @@ const { availabilities, isLoading, fetchAvailabilities, addAvailabilityForDays, 
 const WEEK_DAYS = [1, 2, 3, 4, 5]
 const WEEKEND_DAYS = [6, 0]
 
-// Bornes validées avec le repo owner (2026-08-17) : 8h-12h / 12h-18h / 18h-22h.
-// Demande produit (2026-08-23) : combinables entre eux (matin ET après-midi ET soir en une
-// seule sauvegarde), pas exclusifs -- avant ce correctif, cliquer un second preset écrasait
-// juste Début/Fin du premier au lieu de s'y ajouter. `selectedPresets` est maintenant un
-// multi-select (même pattern que `selectedDays` ci-dessus, boutons togglables) ; l'heure
+// TIME_PRESETS : voir availability-service.js (bornes validées avec le repo owner,
+// 2026-08-17). Demande produit (2026-08-23) : combinables entre eux (matin ET après-midi
+// ET soir en une seule sauvegarde), pas exclusifs -- avant ce correctif, cliquer un second
+// preset écrasait juste Début/Fin du premier au lieu de s'y ajouter. `selectedPresets` est
+// un multi-select (même pattern que `selectedDays` ci-dessus, boutons togglables) ; l'heure
 // exacte manuelle (Début/Fin ci-dessous) reste un moyen alternatif d'ajouter UN créneau
 // précis, mutuellement exclusif avec les presets (voir handleAdd).
-const TIME_PRESETS = [
-  { key: 'morning', startHour: 8, endHour: 12 },
-  { key: 'afternoon', startHour: 12, endHour: 18 },
-  { key: 'evening', startHour: 18, endHour: 22 },
-]
 
 const selectedDays = ref([])
 const selectedPresets = ref([])
@@ -76,16 +72,17 @@ const formatTime = (date) => {
 }
 
 // Résout les plages horaires (Début/Fin) à soumettre pour ce clic sur "Enregistrer" --
-// un preset sélectionné par plage cochée (`selectedPresets`, combinables), sinon la
-// plage manuelle (Début/Fin), jamais les deux (voir togglePreset ci-dessus).
+// un preset sélectionné par plage cochée (`selectedPresets`, combinables), sinon la plage
+// manuelle (Début/Fin), jamais les deux (voir togglePreset ci-dessus). Presets fusionnés
+// via `mergeConsecutiveHourRanges` (availability-service.js) quand ils sont consécutifs
+// (matin+après-midi, après-midi+soir, ou les trois) -- voir sa doc pour le détail
+// (fonction pure, testée séparément, pas de logique métier dupliquée ici).
 const rangesToSubmit = () => {
   if (selectedPresets.value.length > 0) {
-    return TIME_PRESETS.filter((preset) => selectedPresets.value.includes(preset.key)).map(
-      (preset) => ({
-        start: `${String(preset.startHour).padStart(2, '0')}:00`,
-        end: `${String(preset.endHour).padStart(2, '0')}:00`,
-      }),
-    )
+    return mergeConsecutiveHourRanges(selectedPresets.value).map((group) => ({
+      start: `${String(group.startHour).padStart(2, '0')}:00`,
+      end: `${String(group.endHour).padStart(2, '0')}:00`,
+    }))
   }
   if (startTime.value && endTime.value) {
     return [{ start: formatTime(startTime.value), end: formatTime(endTime.value) }]
