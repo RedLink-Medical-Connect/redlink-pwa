@@ -1,4 +1,5 @@
 import { defineBackend } from '@aws-amplify/backend'
+import { Names } from 'aws-cdk-lib'
 import { Policy, PolicyStatement } from 'aws-cdk-lib/aws-iam'
 import { AwsCustomResource, AwsCustomResourcePolicy, PhysicalResourceId } from 'aws-cdk-lib/custom-resources'
 import { auth } from './auth/resource'
@@ -69,7 +70,29 @@ cfnUserPool.policies = {
  */
 const geoStack = backend.createStack('geo-stack')
 
-const indexName = 'placeIndex'
+/**
+ * Bug réel post-déploiement n°3 (2026-08-25) : `indexName` était en dur
+ * (`'placeIndex'`), donc partagé par TOUS les environnements (sandbox local,
+ * `main`, toute future branche) puisqu'un nom de Place Index est unique par
+ * compte + région AWS, pas par stack CloudFormation. Le premier vrai
+ * déploiement de `main` a échoué avec `Place index already exists:
+ * placeIndex` (le sandbox local en avait déjà créé un), qui a ensuite fait
+ * échouer le rollback de toute la stack (tables DynamoDB refusant de se
+ * supprimer) -- même classe de risque que la collision déjà identifiée pour
+ * `AwsCustomResource` (ADR-0013), non traitée à l'époque faute d'un deuxième
+ * environnement réel pour la révéler.
+ *
+ * `Names.uniqueResourceName` (CDK, pas une solution maison) dérive un nom
+ * unique par stack parente non imbriquée (donc par branche/sandbox) --
+ * mêmes contraintes de charset que Gen1 n'avait pas à gérer (pas de Place
+ * Index dans son mapping). `maxLength: 64` : marge large sous la limite
+ * Location Service (100 caractères), le suffixe de hash CDK inclus.
+ */
+const indexName = Names.uniqueResourceName(geoStack, {
+  maxLength: 64,
+  separator: '-',
+  allowedSpecialCharacters: '-_',
+})
 
 /**
  * Constante simple plutôt que la table `Mappings.RegionMapping` à 20 entrées
