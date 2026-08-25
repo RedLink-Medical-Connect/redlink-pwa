@@ -3,7 +3,15 @@ backend:
   phases:
     build:
       commands:
-        - npm ci --cache .npm --prefer-offline
+        # npm install, pas npm ci : bug npm connu et toujours ouvert (npm/cli#8726,
+        # #8674, #5125) -- npm ci refuse par intermittence un lockfile que npm
+        # install vient de générer, sur de gros arbres de dépendances comme
+        # aws-cdk-lib/@aws-amplify/backend. Confirmé en reproduisant en local
+        # (npm 10 et 12, cache vidé, plusieurs stratégies d'install) : un package
+        # différent "manquant du lock file" à chaque tentative, alors qu'il est
+        # bien présent sur disque -- signature du bug, pas une vraie incohérence
+        # du repo.
+        - npm install --cache .npm --prefer-offline
         - npx ampx pipeline-deploy --branch $AWS_BRANCH --app-id $AWS_APP_ID
 frontend:
   phases:
