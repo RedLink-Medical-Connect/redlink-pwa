@@ -1,7 +1,9 @@
 import { ref } from 'vue'
 import { generateClient } from 'aws-amplify/data'
+import { getCurrentUser } from 'aws-amplify/auth'
 import { isValidatedDonor } from '@/services/eligibility-service'
 import { throwIfGraphqlError } from '@/services/graphql-error-service'
+import { resolveClinicOwnerRelationUpsert } from '@/services/clinic-owner-relation-service'
 
 // Phase 8, sous-tâche 5 (lot 3/3) : migré sur le client Gen2 (`aws-amplify/data`,
 // `client.models.Animal.*`). `listAnimalsForValidation`/`validateAnimalDonorSimple`/
@@ -52,29 +54,29 @@ export function mapValidationErrorKey(errorMessage) {
   return VALIDATION_ERROR_KEYS[errorMessage] || 'dashboard.validations.toasts.generic_error'
 }
 
-// Clé i18n spécifique par code d'erreur levé par `correctBloodGroup` (voir sa doc
-// plus bas). Réutilise la même clé `blood_group_unknown` que `VALIDATION_ERROR_KEYS`
-// pour le code `BLOOD_GROUP_UNKNOWN` (même garde-fou, même message) — mais un
-// message d'erreur générique distinct pour tout le reste (réseau, @auth...) : celui de
-// `mapValidationErrorKey` ("Impossible de valider cet animal") parlerait de validation,
-// pas de correction de groupe sanguin, ce qui induirait le vétérinaire en erreur sur
-// l'action qui a réellement échoué.
-const BLOOD_GROUP_CORRECTION_ERROR_KEYS = {
+// Clé i18n spécifique par code d'erreur levé par `correctCriticalFields` (voir sa doc plus
+// bas). Réutilise la même clé `blood_group_unknown` que `VALIDATION_ERROR_KEYS` pour le
+// code `BLOOD_GROUP_UNKNOWN` (même garde-fou, même message) — mais un message d'erreur
+// générique distinct pour tout le reste (réseau, @auth...) : celui de
+// `mapValidationErrorKey` ("Impossible de valider cet animal") parlerait de validation, pas
+// de correction, ce qui induirait le vétérinaire en erreur sur l'action qui a réellement
+// échoué.
+const CRITICAL_FIELDS_CORRECTION_ERROR_KEYS = {
   BLOOD_GROUP_UNKNOWN: 'dashboard.validations.toasts.blood_group_unknown',
 }
 
 /**
- * Traduit le `.message` d'une erreur levée par `correctBloodGroup` en clé i18n à afficher
- * à l'utilisateur — même raisonnement que `mapValidationErrorKey` ci-dessus (fonction pure,
- * hors contexte de composant, testable sans monter de composant Vue).
+ * Traduit le `.message` d'une erreur levée par `correctCriticalFields` en clé i18n à
+ * afficher à l'utilisateur — même raisonnement que `mapValidationErrorKey` ci-dessus
+ * (fonction pure, hors contexte de composant, testable sans monter de composant Vue).
  *
  * @param {string} errorMessage
  * @returns {string} une clé i18n, à passer à `t()`
  */
-export function mapBloodGroupCorrectionErrorKey(errorMessage) {
+export function mapCriticalFieldsCorrectionErrorKey(errorMessage) {
   return (
-    BLOOD_GROUP_CORRECTION_ERROR_KEYS[errorMessage] ||
-    'dashboard.validations.toasts.blood_group_correction_error'
+    CRITICAL_FIELDS_CORRECTION_ERROR_KEYS[errorMessage] ||
+    'dashboard.validations.toasts.critical_fields_correction_error'
   )
 }
 
@@ -110,15 +112,16 @@ export function mapBloodGroupCorrectionErrorKey(errorMessage) {
  * localement (issu de `pendingAnimals`) est absent/`''`/`'UNKNOWN'`, même prédicat que celui
  * déjà utilisé par `isBloodCompatible` (eligibility-service.js) pour rester cohérent.
  *
- * Phase 6 (section B) : `correctBloodGroup` ci-dessous couvre le cas où ce `bloodGroup`
+ * Phase 6 (section B) : `correctCriticalFields` ci-dessous couvre le cas où ce `bloodGroup`
  * connu localement EST `'UNKNOWN'`/vide (saisie erronée de l'Owner) — jusque-là un
  * vétérinaire pouvait constater le problème (message `BLOOD_GROUP_UNKNOWN` ci-dessus) mais
  * n'avait aucun moyen de le corriger : `Animal.bloodGroup` n'avait pas de règle `@auth` au
- * niveau champ ouvrant l'écriture aux Veterinarians. Nouvelle règle de champ ajoutée
- * (schema.graphql) : contrairement à `isValidatedDonor`/`validationExpiresAt`,
- * `bloodGroup` reste aussi écrit par l'Owner (création/édition) — voir le commentaire dans
- * schema.graphql pour le détail de cette règle @auth, volontairement différente du pattern
- * ADR-0002/0003 (Owner `[read]` seul) pour ce champ précis.
+ * niveau champ ouvrant l'écriture aux Veterinarians. Étendu depuis (demande produit
+ * 2026-08-23, amende ADR-0006) à `species`/`weight`/`isVaccinated` : ces quatre champs sont
+ * désormais verrouillés en écriture pour l'Owner après la création
+ * (`ownerCreateReadOnlyVetReadUpdate`, `amplify/data/resource.ts`, contrairement au
+ * comportement d'origine "bloodGroup reste aussi écrit par l'Owner en édition") — voir le
+ * commentaire dans `resource.ts` pour le détail de cette règle `@auth`.
  */
 export function useAnimalValidation() {
   const client = generateClient()
@@ -126,11 +129,15 @@ export function useAnimalValidation() {
   const pendingAnimals = ref([])
   const isLoading = ref(false)
   const isValidating = ref(false)
-  // Ref de chargement dédiée à `correctBloodGroup`, distincte de `isValidating` (même
-  // raisonnement que isLoading/isValidating déjà séparés : une correction de bloodGroup et
-  // une validation sont deux actions indépendantes, potentiellement déclenchées sur deux
-  // lignes différentes du tableau au même instant côté ValidationsView.vue).
-  const isCorrectingBloodGroup = ref(false)
+  // Cache de session pour le clinicID du vétérinaire courant -- même pattern que
+  // fetchClinicId() dans useClinicRequest.js (un seul aller-retour GraphQL par session,
+  // pas un par validation).
+  const vetClinicId = ref(null)
+  // Ref de chargement dédiée à `correctCriticalFields`, distincte de `isValidating` (même
+  // raisonnement que isLoading/isValidating déjà séparés : une correction et une validation
+  // sont deux actions indépendantes, potentiellement déclenchées sur deux lignes
+  // différentes du tableau au même instant côté ValidationsView.vue).
+  const isCorrectingCriticalFields = ref(false)
   // Distingue "chargement en erreur" de "file d'attente réellement vide" — sans ce ref,
   // un échec réseau/@auth silencieux (attrapé ci-dessous, jamais rethrow, voir le test
   // dédié plus bas) rendait exactement le même état que 0 animal en attente : un
@@ -154,6 +161,12 @@ export function useAnimalValidation() {
           'species',
           'breed',
           'bloodGroup',
+          // weight/isVaccinated ajoutés (demande produit 2026-08-23) : nécessaires pour
+          // préremplir le dialogue de correction des champs critiques
+          // (`correctCriticalFields`, ValidationsView.vue) -- absents jusqu'ici car
+          // `bloodGroup` seul était corrigeable.
+          'weight',
+          'isVaccinated',
           'isValidatedDonor',
           'validationExpiresAt',
           'ownerID',
@@ -175,16 +188,96 @@ export function useAnimalValidation() {
   }
 
   /**
+   * clinicID du Veterinarian courant -- même pattern que `fetchClinicId()`
+   * (useClinicRequest.js) : ne catch pas ses propres erreurs réseau/`@auth`, ne renvoie
+   * `null` QUE pour le cas légitime "ce compte n'a pas encore de clinicID" (voir CLAUDE.md,
+   * section Composables, "Résolution de contexte qui ne catch pas ses propres erreurs").
+   * L'appelant (`upsertClinicOwnerRelation` ci-dessous) reste best-effort de toute façon,
+   * donc une vraie erreur ici est simplement avalée un niveau plus haut -- mais ce helper
+   * lui-même ne doit pas transformer une vraie panne réseau en "pas de clinique".
+   */
+  const fetchVetClinicId = async () => {
+    if (vetClinicId.value) return vetClinicId.value
+
+    const { userId } = await getCurrentUser()
+    if (!userId) return null
+
+    const { data, errors } = await client.models.Veterinarian.get(
+      { id: userId },
+      { selectionSet: ['clinicID'] },
+    )
+    throwIfGraphqlError(errors, 'getVeterinarian')
+
+    if (!data || !data.clinicID) return null
+
+    vetClinicId.value = data.clinicID
+    return vetClinicId.value
+  }
+
+  /**
+   * Rattache un donneur validé à la clinique de son vétérinaire validateur (demande produit
+   * 2026-08-23 — amende Phase 3 : `ClinicOwnerRelation` était jusqu'ici upsertée uniquement
+   * à la clôture `COMPLETED` d'une Mission, c'est-à-dire après un don réel. Un donneur
+   * validé par un vétérinaire rejoint désormais l'annuaire `DonorsView.vue` de SA clinique
+   * dès cette validation, sans attendre un premier don). `useMissionClosure.js` continue par
+   * ailleurs d'upserter la relation à la clôture — utile si ce même donneur donne un jour
+   * dans une AUTRE clinique que celle qui l'a validé.
+   *
+   * Même logique de décision que `useMissionClosure.js` (fonction pure partagée,
+   * `resolveClinicOwnerRelationUpsert`), même traitement d'erreur best-effort et pour la
+   * même raison : au moment de l'appel, `Animal.isValidatedDonor` a déjà été écrit avec
+   * succès -- la validation elle-même a réussi, c'est la partie critique du métier. Un échec
+   * ici est un manque de confort d'annuaire, pas une perte de donnée médicale ; ne doit
+   * jamais faire échouer `validateAnimal`.
+   *
+   * @param {string} ownerID
+   */
+  const upsertClinicOwnerRelation = async (ownerID) => {
+    if (!ownerID) return
+
+    try {
+      const clinicID = await fetchVetClinicId()
+      if (!clinicID) return
+
+      const { data, errors } = await client.models.ClinicOwnerRelation.list({
+        filter: { ownerID: { eq: ownerID } },
+      })
+      throwIfGraphqlError(errors, 'clinicOwnerRelationsByOwnerID')
+
+      const toCreate = resolveClinicOwnerRelationUpsert(data || [], clinicID)
+      if (!toCreate) return
+
+      const { errors: createErrors } = await client.models.ClinicOwnerRelation.create({
+        clinicID: toCreate.clinicID,
+        ownerID,
+        isPrimaryClinic: toCreate.isPrimaryClinic,
+      })
+      throwIfGraphqlError(createErrors, 'createClinicOwnerRelation')
+    } catch (e) {
+      console.error(
+        'Erreur liaison clinique/propriétaire (ClinicOwnerRelation) à la validation vétérinaire :',
+        e,
+      )
+      // Volontairement avalée, pas relancée — voir le commentaire de fonction ci-dessus.
+    }
+  }
+
+  /**
    * Valide un Animal comme donneur pour 1 an à partir de maintenant. N'écrit QUE
    * `isValidatedDonor` et `validationExpiresAt` (validateAnimalDonorSimple, ADR-0002) —
-   * jamais `bloodGroup` ni aucun autre champ.
+   * jamais `bloodGroup` ni aucun autre champ. Rattache aussi (best-effort, voir
+   * `upsertClinicOwnerRelation` ci-dessus) le donneur à la clinique du vétérinaire
+   * validateur.
    *
    * Refuse (throw `BLOOD_GROUP_UNKNOWN`) si l'Animal est trouvé dans `pendingAnimals` et que
    * son `bloodGroup` est absent/`'UNKNOWN'` — CONTEXT.md interdit un Validated Donor à groupe
    * sanguin inconnu. Si l'Animal n'est PAS (plus) dans `pendingAnimals` (ex. déjà validé par
    * un autre vétérinaire entre-temps), on ne peut pas vérifier son `bloodGroup` sans un fetch
    * supplémentaire — on laisse alors la mutation partir telle quelle, comme avant : ce cas
-   * limite reste couvert par la revue humaine de la Mission plutôt que bloqué ici.
+   * limite reste couvert par la revue humaine de la Mission plutôt que bloqué ici. Même
+   * limite pour `upsertClinicOwnerRelation` : sans `knownAnimal.ownerID` (Animal pas/plus
+   * dans `pendingAnimals`), le rattachement clinique est silencieusement sauté -- pas
+   * bloquant (best-effort par nature).
    *
    * @param {string} animalId
    */
@@ -207,6 +300,10 @@ export function useAnimalValidation() {
       throwIfGraphqlError(errors, 'updateAnimal')
 
       pendingAnimals.value = pendingAnimals.value.filter((animal) => animal.id !== animalId)
+
+      if (knownAnimal?.ownerID) {
+        await upsertClinicOwnerRelation(knownAnimal.ownerID)
+      }
     } catch (e) {
       console.error("Erreur validation vétérinaire de l'animal:", e)
       throw e
@@ -216,49 +313,56 @@ export function useAnimalValidation() {
   }
 
   /**
-   * Corrige le `bloodGroup` d'un Animal en attente de validation, saisi par erreur par
-   * l'Owner (Phase 6, section B — nouvelle règle `@auth` au niveau champ sur `bloodGroup`,
-   * voir schema.graphql). N'écrit QUE `bloodGroup` (`updateAnimalBloodGroupSimple`) —
-   * jamais `isValidatedDonor`/`validationExpiresAt`, qui restent le rôle exclusif de
-   * `validateAnimal` ci-dessus.
-   *
-   * Refuse (throw `BLOOD_GROUP_UNKNOWN`, même code que `validateAnimal`) si `bloodGroup`
-   * est absent/`''`/`'UNKNOWN'` — défense en profondeur : `ValidationsView.vue` alimente
-   * déjà son `Select` avec `BloodGroupsBySpecies` (constants/enums.js), qui ne liste jamais
-   * `'UNKNOWN'` comme option choisissable, mais cette fonction reste appelable
-   * indépendamment de ce composant.
-   *
-   * Met à jour `pendingAnimals.value` localement avec la nouvelle valeur au succès — pas de
-   * re-fetch complet : `validateAnimal` lit `bloodGroup` depuis cette même liste locale
-   * (voir plus haut), donc un vétérinaire qui corrige puis valide dans la foulée doit voir
-   * la correction reflétée immédiatement.
+   * Corrige les champs médicaux critiques (`species`/`bloodGroup`/`weight`/`isVaccinated`)
+   * d'un Animal en attente de validation, lors de la "première analyse" du vétérinaire
+   * (ValidationsView.vue) — Phase 6 section B (`bloodGroup` seul à l'origine) étendue aux
+   * trois autres champs (demande produit 2026-08-23, amende ADR-0006) : ces quatre champs
+   * sont désormais verrouillés côté schéma pour l'Owner après la création
+   * (`ownerCreateReadOnlyVetReadUpdate`, `amplify/data/resource.ts`), donc SEUL un
+   * Veterinarian peut encore les corriger. N'écrit jamais `isValidatedDonor`/
+   * `validationExpiresAt`, qui restent le rôle exclusif de `validateAnimal` ci-dessus.
    *
    * @param {string} animalId
-   * @param {string} bloodGroup Nouvelle valeur, non vide et différente de 'UNKNOWN'.
+   * @param {{species?: string, bloodGroup?: string, weight?: number, isVaccinated?: boolean}} fields
+   *   Partiel : seuls les champs présents sont écrits (`Object.keys(fields)`, pas de valeur
+   *   par défaut imposée aux absents). Si `bloodGroup` est fourni, refuse (throw
+   *   `BLOOD_GROUP_UNKNOWN`, même code que `validateAnimal`) une valeur absente/`''`/
+   *   `'UNKNOWN'` — défense en profondeur : `ValidationsView.vue` alimente déjà son `Select`
+   *   avec `BloodGroupsBySpecies` filtré (constants/enums.js), qui ne liste jamais
+   *   `'UNKNOWN'` comme option choisissable, mais cette fonction reste appelable
+   *   indépendamment de ce composant.
+   *
+   *   Met à jour `pendingAnimals.value` localement avec les nouvelles valeurs au succès —
+   *   pas de re-fetch complet : `validateAnimal` lit `bloodGroup` depuis cette même liste
+   *   locale (voir plus haut), donc un vétérinaire qui corrige puis valide dans la foulée
+   *   doit voir la correction reflétée immédiatement.
    */
-  const correctBloodGroup = async (animalId, bloodGroup) => {
-    isCorrectingBloodGroup.value = true
+  const correctCriticalFields = async (animalId, fields) => {
+    isCorrectingCriticalFields.value = true
     try {
-      if (!bloodGroup || bloodGroup === 'UNKNOWN') {
+      if (
+        Object.prototype.hasOwnProperty.call(fields, 'bloodGroup') &&
+        (!fields.bloodGroup || fields.bloodGroup === 'UNKNOWN')
+      ) {
         throw new Error('BLOOD_GROUP_UNKNOWN')
       }
 
       const { errors } = await client.models.Animal.update({
         id: animalId,
-        bloodGroup,
+        ...fields,
       })
 
       throwIfGraphqlError(errors, 'updateAnimal')
 
       const target = pendingAnimals.value.find((animal) => animal.id === animalId)
       if (target) {
-        target.bloodGroup = bloodGroup
+        Object.assign(target, fields)
       }
     } catch (e) {
-      console.error("Erreur correction du groupe sanguin de l'animal:", e)
+      console.error("Erreur correction des champs critiques de l'animal:", e)
       throw e
     } finally {
-      isCorrectingBloodGroup.value = false
+      isCorrectingCriticalFields.value = false
     }
   }
 
@@ -266,10 +370,10 @@ export function useAnimalValidation() {
     pendingAnimals,
     isLoading,
     isValidating,
-    isCorrectingBloodGroup,
+    isCorrectingCriticalFields,
     loadError,
     fetchPendingValidations,
     validateAnimal,
-    correctBloodGroup,
+    correctCriticalFields,
   }
 }

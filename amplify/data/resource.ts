@@ -54,6 +54,23 @@ const ownerReadOnlyVetReadUpdate = (allow: any) => [
   allow.owner().to(['read']),
   allow.group('Veterinarians').to(['read', 'update']),
 ]
+// Owner écrit UNE FOIS à la création puis lecture seule (jamais `update`), correction
+// réservée aux Veterinarians (read+update) -- Animal, champs médicaux critiques
+// (species/bloodGroup/weight/isVaccinated). Demande produit 2026-08-23 : contrairement à
+// `ownerReadOnlyVetReadUpdate` ci-dessus (Owner ne les écrit JAMAIS), ces champs sont
+// nécessairement saisis par l'Owner à la création d'un Animal (RegisterOwnerView.vue/
+// AddAnimalView.vue) -- `.to(['create', 'read'])` couvre ce besoin sans jamais rouvrir
+// `update`. Limite assumée, différente de "immuable seulement après validation" demandé
+// initialement : `.authorization()` Gen2 ne peut pas conditionner une règle sur la valeur
+// d'un autre champ (`isValidatedDonor`, même limite documentée sur ADR-0002 à 0006) --
+// verrouiller dès la création plutôt qu'à la validation est le seul équivalent
+// déclaratif, cohérent avec le nouveau rôle du vétérinaire lors de sa "première analyse"
+// (ValidationsView.vue) : il corrige/confirme ces champs avant de valider, l'Owner ne les
+// retouche plus après coup.
+const ownerCreateReadOnlyVetReadUpdate = (allow: any) => [
+  allow.owner().to(['create', 'read']),
+  allow.group('Veterinarians').to(['read', 'update']),
+]
 
 export const schema = a.schema({
   // ==========================================================
@@ -168,36 +185,30 @@ export const schema = a.schema({
   Animal: a
     .model({
       name: a.string().required(),
-      species: a.ref('Species').required(),
+      // `.authorization()` de champ (REMPLACE, pour ces quatre champs -- species/bloodGroup/
+      // weight/isVaccinated -- les règles de type ci-dessous) : demande produit 2026-08-23,
+      // amende ADR-0006. Owner : `create+read` (les saisit à la création d'un Animal,
+      // RegisterOwnerView.vue/AddAnimalView.vue) mais plus jamais `update` -- avant ce
+      // correctif, `bloodGroup` restait aussi ouvert en édition Owner (AnimalsView.vue), ce
+      // qui permettait de défaire silencieusement une correction vétérinaire. Veterinarians :
+      // `read+update`, pour corriger/confirmer ces champs lors de la "première analyse"
+      // précédant la validation (ValidationsView.vue, étendu pour couvrir les quatre plutôt
+      // que `bloodGroup` seul). Voir `ownerCreateReadOnlyVetReadUpdate` en tête de fichier
+      // pour la limite assumée (verrouillage dès la création, pas seulement après
+      // validation -- `.authorization()` ne peut pas conditionner sur `isValidatedDonor`).
+      species: a.ref('Species').required().authorization(ownerCreateReadOnlyVetReadUpdate),
       breed: a.string(),
       // Sexe de l'animal (CdC §2.1) -- informatif uniquement pour ce pilote, PAS un critère
       // d'éligibilité (décision produit) : ne pas le référencer dans eligibility-service.js.
       // Valeur libre plutôt qu'un enum dédié pour ce pilote ('MALE'/'FEMALE', voir AnimalSex
       // dans constants/enums.js) ; pas de `.authorization()` dédiée, hérite des règles de type
-      // ci-dessous (même bord Owner que breed/weight).
+      // ci-dessous (même bord Owner que breed).
       sex: a.string(),
       birthDate: a.date(),
-      weight: a.float().required(),
+      weight: a.float().required().authorization(ownerCreateReadOnlyVetReadUpdate),
 
-      // `.authorization()` de champ (REMPLACE, pour ce champ, les règles de type ci-dessous --
-      // voir l'en-tête de fichier). Choix DÉLIBÉRÉMENT différent du pattern ADR-0002/0003 (Owner
-      // : [read] seul) : contrairement à lastDonationDate/isValidatedDonor/validationExpiresAt
-      // (jamais écrits par l'Owner), bloodGroup EST déjà écrit par l'Owner à la création
-      // (AddAnimalView.vue/useAnimals.js createNewAnimal) et en édition (AnimalsView.vue/
-      // useAnimals.js updateAnimalDetails) -- une règle Owner restreinte à [read] casserait ces
-      // deux écritures existantes. La règle owner reste donc SANS restriction d'opérations.
-      // Ajout : Veterinarians en read+update, pour permettre à un vétérinaire de corriger un
-      // bloodGroup à UNKNOWN saisi par erreur par l'Owner, avant validation (ADR-0006). Même
-      // compromis assumé qu'ADR-0002/0003/0006 : le Transformer ne peut pas conditionner cette
-      // règle sur l'état isValidatedDonor de l'Animal -- un Veterinarian pourrait en théorie
-      // aussi modifier le bloodGroup d'un Animal DÉJÀ validé sans re-validation automatique.
-      // Acceptable pour ce pilote (Veterinarians de confiance) ; côté UI, ValidationsView.vue
-      // n'expose la correction que pour les Animals en attente de validation.
-      bloodGroup: a
-        .string()
-        .required()
-        .authorization((allow) => [allow.owner(), allow.group('Veterinarians').to(['read', 'update'])]),
-      isVaccinated: a.boolean().required(),
+      bloodGroup: a.string().required().authorization(ownerCreateReadOnlyVetReadUpdate),
+      isVaccinated: a.boolean().required().authorization(ownerCreateReadOnlyVetReadUpdate),
       isSterilized: a.boolean(),
 
       // `.authorization()` de champ (REMPLACE, pour ce champ, les règles de type ci-dessous) :

@@ -57,23 +57,6 @@ import { throwIfGraphqlError } from '@/services/graphql-error-service'
  * vue à l'identique) — ne pas en inventer une ici serait une extension de périmètre non
  * demandée par la sous-tâche 7.7.
  */
-/**
- * Phase 7 (revue Lead Dev) : `completeOwnerRegistration` crée TOUJOURS un
- * `OwnerAvailability` par défaut (samedi 9h-12h), que `data.animal_name` soit
- * renseigné ou non -- seul l'Animal (et ses valeurs par défaut isVaccinated/
- * donationFrequency) dépend de `animal_name`. La condition initiale de
- * `VerifyEmailView.vue` (`role === 'owner' && animal_name`) laissait donc un
- * Owner sans animal recevoir ce créneau fantôme sans jamais voir l'écran de
- * transparence. Fonction pure exportée pour rester testable sans monter de
- * composant (`VerifyEmailView.vue` fait `t(...)`, jamais cette fonction).
- *
- * @param {object} data - `tempRegistrationData` (voir `completeRegistration`).
- * @returns {boolean}
- */
-export function shouldShowExpressDefaultsInfo(data) {
-  return data?.role === 'owner'
-}
-
 export function useRegistrationCompletion() {
   const client = generateClient()
 
@@ -96,7 +79,7 @@ export function useRegistrationCompletion() {
       address: data.address || '',
       latitude: parseFloat(data.latitude || 0),
       longitude: parseFloat(data.longitude || 0),
-      maxTravelDistance: 50,
+      maxTravelDistance: 5,
       totalDonations: 0,
     })
 
@@ -112,15 +95,28 @@ export function useRegistrationCompletion() {
         breed: data.animal_breed || '',
         // Sous-tâche 6.8 : champ informatif uniquement, optionnel (voir schema.graphql).
         sex: data.animal_sex || null,
+        // Bug réel trouvé en test manuel : `animal_birthDate` était collecté par
+        // RegisterOwnerView.vue (form d'inscription express) mais jamais transmis
+        // ici -- tout Animal créé à l'inscription se retrouvait avec `birthDate: null`,
+        // donc un âge affiché en "?" (`calculateAge()`, useAnimals.js) quel que soit ce
+        // qui avait été saisi. Même repli que `createNewAnimal` (useAnimals.js) :
+        // chaîne vide traitée comme "non renseigné".
+        birthDate: data.animal_birthDate ? data.animal_birthDate : null,
         weight: parseFloat(data.animal_weight || 0),
         // Pas d'entrée d'enum dédiée pour 'UNKNOWN' dans src/constants/enums.js (les
         // groupes sanguins connus sont listés par espèce dans BloodGroupsBySpecies,
         // sans valeur "inconnu") — littéral laissé tel quel, hors périmètre de la
         // substitution Species/DonationFrequency demandée pour la Phase 7.7/R-14.
         bloodGroup: data.blood_group || 'UNKNOWN',
-        isVaccinated: true,
-        isSterilized: false,
-        donationFrequency: DonationFrequency.ASAP,
+        // Harmonisation avec AddAnimalView.vue (demande produit 2026-08-23) : ces trois
+        // valeurs étaient fabriquées en silence (isVaccinated forcé à true en particulier,
+        // jamais réellement demandé au propriétaire) -- RegisterOwnerView.vue expose
+        // désormais les mêmes champs qu'AddAnimalView.vue, mêmes défauts (false/false/ASAP)
+        // si l'Owner ne les touche pas, plutôt que de prétendre un statut vaccinal jamais
+        // confirmé.
+        isVaccinated: data.animal_isVaccinated || false,
+        isSterilized: data.animal_isSterilized || false,
+        donationFrequency: data.animal_donationFrequency || DonationFrequency.ASAP,
       })
 
       throwIfGraphqlError(animalErrors, 'createAnimal')

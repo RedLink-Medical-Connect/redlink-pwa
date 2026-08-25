@@ -1,0 +1,167 @@
+import { Species } from '@/constants/enums.js'
+
+// Listes statiques de races reconnues (FCI pour le chien, LOOF/FIFe pour le chat) --
+// demande produit 2026-08-23 : remplacer le champ race en texte libre par un menu
+// déroulant avec recherche (pattern AddressAutocomplete.vue, voir BreedAutocomplete.vue),
+// pour éviter les doublons de saisie libre ("Labrador"/"labrador"/"Labrador Retriever").
+// Pas d'appel réseau : filtrage entièrement côté client sur ces listes.
+//
+// Ces listes visent une couverture large des races courantes en clientèle vétérinaire
+// française, pas l'exhaustivité stricte du standard FCI (~360 races canines) -- une race
+// absente reste saisissable via l'option 'Autre' en fin de liste, qui laisse alors le champ
+// texte libre ouvert (voir BreedAutocomplete.vue).
+export const DogBreeds = Object.freeze([
+  'Affenpinscher',
+  'Airedale Terrier',
+  'Akita Inu',
+  'Alaskan Malamute',
+  'American Staffordshire Terrier',
+  'Australian Shepherd',
+  'Basenji',
+  'Basset Bleu de Gascogne',
+  'Basset Fauve de Bretagne',
+  'Basset Hound',
+  'Beagle',
+  'Bearded Collie',
+  'Beauceron',
+  'Bedlington Terrier',
+  'Berger Allemand',
+  'Berger Australien',
+  'Berger Belge Malinois',
+  'Berger Belge Tervueren',
+  'Berger Blanc Suisse',
+  'Berger de Brie',
+  'Berger des Pyrénées',
+  'Berger Picard',
+  'Bichon Frisé',
+  'Bichon Havanais',
+  'Bichon Maltais',
+  'Border Collie',
+  'Border Terrier',
+  'Boston Terrier',
+  'Bouledogue Français',
+  'Bouvier Bernois',
+  'Bouvier des Flandres',
+  'Boxer',
+  'Braque Allemand',
+  'Braque de Weimar',
+  'Braque Français',
+  'Briard',
+  'Bull Terrier',
+  'Bulldog Anglais',
+  'Cairn Terrier',
+  'Caniche',
+  'Cavalier King Charles Spaniel',
+  'Chihuahua',
+  'Chow-Chow',
+  'Cocker Anglais',
+  'Cocker Américain',
+  'Colley (Colley à poil long)',
+  'Coton de Tuléar',
+  'Dalmatien',
+  'Dobermann',
+  'Dogue Allemand',
+  'Dogue de Bordeaux',
+  'Épagneul Breton',
+  'Épagneul Français',
+  'Fox Terrier',
+  'Golden Retriever',
+  'Grand Bleu de Gascogne',
+  'Griffon Bruxellois',
+  'Groenendael',
+  'Husky Sibérien',
+  'Jack Russell Terrier',
+  'Jagdterrier',
+  'Kerry Blue Terrier',
+  'King Charles Spaniel',
+  'Labrador Retriever',
+  'Lévrier Afghan',
+  'Lévrier Espagnol (Galgo)',
+  'Lhassa Apso',
+  'Malinois',
+  'Pékinois',
+  'Pinscher Nain',
+  'Podenco Ibicenco',
+  'Pointer Anglais',
+  'Rottweiler',
+  'Saint-Bernard',
+  'Samoyède',
+  'Schnauzer Géant',
+  'Schnauzer Moyen',
+  'Schnauzer Nain',
+  'Setter Anglais',
+  'Setter Gordon',
+  'Setter Irlandais',
+  'Shar Peï',
+  'Shetland Sheepdog',
+  'Shiba Inu',
+  'Shih Tzu',
+  'Spitz Allemand',
+  'Spitz Nain (Poméranien)',
+  'Springer Anglais',
+  'Staffordshire Bull Terrier',
+  'Teckel',
+  'Terre-Neuve',
+  'Whippet',
+  'Yorkshire Terrier',
+  // Toujours en dernier -- voir BreedAutocomplete.vue (bascule vers un champ texte libre).
+  'Autre',
+])
+
+export const CatBreeds = Object.freeze([
+  'Abyssin',
+  'American Curl',
+  'American Shorthair',
+  'Angora Turc',
+  'Bengal',
+  'Birman (Sacré de Birmanie)',
+  'Bleu Russe',
+  'Bombay',
+  'British Longhair',
+  'British Shorthair',
+  'Burmese',
+  'Chartreux',
+  'Chat des Forêts Norvégiennes',
+  'Chat Sans Poil (Sphynx)',
+  'Cornish Rex',
+  'Devon Rex',
+  'Européen (Chat de Gouttière)',
+  'Exotic Shorthair',
+  'Himalayen',
+  'Maine Coon',
+  'Manx',
+  'Munchkin',
+  'Nebelung',
+  'Ocicat',
+  'Oriental',
+  'Persan',
+  'Peterbald',
+  'Ragdoll',
+  'Sacré de Birmanie',
+  'Savannah',
+  'Scottish Fold',
+  'Scottish Straight',
+  'Selkirk Rex',
+  'Siamois',
+  'Sibérien',
+  'Singapura',
+  'Somali',
+  'Sphynx',
+  'Tonkinois',
+  // Toujours en dernier -- voir BreedAutocomplete.vue (bascule vers un champ texte libre).
+  'Autre',
+])
+
+/**
+ * Liste de races pour une espèce donnée. Fonction (pas un simple objet indexé) pour
+ * rester cohérente avec `BloodGroupsBySpecies[species]`/le repli `|| []` déjà utilisé
+ * partout ailleurs dans le repo pour une espèce absente/non reconnue.
+ *
+ * @param {string} species Species.DOG ou Species.CAT
+ * @returns {readonly string[]}
+ */
+export const breedsForSpecies = (species) => {
+  if (species === Species.DOG) return DogBreeds
+  if (species === Species.CAT) return CatBreeds
+  return []
+}

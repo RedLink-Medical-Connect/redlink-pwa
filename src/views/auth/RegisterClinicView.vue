@@ -70,12 +70,13 @@ const handleRegister = async () => {
     isLoading.value = true
     auth.clearError()
 
-    await auth.register(
+    const success = await auth.register(
       form.value.email,
       password.value,
       `${form.value.firstname} ${form.value.lastname}`,
       'vet',
     )
+    if (!success) return
 
     const payload = { ...form.value, role: 'vet' }
 

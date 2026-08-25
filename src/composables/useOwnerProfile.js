@@ -44,7 +44,7 @@ export function useOwnerProfile() {
     address: '',
     latitude: null,
     longitude: null,
-    maxTravelDistance: 50,
+    maxTravelDistance: 5,
   })
 
   /**

@@ -50,9 +50,38 @@ export const DonorStatus = Object.freeze({
   NEVER_VALIDATED: 'NEVER_VALIDATED',
 })
 
-// Groupes sanguins par espèce (non typés côté schéma, mais centralisés ici)
+// Groupes sanguins par espèce (non typés côté schéma, mais centralisés ici).
+// Source : Recap_Don_Sang_Veterinaire.pdf (repo owner, vérifié 2026-08-23) — DEA 1.1 est
+// le seul groupe canin réellement typé en pratique courante (le plus sensible
+// cliniquement, ~30% des chiens) ; DEA 4 est le donneur universel canin (présent chez
+// ~98% des chiens). Les autres groupes DEA (1.2, 3, 5, 6, 7, Dal, Kai...) entraînent des
+// réactions moins sévères et ne sont pas typés en routine — volontairement absents de
+// cette liste plutôt que de fragmenter le matching sur des groupes que personne ne teste
+// (isBloodCompatible fait une comparaison stricte, sans matrice de compatibilité).
+// Système félin AB : A (90%), B (10%), AB (<1%) — déjà correct, inchangé.
+// 'UNKNOWN' explicite dans les deux listes (Phase "Beta hardening") : un Owner qui ignore
+// réellement le groupe sanguin de son animal doit pouvoir le déclarer plutôt que de forcer
+// une valeur au hasard — `bloodGroup` reste un champ obligatoire (sous-tâche 6.1), mais
+// "je ne sais pas" en est désormais une réponse valide et explicite. `isValidatedDonor`
+// refuse toujours la validation vétérinaire tant que ce groupe reste 'UNKNOWN'
+// (useAnimalValidation.js).
 export const BloodGroupsBySpecies = Object.freeze({
-  [Species.DOG]: ['DEA 1.1-', 'DEA 1.1+', 'Dal', 'Kai'],
-  [Species.CAT]: ['A', 'B', 'AB'],
+  [Species.DOG]: ['DEA 1.1+', 'DEA 1.1-', 'DEA 4', 'UNKNOWN'],
+  [Species.CAT]: ['A', 'B', 'AB', 'UNKNOWN'],
 })
+
+/**
+ * Libellé affiché pour une valeur de `BloodGroupsBySpecies` — seule 'UNKNOWN' a besoin
+ * d'une traduction (les autres valeurs, ex. 'DEA 1.1+'/'A', sont la même notation partout).
+ * Prend le libellé déjà traduit en paramètre plutôt que d'appeler `useI18n()` ici : cette
+ * fonction est utilisée dans des slots de template (`#value`/`#option` de `Select`), pas
+ * dans un composable — même raisonnement que `mapValidationErrorKey` (composables/) pour
+ * rester une fonction pure, testable sans monter de composant.
+ *
+ * @param {string} value
+ * @param {string} unknownLabel Le résultat déjà traduit de `$t('dashboard.owner.animals.form.blood_group_unknown_option')`.
+ * @returns {string}
+ */
+export const formatBloodGroupLabel = (value, unknownLabel) =>
+  value === 'UNKNOWN' ? unknownLabel : value
 

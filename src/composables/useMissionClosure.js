@@ -2,6 +2,7 @@ import { ref } from 'vue'
 import { generateClient } from 'aws-amplify/data'
 import { MissionStatus } from '@/constants/enums'
 import { throwIfGraphqlError } from '@/services/graphql-error-service'
+import { resolveClinicOwnerRelationUpsert } from '@/services/clinic-owner-relation-service'
 
 // Phase 8, sous-tâche 5 (lot 3/3) : migré sur le client Gen2 (`aws-amplify/data`,
 // `client.models.Mission.*`/`client.models.Animal.*`/`client.models.ClinicOwnerRelation.*`/
@@ -42,44 +43,6 @@ function todayAsAWSDate(now = new Date()) {
   const month = String(now.getMonth() + 1).padStart(2, '0')
   const day = String(now.getDate()).padStart(2, '0')
   return `${year}-${month}-${day}`
-}
-
-/**
- * Décide si une `ClinicOwnerRelation` doit être créée pour (clinicID, ownerID), et avec
- * quelle valeur d'`isPrimaryClinic`, à partir de `existingRelations` — la liste COMPLÈTE des
- * relations déjà existantes pour cet Owner (toutes cliniques confondues, telle que renvoyée
- * par `clinicOwnerRelationsByOwnerID`). Fonction pure, testable sans mock GraphQL (même
- * convention que `mapAcceptMissionError`/`mapValidationErrorKey` ailleurs dans ce repo : la
- * décision go/no-go sort du corps async pour rester testable directement).
- *
- * - Si une relation existe déjà pour CE `clinicID` exact : `null` — no-op, pas de doublon
- *   (un donneur qui a déjà donné dans cette clinique par le passé ne doit pas en récolter
- *   une deuxième).
- * - Sinon, à créer : `isPrimaryClinic: true` seulement si `existingRelations` est vide (la
- *   toute première relation de cet Owner, toutes cliniques confondues) ; `false` sinon.
- *   Simplification pilote assumée (voir CLAUDE.md/roadmap Phase 3) : il n'existe aucun
- *   mécanisme en V1 pour changer `isPrimaryClinic` après coup (ex. si l'Owner déménage et
- *   qu'une autre clinique devient sa clinique principale) — la première clinique où un don a
- *   lieu reste "primaire" indéfiniment pour ce pilote.
- *
- * Course acceptée, non résolue (relevé en Lead Dev review) : ceci lit `existingRelations`
- * puis décide, sans écriture atomique conditionnelle (contrairement à `acceptMission`,
- * ADR-0001) — pas de contrainte d'unicité composite `(clinicID, ownerID)` au niveau du
- * schéma (seulement deux GSI séparés). Si deux Missions du même Owner dans la même Clinic
- * sont closes COMPLETED à quelques instants d'écart, les deux lectures peuvent voir "aucune
- * relation" et créer chacune une ligne — un doublon d'annuaire, pas une perte de donnée.
- * Accepté pour ce pilote : scénario mono-vétérinaire à faible fréquence, pas la course
- * multi-Owners concurrente qu'ADR-0001 corrige.
- *
- * @param {Array<{clinicID: string, isPrimaryClinic: boolean|null}>} existingRelations
- * @param {string} clinicID
- * @returns {{clinicID: string, isPrimaryClinic: boolean}|null}
- */
-export function resolveClinicOwnerRelationUpsert(existingRelations, clinicID) {
-  const alreadyLinkedToThisClinic = existingRelations.some((r) => r.clinicID === clinicID)
-  if (alreadyLinkedToThisClinic) return null
-
-  return { clinicID, isPrimaryClinic: existingRelations.length === 0 }
 }
 
 /**

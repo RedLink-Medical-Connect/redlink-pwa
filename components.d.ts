@@ -22,6 +22,7 @@ declare module 'vue' {
     AppMobileMenu: typeof import('./src/components/common/AppMobileMenu.vue')['default']
     Avatar: typeof import('primevue/avatar')['default']
     Badge: typeof import('primevue/badge')['default']
+    BreedAutocomplete: typeof import('./src/components/common/BreedAutocomplete.vue')['default']
     Button: typeof import('primevue/button')['default']
     Calendar: typeof import('primevue/calendar')['default']
     Card: typeof import('primevue/card')['default']

@@ -51,4 +51,13 @@ export default defineConfig({
       '@': fileURLToPath(new URL('./src', import.meta.url)),
     },
   },
+  server: {
+    watch: {
+      // .amplify/artifacts (sortie de build CDK, ampx sandbox) contient des milliers de
+      // fichiers générés (assets Lambda, cdk.out) qui n'ont aucun rapport avec le code
+      // source Vue/Vite -- les regarder épuise inutilement les inotify watchers du système
+      // (ENOSPC réel constaté). Ni du code applicatif ni un déclencheur légitime de HMR.
+      ignored: ['**/.amplify/**'],
+    },
+  },
 })

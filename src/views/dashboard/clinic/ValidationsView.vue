@@ -1,12 +1,12 @@
 <script setup>
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useToast } from 'primevue/usetoast'
 import DashboardSidebar from '@/components/dashboard/DashboardSidebar.vue'
 import {
   useAnimalValidation,
   mapValidationErrorKey,
-  mapBloodGroupCorrectionErrorKey,
+  mapCriticalFieldsCorrectionErrorKey,
 } from '@/composables/useAnimalValidation.js'
 import { Species, BloodGroupsBySpecies } from '@/constants/enums'
 
@@ -17,11 +17,11 @@ const {
   pendingAnimals,
   isLoading,
   isValidating,
-  isCorrectingBloodGroup,
+  isCorrectingCriticalFields,
   loadError,
   fetchPendingValidations,
   validateAnimal,
-  correctBloodGroup,
+  correctCriticalFields,
 } = useAnimalValidation()
 
 // `isValidating` (composable) est un booléen GLOBAL partagé par tout appel à
@@ -31,14 +31,30 @@ const {
 // laisser un second clic déclencher un appel concurrent sur ce ref partagé.
 const validatingAnimalId = ref(null)
 
-// Même raisonnement que `validatingAnimalId` ci-dessus, mais pour `correctBloodGroup`
-// (ref `isCorrectingBloodGroup` distincte, elle aussi globale au composable).
-const correctingAnimalId = ref(null)
+const speciesOptions = [
+  { label: t('request.species.dog'), value: Species.DOG },
+  { label: t('request.species.cat'), value: Species.CAT },
+]
 
-// Id de l'Animal dont la ligne affiche actuellement l'éditeur inline de `bloodGroup`
-// (au plus une ligne à la fois) et valeur en cours de saisie dans son `Select`.
-const editingBloodGroupId = ref(null)
-const newBloodGroup = ref(null)
+// Dialogue de correction ("première analyse", demande produit 2026-08-23, amende
+// ADR-0006) : remplace l'ancien éditeur inline bloodGroup seul (Phase 6 section B),
+// étendu à species/weight/isVaccinated -- ces quatre champs sont désormais verrouillés
+// côté schéma pour l'Owner après la création (`ownerCreateReadOnlyVetReadUpdate`,
+// amplify/data/resource.ts), donc SEUL un Veterinarian peut encore les corriger, ici,
+// avant de valider l'Animal comme donneur.
+const editingAnimal = ref(null)
+const editForm = ref({ species: null, bloodGroup: null, weight: null, isVaccinated: false })
+
+// Options du Select alimentées par BloodGroupsBySpecies (constants/enums.js), jamais de
+// liste en dur (voir R-15, BACKLOG.md, pour l'exemple précis de dette que ça évite) —
+// dépend de l'espèce en cours d'édition dans le dialogue, pas un computed global.
+// 'UNKNOWN' exclu délibérément ici (contrairement aux Selects owner) : ce dialogue sert À
+// corriger un bloodGroup inconnu vers une vraie valeur -- `correctCriticalFields`
+// (useAnimalValidation.js) rejette de toute façon 'UNKNOWN' comme correction, l'exclure de
+// la liste évite un aller-retour d'erreur inutile pour le vétérinaire.
+const bloodGroupOptions = computed(
+  () => (BloodGroupsBySpecies[editForm.value.species] || []).filter((group) => group !== 'UNKNOWN'),
+)
 
 onMounted(() => {
   fetchPendingValidations()
@@ -66,46 +82,41 @@ const handleValidate = async (animal) => {
   }
 }
 
-// Options du Select alimentées par BloodGroupsBySpecies (constants/enums.js), jamais de
-// liste en dur (voir R-15, BACKLOG.md, pour l'exemple précis de dette que ça évite) —
-// dépend de l'espèce de la ligne éditée, pas un computed global.
-const bloodGroupOptionsFor = (animal) => BloodGroupsBySpecies[animal.species] || []
-
-const startEditBloodGroup = (animal) => {
-  editingBloodGroupId.value = animal.id
-  // Pré-remplit avec la valeur actuelle SAUF si elle est déjà 'UNKNOWN'/vide (le cas que
-  // cette action sert justement à corriger) : dans ce cas on laisse le Select vide plutôt
-  // que de proposer une valeur invalide comme pré-sélection.
-  newBloodGroup.value =
-    animal.bloodGroup && animal.bloodGroup !== 'UNKNOWN' ? animal.bloodGroup : null
+const openEditDialog = (animal) => {
+  editingAnimal.value = animal
+  editForm.value = {
+    species: animal.species,
+    // Pré-remplit avec la valeur actuelle SAUF si elle est déjà 'UNKNOWN'/vide (le cas que
+    // ce dialogue sert justement à corriger) : dans ce cas on laisse le Select vide plutôt
+    // que de proposer une valeur invalide comme pré-sélection.
+    bloodGroup: animal.bloodGroup && animal.bloodGroup !== 'UNKNOWN' ? animal.bloodGroup : null,
+    weight: animal.weight,
+    isVaccinated: animal.isVaccinated,
+  }
 }
 
-const cancelEditBloodGroup = () => {
-  editingBloodGroupId.value = null
-  newBloodGroup.value = null
+const closeEditDialog = () => {
+  editingAnimal.value = null
 }
 
-const handleSaveBloodGroup = async (animal) => {
-  correctingAnimalId.value = animal.id
+const handleSaveCorrection = async () => {
+  const animal = editingAnimal.value
   try {
-    await correctBloodGroup(animal.id, newBloodGroup.value)
+    await correctCriticalFields(animal.id, { ...editForm.value })
     toast.add({
       severity: 'success',
       summary: t('common.success'),
-      detail: t('dashboard.validations.toasts.blood_group_corrected', { name: animal.name }),
+      detail: t('dashboard.validations.toasts.critical_fields_corrected', { name: animal.name }),
       life: 3000,
     })
-    editingBloodGroupId.value = null
-    newBloodGroup.value = null
+    closeEditDialog()
   } catch (e) {
     toast.add({
       severity: 'error',
       summary: t('common.error'),
-      detail: t(mapBloodGroupCorrectionErrorKey(e.message)),
+      detail: t(mapCriticalFieldsCorrectionErrorKey(e.message)),
       life: 4000,
     })
-  } finally {
-    correctingAnimalId.value = null
   }
 }
 </script>
@@ -193,47 +204,11 @@ const handleSaveBloodGroup = async (animal) => {
 
             <Column :header="$t('dashboard.validations.columns.blood_group')">
               <template #body="slotProps">
-                <div v-if="editingBloodGroupId === slotProps.data.id" class="flex items-center gap-2">
-                  <Select
-                    v-model="newBloodGroup"
-                    :options="bloodGroupOptionsFor(slotProps.data)"
-                    :placeholder="$t('dashboard.owner.animals.form.blood_group_placeholder')"
-                    class="!w-40 !bg-zinc-50 dark:!bg-zinc-950 !border-zinc-300 dark:!border-zinc-800"
-                  />
-                  <Button
-                    :label="$t('common.save')"
-                    icon="pi pi-check"
-                    size="small"
-                    text
-                    :loading="correctingAnimalId === slotProps.data.id"
-                    :disabled="!newBloodGroup"
-                    @click="handleSaveBloodGroup(slotProps.data)"
-                  />
-                  <Button
-                    :label="$t('common.cancel')"
-                    icon="pi pi-times"
-                    size="small"
-                    text
-                    severity="secondary"
-                    :disabled="correctingAnimalId === slotProps.data.id"
-                    @click="cancelEditBloodGroup"
-                  />
-                </div>
-                <div v-else class="flex items-center gap-2">
-                  <Tag
-                    :value="slotProps.data.bloodGroup"
-                    severity="info"
-                    class="!bg-zinc-100 dark:!bg-zinc-800 !text-zinc-600 dark:!text-zinc-300 !border !border-zinc-200 dark:!border-zinc-700"
-                  />
-                  <Button
-                    :label="$t('common.edit')"
-                    icon="pi pi-pencil"
-                    size="small"
-                    text
-                    :disabled="isCorrectingBloodGroup"
-                    @click="startEditBloodGroup(slotProps.data)"
-                  />
-                </div>
+                <Tag
+                  :value="slotProps.data.bloodGroup"
+                  severity="info"
+                  class="!bg-zinc-100 dark:!bg-zinc-800 !text-zinc-600 dark:!text-zinc-300 !border !border-zinc-200 dark:!border-zinc-700"
+                />
               </template>
             </Column>
 
@@ -248,23 +223,93 @@ const handleSaveBloodGroup = async (animal) => {
 
             <Column :header="$t('dashboard.validations.columns.action')">
               <template #body="slotProps">
-                <Button
-                  :label="$t('dashboard.validations.validate_btn')"
-                  icon="pi pi-check"
-                  size="small"
-                  class="!bg-[#ff3b4e] !border-[#ff3b4e]"
-                  :loading="validatingAnimalId === slotProps.data.id"
-                  :disabled="
-                    (isValidating && validatingAnimalId !== slotProps.data.id) ||
-                    editingBloodGroupId === slotProps.data.id
-                  "
-                  @click="handleValidate(slotProps.data)"
-                />
+                <div class="flex items-center gap-2">
+                  <Button
+                    :label="$t('dashboard.validations.edit_btn')"
+                    icon="pi pi-pencil"
+                    size="small"
+                    text
+                    :disabled="isValidating || isCorrectingCriticalFields"
+                    @click="openEditDialog(slotProps.data)"
+                  />
+                  <Button
+                    :label="$t('dashboard.validations.validate_btn')"
+                    icon="pi pi-check"
+                    size="small"
+                    class="!bg-[#ff3b4e] !border-[#ff3b4e]"
+                    :loading="validatingAnimalId === slotProps.data.id"
+                    :disabled="isValidating && validatingAnimalId !== slotProps.data.id"
+                    @click="handleValidate(slotProps.data)"
+                  />
+                </div>
               </template>
             </Column>
           </DataTable>
         </div>
       </div>
     </div>
+
+    <!-- Dialogue "première analyse" (demande produit 2026-08-23, amende ADR-0006) : seul
+         moyen désormais de corriger species/bloodGroup/weight/isVaccinated, verrouillés
+         pour l'Owner après la création (amplify/data/resource.ts,
+         ownerCreateReadOnlyVetReadUpdate). -->
+    <Dialog
+      :visible="!!editingAnimal"
+      modal
+      :header="editingAnimal ? $t('dashboard.validations.dialog.title', { name: editingAnimal.name }) : ''"
+      :style="{ width: '450px' }"
+      @update:visible="closeEditDialog"
+    >
+      <p class="text-sm text-zinc-500 dark:text-zinc-400 mb-4">
+        {{ $t('dashboard.validations.dialog.subtitle') }}
+      </p>
+      <div v-if="editingAnimal" class="flex flex-col gap-4">
+        <div class="grid grid-cols-2 gap-2">
+          <Select
+            v-model="editForm.species"
+            :options="speciesOptions"
+            option-label="label"
+            option-value="value"
+            :aria-label="$t('dashboard.owner.animals.form.species')"
+          />
+          <InputNumber
+            v-model="editForm.weight"
+            suffix=" kg"
+            :placeholder="$t('dashboard.owner.animals.form.weight')"
+            :min-fraction-digits="1"
+            :aria-label="$t('dashboard.owner.animals.form.weight')"
+          />
+        </div>
+        <Select
+          v-model="editForm.bloodGroup"
+          :options="bloodGroupOptions"
+          :placeholder="$t('dashboard.owner.animals.form.blood_group_placeholder')"
+          :aria-label="$t('dashboard.owner.animals.form.blood_group')"
+        />
+        <div class="flex items-center gap-2">
+          <Checkbox v-model="editForm.isVaccinated" :binary="true" input-id="val-vaccinated" />
+          <label for="val-vaccinated" class="cursor-pointer select-none">{{
+            $t('dashboard.owner.animals.form.vaccinated')
+          }}</label>
+        </div>
+      </div>
+      <template #footer>
+        <Button
+          :label="$t('common.cancel')"
+          text
+          severity="secondary"
+          :disabled="isCorrectingCriticalFields"
+          @click="closeEditDialog"
+        />
+        <Button
+          :label="$t('common.save')"
+          icon="pi pi-check"
+          :loading="isCorrectingCriticalFields"
+          :disabled="!editForm.bloodGroup"
+          class="!bg-[#ff3b4e] !border-[#ff3b4e]"
+          @click="handleSaveCorrection"
+        />
+      </template>
+    </Dialog>
   </div>
 </template>

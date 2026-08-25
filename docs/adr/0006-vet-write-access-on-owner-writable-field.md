@@ -63,3 +63,44 @@ multi-tenant hostile — voir ADR-0002) ; mitigé côté UI uniquement
 déjà validés) et documenté par des tests dédiés (`schema.test.js`,
 `useAnimalValidation.test.js`) plutôt que masqué. À reconsidérer si le pilote s'élargit
 à des cliniques externes moins contrôlées.
+
+## Décision révisée (amendement, 2026-08-24)
+
+Demande produit explicite (2026-08-23, repo owner) : "une fois validé par le vétérinaire
+les informations critiques (groupe sanguin, etc.) [doivent être] immuables par l'Owner".
+La prémisse de la décision d'origine ci-dessus ("`bloodGroup` EST déjà écrit par l'Owner
+à la création ET en édition, donc `owner` doit rester sans restriction d'opérations")
+reste vraie à la création, mais plus en édition : l'édition Owner de `bloodGroup` (et,
+par le même raisonnement médical, de `species`/`weight`/`isVaccinated` — les champs que
+le vétérinaire revoit lors de sa "première analyse" avant validation, voir
+`ValidationsView.vue`) est désormais explicitement ce qu'on veut empêcher, pas un flux à
+préserver.
+
+Traduction Gen2 (`amplify/data/resource.ts`, `ownerCreateReadOnlyVetReadUpdate`) :
+
+```graphql
+bloodGroup: String!
+  @auth(rules: [
+    { allow: owner, operations: [create, read] },
+    { allow: groups, groups: ["Veterinarians"], operations: [read, update] }
+  ])
+# même règle sur species/weight/isVaccinated
+```
+
+`operations: [create, read]` (au lieu d'aucune restriction) est le seul équivalent
+déclaratif disponible pour "l'Owner ne peut plus modifier ce champ" — Gen2 ne peut
+toujours pas conditionner sur `isValidatedDonor` (même limite que ci-dessus, non résolue
+par cet amendement). Verrouiller dès la création plutôt que seulement après validation
+est donc une simplification assumée, pas la sémantique demandée à la lettre : un Owner
+ne peut de toute façon plus jamais corriger une faute de frappe sur ces champs lui-même
+une fois l'Animal créé, validé ou non — seul un Veterinarian le peut. Accepté comme
+cohérent avec le nouveau rôle du vétérinaire (il confirme/corrige ces champs à chaque
+validation de toute façon) et documenté par les tests dédiés
+(`resource.transform.test.ts`, `useAnimals.test.js`, `AnimalsView` — édition Owner
+restreinte aux champs non critiques).
+
+Résidu de la limite d'origine (ci-dessus) : lui aussi non résolu, mais moins tangible
+qu'avant cet amendement — un Veterinarian qui réécrit `bloodGroup` sur un Animal déjà
+validé reste possible via un appel direct, mais l'Owner ne peut plus, lui, défaire une
+correction vétérinaire par erreur ou par malveillance (le vrai gap fermé par cet
+amendement).
