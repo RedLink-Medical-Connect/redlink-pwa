@@ -31,6 +31,7 @@
     "leaflet": "^1.9.4",
     "libphonenumber-js": "^1.12.31",
     "maplibre-gl-js-amplify": "^4.0.2",
+    "marked": "^15.0.12",
     "pinia": "^3.0.4",
     "primeicons": "^7.0.0",
     "primevue": "^4.5.0",

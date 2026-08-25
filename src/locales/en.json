@@ -58,7 +58,8 @@
     "animal_delete_failed": "Unable to delete the animal.",
     "profile_load_failed": "Unable to load the profile.",
     "profile_save_failed": "Unable to save the profile.",
-    "profile_delete_failed": "Unable to delete the account."
+    "profile_delete_failed": "Unable to delete the account.",
+    "consent_required": "You must accept the Terms of Use and the Privacy Policy to continue."
   },
   "roles": {
     "vet": "Clinic",
@@ -124,22 +125,19 @@
     }
   },
   "legal": {
-    "title": "Legal Notice & Privacy",
-    "placeholder_notice": "Legal notice to be completed with the partner veterinary school's information before going into production.",
+    "version_banner": "Version {version} — published on {date}",
+    "load_error": "Unable to load this document. Please try again later.",
     "notice": {
-      "title": "Legal notice",
-      "body": "This application is a prototype developed as part of a pilot project with a partner veterinary school. The legal notice (publisher, host, publication director, registration number) will be completed before any real production launch."
+      "title": "Legal notice"
     },
     "privacy": {
-      "title": "Privacy and data protection (GDPR)",
-      "intro": "As part of its operation, Redlink collects and processes personal data.",
-      "data_collected_title": "Personal data collected",
-      "data_identity": "Identity: last name, first name",
-      "data_contact": "Contact details: email address, phone number, postal address",
-      "data_geoloc": "Geolocation: GPS coordinates of the address provided, used to calculate the distance between a donor animal and a clinic",
-      "data_animals": "Animal-related data: species, breed, blood group, donation history, availability",
-      "usage": "This data is used exclusively to match veterinary clinics with donor animal owners.",
-      "rights": "In accordance with the General Data Protection Regulation (GDPR), you have the right to access, rectify, and delete your data, exercisable directly from your personal space (account deletion) or by contacting us via the Support page. This page will be completed with the full regulatory information (legal basis for processing, retention period, data protection officer contact details where applicable) before going into production."
+      "title": "Privacy and data protection (GDPR)"
+    },
+    "cgu": {
+      "title": "Terms of Use"
+    },
+    "cgv": {
+      "title": "Terms of Sale"
     }
   },
   "support": {
@@ -164,8 +162,10 @@
       "contact": "Contact",
       "about": "About",
       "legal_section": "Legal",
-      "terms": "Terms & Conditions",
+      "terms": "Terms of Use",
       "privacy": "Privacy Policy",
+      "cgv": "Terms of Sale",
+      "legal_notice": "Legal Notice",
       "question_title": "Any question or feedback?",
       "question_desc": "Ask us anything — we respond within 24 hours.",
       "email_placeholder": "your{'@'}email.com",
@@ -194,7 +194,13 @@
       "city": "CITY",
       "zip": "ZIP CODE",
       "next": "NEXT",
-      "finish": "COMPLETE REGISTRATION"
+      "finish": "COMPLETE REGISTRATION",
+      "consent": {
+        "cgu": "I accept the {link}",
+        "cgu_link": "Terms of Use",
+        "privacy": "I accept the {link}",
+        "privacy_link": "Privacy Policy"
+      }
     },
     "login": {
       "title": "LOG IN",
@@ -688,9 +694,16 @@
         "title": "First check-up — {name}",
         "subtitle": "Correct this information before validating this animal as a donor."
       },
+      "attestation": {
+        "title": "Attestation of honor — {name}",
+        "text": "I attest, on my honor, that I have personally examined this animal and verified its eligibility for donation according to the applicable criteria.",
+        "checkbox_label": "I confirm this attestation",
+        "confirm_btn": "Confirm and validate"
+      },
       "toasts": {
         "success": "{name} is now a validated donor.",
         "blood_group_unknown": "Unknown blood group — cannot be validated.",
+        "attestation_required": "You must check the attestation of honor to validate this donor.",
         "generic_error": "Unable to validate this animal.",
         "blood_group_corrected": "{name}'s blood group has been corrected.",
         "blood_group_correction_error": "Unable to correct this animal's blood group.",

@@ -25,6 +25,7 @@ const animalUpdateMock = vi.fn()
 const vetGetMock = vi.fn()
 const relationListMock = vi.fn()
 const relationCreateMock = vi.fn()
+const attestationCreateMock = vi.fn()
 const getCurrentUserMock = vi.fn()
 
 vi.mock('aws-amplify/data', () => ({
@@ -40,6 +41,9 @@ vi.mock('aws-amplify/data', () => ({
       ClinicOwnerRelation: {
         list: (...args) => relationListMock(...args),
         create: (...args) => relationCreateMock(...args),
+      },
+      DonorValidationAttestation: {
+        create: (...args) => attestationCreateMock(...args),
       },
     },
   }),
@@ -74,7 +78,15 @@ const resetAllMocks = () => {
   vetGetMock.mockReset()
   relationListMock.mockReset()
   relationCreateMock.mockReset()
+  attestationCreateMock.mockReset()
   getCurrentUserMock.mockReset()
+  // Scaffolding légal/RGPD (2026-08-25) : `validateAnimal` appelle désormais `getCurrentUser()`
+  // et `DonorValidationAttestation.create()` de façon INCONDITIONNELLE (voir la doc de
+  // `validateAnimal`, useAnimalValidation.js) -- valeurs de succès par défaut ici pour ne pas
+  // devoir les remocker dans chaque test qui ne porte pas spécifiquement sur l'attestation ;
+  // les tests dédiés plus bas (describe "attestation") écrasent ces défauts au besoin.
+  getCurrentUserMock.mockResolvedValue({ userId: 'vet-1' })
+  attestationCreateMock.mockResolvedValue({ data: { id: 'attestation-1' }, errors: undefined })
 }
 
 describe('useAnimalValidation.fetchPendingValidations', () => {
@@ -295,7 +307,7 @@ describe('useAnimalValidation.validateAnimal', () => {
     }))
 
     const { validateAnimal } = useAnimalValidation()
-    await validateAnimal('animal-1')
+    await validateAnimal('animal-1', true)
 
     expect(animalUpdateMock).toHaveBeenCalledTimes(1)
     const capturedInput = animalUpdateMock.mock.calls[0][0]
@@ -316,7 +328,7 @@ describe('useAnimalValidation.validateAnimal', () => {
       const { validateAnimal, pendingAnimals, isValidating } = useAnimalValidation()
       pendingAnimals.value = [buildAnimal({ id: 'animal-1', bloodGroup })]
 
-      await expect(validateAnimal('animal-1')).rejects.toThrow('BLOOD_GROUP_UNKNOWN')
+      await expect(validateAnimal('animal-1', true)).rejects.toThrow('BLOOD_GROUP_UNKNOWN')
 
       expect(animalUpdateMock).not.toHaveBeenCalled()
       expect(isValidating.value).toBe(false)
@@ -334,7 +346,7 @@ describe('useAnimalValidation.validateAnimal', () => {
     const { validateAnimal, pendingAnimals } = useAnimalValidation()
     pendingAnimals.value = [buildAnimal({ id: 'animal-1', bloodGroup: 'DEA 1.1-' })]
 
-    await expect(validateAnimal('animal-1')).resolves.toBeUndefined()
+    await expect(validateAnimal('animal-1', true)).resolves.toBeUndefined()
     expect(animalUpdateMock).toHaveBeenCalledTimes(1)
   })
 
@@ -347,7 +359,7 @@ describe('useAnimalValidation.validateAnimal', () => {
     }))
 
     const { validateAnimal } = useAnimalValidation()
-    await validateAnimal('animal-1')
+    await validateAnimal('animal-1', true)
     const after = Date.now()
 
     const capturedInput = animalUpdateMock.mock.calls[0][0]
@@ -374,7 +386,7 @@ describe('useAnimalValidation.validateAnimal', () => {
       buildAnimal({ id: 'animal-3' }),
     ]
 
-    await validateAnimal('animal-1')
+    await validateAnimal('animal-1', true)
 
     expect(pendingAnimals.value.map((a) => a.id)).toEqual(['animal-2', 'animal-3'])
   })
@@ -390,7 +402,7 @@ describe('useAnimalValidation.validateAnimal', () => {
     pendingAnimals.value = [buildAnimal({ id: 'animal-1' })]
 
     expect(isValidating.value).toBe(false)
-    const promise = validateAnimal('animal-1')
+    const promise = validateAnimal('animal-1', true)
     expect(isValidating.value).toBe(true)
 
     await expect(promise).rejects.toThrow('boom')
@@ -413,7 +425,7 @@ describe('useAnimalValidation.validateAnimal', () => {
     const { validateAnimal, isValidating, pendingAnimals } = useAnimalValidation()
     pendingAnimals.value = [buildAnimal({ id: 'animal-1' })]
 
-    await expect(validateAnimal('animal-1')).rejects.toThrow('Erreur GraphQL updateAnimal')
+    await expect(validateAnimal('animal-1', true)).rejects.toThrow('Erreur GraphQL updateAnimal')
 
     expect(isValidating.value).toBe(false)
     // Rejeté avant le filtre local : l'Animal reste dans pendingAnimals.
@@ -436,7 +448,7 @@ describe('useAnimalValidation.validateAnimal', () => {
     const { validateAnimal, pendingAnimals } = useAnimalValidation()
     pendingAnimals.value = [buildAnimal({ id: 'animal-2' }), buildAnimal({ id: 'animal-3' })]
 
-    await expect(validateAnimal('animal-absent-ailleurs')).resolves.toBeUndefined()
+    await expect(validateAnimal('animal-absent-ailleurs', true)).resolves.toBeUndefined()
 
     const capturedInput = animalUpdateMock.mock.calls[0][0]
     expect(capturedInput.id).toBe('animal-absent-ailleurs')
@@ -462,7 +474,7 @@ describe('useAnimalValidation.validateAnimal — rattachement ClinicOwnerRelatio
     const { validateAnimal, pendingAnimals } = useAnimalValidation()
     pendingAnimals.value = [buildAnimal({ id: 'animal-1', ownerID: 'owner-1' })]
 
-    await validateAnimal('animal-1')
+    await validateAnimal('animal-1', true)
 
     expect(relationListMock).toHaveBeenCalledWith({ filter: { ownerID: { eq: 'owner-1' } } })
     expect(relationCreateMock).toHaveBeenCalledWith({
@@ -484,7 +496,7 @@ describe('useAnimalValidation.validateAnimal — rattachement ClinicOwnerRelatio
     const { validateAnimal, pendingAnimals } = useAnimalValidation()
     pendingAnimals.value = [buildAnimal({ id: 'animal-1', ownerID: 'owner-1' })]
 
-    await validateAnimal('animal-1')
+    await validateAnimal('animal-1', true)
 
     expect(relationCreateMock).not.toHaveBeenCalled()
   })
@@ -495,9 +507,12 @@ describe('useAnimalValidation.validateAnimal — rattachement ClinicOwnerRelatio
     const { validateAnimal, pendingAnimals } = useAnimalValidation()
     // pendingAnimals.value reste vide -- knownAnimal introuvable.
 
-    await expect(validateAnimal('animal-1')).resolves.toBeUndefined()
+    await expect(validateAnimal('animal-1', true)).resolves.toBeUndefined()
 
-    expect(getCurrentUserMock).not.toHaveBeenCalled()
+    // getCurrentUser() est désormais appelé INCONDITIONNELLEMENT (scaffolding légal/RGPD,
+    // 2026-08-25) -- pour le `veterinarianID` de l'attestation, pas pour le rattachement
+    // ClinicOwnerRelation (celui-ci reste sauté ici faute d'ownerID connu).
+    expect(getCurrentUserMock).toHaveBeenCalled()
     expect(relationCreateMock).not.toHaveBeenCalled()
     expect(pendingAnimals.value).toEqual([])
   })
@@ -505,17 +520,111 @@ describe('useAnimalValidation.validateAnimal — rattachement ClinicOwnerRelatio
   it('ne fait jamais échouer validateAnimal si le rattachement ClinicOwnerRelation échoue (best-effort, la validation elle-même a déjà réussi)', async () => {
     const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     animalUpdateMock.mockResolvedValue({ data: {}, errors: undefined })
-    getCurrentUserMock.mockRejectedValue(new Error('network down'))
+    // getCurrentUserMock reste au défaut de resetAllMocks (résolu) -- il est désormais
+    // requis pour l'attestation, PAS best-effort (voir le nouveau describe "attestation"
+    // plus bas pour ce cas). Le point d'échec best-effort testé ici est déplacé sur
+    // vetGetMock (résolution du clinicID, `fetchVetClinicId()`), toujours dans le chemin
+    // `upsertClinicOwnerRelation` -- best-effort inchangé.
+    vetGetMock.mockRejectedValue(new Error('network down'))
 
     const { validateAnimal, pendingAnimals } = useAnimalValidation()
     pendingAnimals.value = [buildAnimal({ id: 'animal-1', ownerID: 'owner-1' })]
 
-    await expect(validateAnimal('animal-1')).resolves.toBeUndefined()
+    await expect(validateAnimal('animal-1', true)).resolves.toBeUndefined()
     expect(pendingAnimals.value).toEqual([])
     expect(consoleErrorSpy).toHaveBeenCalledWith(
       expect.stringContaining('ClinicOwnerRelation'),
       expect.any(Error),
     )
+
+    consoleErrorSpy.mockRestore()
+  })
+})
+
+// Scaffolding légal/RGPD (2026-08-25, docs/adr/0014) : attestation sur l'honneur du
+// vétérinaire, écrite AVANT le flip isValidatedDonor (voir la doc de `validateAnimal`,
+// useAnimalValidation.js, pour le raisonnement complet sur cet ordre délibéré).
+describe('useAnimalValidation.validateAnimal — attestation sur l’honneur (DonorValidationAttestation)', () => {
+  beforeEach(resetAllMocks)
+
+  it("refuse (ATTESTATION_REQUIRED) sans appeler la moindre mutation si attestationAccepted n'est pas true", async () => {
+    const { validateAnimal, isValidating } = useAnimalValidation()
+
+    await expect(validateAnimal('animal-1', false)).rejects.toThrow('ATTESTATION_REQUIRED')
+
+    expect(attestationCreateMock).not.toHaveBeenCalled()
+    expect(animalUpdateMock).not.toHaveBeenCalled()
+    expect(isValidating.value).toBe(false)
+  })
+
+  it('refuse (ATTESTATION_REQUIRED) quand attestationAccepted est omis (undefined)', async () => {
+    const { validateAnimal } = useAnimalValidation()
+
+    await expect(validateAnimal('animal-1')).rejects.toThrow('ATTESTATION_REQUIRED')
+    expect(attestationCreateMock).not.toHaveBeenCalled()
+  })
+
+  it('crée la DonorValidationAttestation AVANT Animal.update, avec veterinarianID/eventType/attestationVersion, et clinicID résolu (fetchVetClinicId)', async () => {
+    const calls = []
+    attestationCreateMock.mockImplementation(async (input) => {
+      calls.push({ name: 'CreateDonorValidationAttestation', input })
+      return { data: { id: 'attestation-1' }, errors: undefined }
+    })
+    animalUpdateMock.mockImplementation(async (input) => {
+      calls.push({ name: 'UpdateAnimal', input })
+      return { data: { ...input }, errors: undefined }
+    })
+    getCurrentUserMock.mockResolvedValue({ userId: 'vet-42' })
+    vetGetMock.mockResolvedValue({ data: { clinicID: 'clinic-42' }, errors: undefined })
+
+    const { validateAnimal, pendingAnimals } = useAnimalValidation()
+    pendingAnimals.value = [buildAnimal({ id: 'animal-1', bloodGroup: 'DEA 1.1-' })]
+
+    await validateAnimal('animal-1', true)
+
+    expect(calls.map((c) => c.name)).toEqual(['CreateDonorValidationAttestation', 'UpdateAnimal'])
+    expect(calls[0].input).toEqual({
+      animalID: 'animal-1',
+      veterinarianID: 'vet-42',
+      clinicID: 'clinic-42',
+      eventType: 'ATTESTATION',
+      attestationVersion: '1.0',
+    })
+  })
+
+  it('clinicID reste null (best-effort) sans bloquer ni l’attestation ni la validation si fetchVetClinicId échoue', async () => {
+    getCurrentUserMock.mockResolvedValue({ userId: 'vet-42' })
+    vetGetMock.mockRejectedValue(new Error('network down'))
+    animalUpdateMock.mockResolvedValue({ data: {}, errors: undefined })
+
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { validateAnimal } = useAnimalValidation()
+
+    await expect(validateAnimal('animal-1', true)).resolves.toBeUndefined()
+
+    expect(attestationCreateMock).toHaveBeenCalledWith(
+      expect.objectContaining({ clinicID: null }),
+    )
+    expect(animalUpdateMock).toHaveBeenCalledTimes(1)
+
+    consoleErrorSpy.mockRestore()
+  })
+
+  it("propage une erreur GraphQL/@auth sur CreateDonorValidationAttestation SANS jamais appeler Animal.update -- pas de flip isValidatedDonor sans preuve d'attestation", async () => {
+    attestationCreateMock.mockResolvedValue({
+      data: null,
+      errors: [{ message: 'Not Authorized to access createDonorValidationAttestation' }],
+    })
+
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { validateAnimal, isValidating } = useAnimalValidation()
+
+    await expect(validateAnimal('animal-1', true)).rejects.toThrow(
+      'Erreur GraphQL createDonorValidationAttestation',
+    )
+
+    expect(animalUpdateMock).not.toHaveBeenCalled()
+    expect(isValidating.value).toBe(false)
 
     consoleErrorSpy.mockRestore()
   })
@@ -535,6 +644,12 @@ describe('mapValidationErrorKey', () => {
   it('mappe BLOOD_GROUP_UNKNOWN vers sa clé i18n spécifique', () => {
     expect(mapValidationErrorKey('BLOOD_GROUP_UNKNOWN')).toBe(
       'dashboard.validations.toasts.blood_group_unknown',
+    )
+  })
+
+  it('mappe ATTESTATION_REQUIRED vers sa clé i18n spécifique (scaffolding légal/RGPD, 2026-08-25)', () => {
+    expect(mapValidationErrorKey('ATTESTATION_REQUIRED')).toBe(
+      'dashboard.validations.toasts.attestation_required',
     )
   })
 

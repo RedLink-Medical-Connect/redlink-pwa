@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { generateClient } from 'aws-amplify/data'
-import { Species, DonationFrequency } from '@/constants/enums'
+import { Species, DonationFrequency, AccountRole, LegalDocumentType } from '@/constants/enums'
+import { LEGAL_DOCUMENT_VERSIONS } from '@/constants/legal.js'
 import { throwIfGraphqlError } from '@/services/graphql-error-service'
 
 /**
@@ -25,10 +26,12 @@ import { throwIfGraphqlError } from '@/services/graphql-error-service'
  * (`data.role`, valeur de `tempRegistrationData`/`temp_register_safe_data`, voir
  * `VerifyEmailView.vue`) :
  *
- * - `owner` : Owner (`id` = cognitoUserId) + Animal par défaut si un nom d'animal a été
- *   renseigné à l'inscription express (Phase 6.B) + OwnerAvailability par défaut
- *   (samedi 9h-12h).
- * - `vet` : Clinic (`id` généré côté backend) + Veterinarian (`id` = cognitoUserId).
+ * - `owner` : Owner (`id` = cognitoUserId) + 2 ConsentRecord (CGU/confidentialité, voir
+ *   `createConsentRecords` ci-dessous, scaffolding légal/RGPD 2026-08-25) + Animal par
+ *   défaut si un nom d'animal a été renseigné à l'inscription express (Phase 6.B) +
+ *   OwnerAvailability par défaut (samedi 9h-12h).
+ * - `vet` : Clinic (`id` généré côté backend) + Veterinarian (`id` = cognitoUserId) + 2
+ *   ConsentRecord (même scaffolding).
  * - tout autre rôle : no-op, identique au comportement d'origine (le `if`/`else if` du
  *   composant ne couvrait déjà que ces deux cas).
  *
@@ -66,10 +69,50 @@ export function useRegistrationCompletion() {
   const isCompleting = ref(false)
 
   /**
+   * Scaffolding légal/RGPD (2026-08-25, docs/adr/0014) : une ligne `ConsentRecord` par
+   * document obligatoire (CGU + politique de confidentialité -- PAS CGV, non capturée à
+   * l'inscription, voir constants/legal.js) pour le compte qui vient d'être créé.
+   * `documentVersion` vient de `LEGAL_DOCUMENT_VERSIONS` (constants/legal.js), jamais d'une
+   * valeur transmise par le client -- une `ConsentRecord` doit toujours référencer une
+   * version qui a réellement existé, pas ce que le formulaire prétend avoir affiché.
+   *
+   * Volontairement CRITIQUE (rethrow via `throwIfGraphqlError`, PAS best-effort/avalé) --
+   * contrairement à la convention "écriture secondaire best-effort" du reste du repo (ex.
+   * `upsertClinicOwnerRelation`, useMissionClosure.js/useAnimalValidation.js) : cette preuve
+   * de consentement EST la fonctionnalité elle-même (demande produit : "je veux pouvoir...
+   * retrouver qui a consenti à quoi et quand"), pas un confort d'annuaire en plus d'une
+   * écriture déjà réussie -- un profil créé sans sa preuve de consentement serait
+   * exactement le risque que ce scaffolding existe pour éliminer.
+   *
+   * @param {string} userID cognitoUserId (= Owner.id ou Veterinarian.id)
+   * @param {string} userRole `AccountRole.OWNER`/`AccountRole.VETERINARIAN`
+   */
+  const createConsentRecords = async (userID, userRole) => {
+    for (const documentType of [LegalDocumentType.CGU, LegalDocumentType.PRIVACY_POLICY]) {
+      const { errors } = await client.models.ConsentRecord.create({
+        userID,
+        userRole,
+        documentType,
+        documentVersion: LEGAL_DOCUMENT_VERSIONS[documentType].version,
+      })
+      throwIfGraphqlError(errors, 'createConsentRecord')
+    }
+  }
+
+  /**
    * Owner (id = cognitoUserId) + Animal par défaut (si renseigné) + OwnerAvailability
    * par défaut.
    */
   const completeOwnerRegistration = async (data, cognitoUserId) => {
+    // Défense en profondeur (même raisonnement que `BLOOD_GROUP_UNKNOWN`,
+    // useAnimalValidation.js) : RegisterOwnerView.vue bloque déjà la progression tant que
+    // les deux cases ne sont pas cochées, mais cette fonction reste appelable
+    // indépendamment de ce composant -- un Owner ne doit jamais pouvoir être créé sans ses
+    // deux `ConsentRecord` associés, quel que soit le chemin d'appel.
+    if (!data.cguAccepted || !data.privacyAccepted) {
+      throw new Error('CONSENT_REQUIRED')
+    }
+
     const { data: owner, errors: ownerErrors } = await client.models.Owner.create({
       id: cognitoUserId,
       firstname: data.firstname,
@@ -86,6 +129,8 @@ export function useRegistrationCompletion() {
     throwIfGraphqlError(ownerErrors, 'createOwner')
 
     const ownerID = owner.id
+
+    await createConsentRecords(ownerID, AccountRole.OWNER)
 
     if (data.animal_name) {
       const { errors: animalErrors } = await client.models.Animal.create({
@@ -136,6 +181,11 @@ export function useRegistrationCompletion() {
    * Clinic + Veterinarian (id = cognitoUserId).
    */
   const completeVetRegistration = async (data, cognitoUserId) => {
+    // Même garde-fou que completeOwnerRegistration ci-dessus, même raison.
+    if (!data.cguAccepted || !data.privacyAccepted) {
+      throw new Error('CONSENT_REQUIRED')
+    }
+
     // Clinic.id est un identifiant propre généré côté backend (comme Animal/OwnerAvailability) :
     // Clinic.veterinarians est une relation @hasMany, un Clinic peut donc avoir plusieurs
     // Veterinarian, et Clinic.id ne doit jamais être aliasé sur le cognitoUserId d'un vétérinaire.
@@ -163,6 +213,8 @@ export function useRegistrationCompletion() {
     })
 
     throwIfGraphqlError(vetErrors, 'createVeterinarian')
+
+    await createConsentRecords(cognitoUserId, AccountRole.VETERINARIAN)
   }
 
   /**

@@ -32,6 +32,11 @@ const form = ref({
   address: '',
   latitude: null,
   longitude: null,
+
+  // Scaffolding légal/RGPD (2026-08-25, docs/adr/0014) — jamais pré-coché, voir le
+  // commentaire équivalent dans RegisterOwnerView.vue.
+  cguAccepted: false,
+  privacyAccepted: false,
 })
 
 const nextStep = () => {
@@ -43,6 +48,13 @@ const nextStep = () => {
   const passwordError = validatePassword()
   if (passwordError) {
     auth.setError(passwordError)
+    return
+  }
+
+  // Scaffolding légal/RGPD (2026-08-25, docs/adr/0014) : voir le commentaire équivalent
+  // dans RegisterOwnerView.vue (nextStep()).
+  if (!form.value.cguAccepted || !form.value.privacyAccepted) {
+    auth.setError(t('errors.consent_required'))
     return
   }
 
@@ -181,6 +193,33 @@ const handleRegister = async () => {
             input-class="w-full p-3 bg-zinc-100 dark:bg-zinc-800 border-none"
             required
           />
+        </div>
+
+        <div class="flex flex-col gap-2 mt-2">
+          <div class="flex items-start gap-2">
+            <Checkbox v-model="form.cguAccepted" :binary="true" input-id="reg-clinic-cgu" />
+            <label for="reg-clinic-cgu" class="text-sm cursor-pointer select-none">
+              <i18n-t keypath="auth.register_common.consent.cgu" tag="span">
+                <template #link>
+                  <router-link to="/legal/cgu" target="_blank" class="underline font-semibold">{{
+                    $t('auth.register_common.consent.cgu_link')
+                  }}</router-link>
+                </template>
+              </i18n-t>
+            </label>
+          </div>
+          <div class="flex items-start gap-2">
+            <Checkbox v-model="form.privacyAccepted" :binary="true" input-id="reg-clinic-privacy" />
+            <label for="reg-clinic-privacy" class="text-sm cursor-pointer select-none">
+              <i18n-t keypath="auth.register_common.consent.privacy" tag="span">
+                <template #link>
+                  <router-link to="/legal/privacy" target="_blank" class="underline font-semibold">{{
+                    $t('auth.register_common.consent.privacy_link')
+                  }}</router-link>
+                </template>
+              </i18n-t>
+            </label>
+          </div>
         </div>
 
         <Button

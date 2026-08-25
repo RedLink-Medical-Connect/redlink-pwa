@@ -25,10 +25,30 @@ const router = createRouter({
       name: 'support',
       component: () => import('@/views/SupportView.vue'),
     },
+    // Scaffolding légal/RGPD (2026-08-25, docs/adr/0014) — remplace l'ancienne LegalView.vue
+    // unique (mentions légales + confidentialité mélangées, sans CGU/CGV, sans versioning)
+    // par 4 vues dédiées, contenu chargé depuis public/legal/*.md (voir
+    // useLegalDocument.js). `/legal` reste l'URL des mentions légales (le plus proche
+    // sémantiquement de l'ancienne route unique) plutôt qu'une redirection vers /legal/notice.
     {
       path: '/legal',
       name: 'legal',
-      component: () => import('@/views/LegalView.vue'),
+      component: () => import('@/views/legal/LegalNoticeView.vue'),
+    },
+    {
+      path: '/legal/cgu',
+      name: 'legal-cgu',
+      component: () => import('@/views/legal/CGUView.vue'),
+    },
+    {
+      path: '/legal/cgv',
+      name: 'legal-cgv',
+      component: () => import('@/views/legal/CGVView.vue'),
+    },
+    {
+      path: '/legal/privacy',
+      name: 'legal-privacy',
+      component: () => import('@/views/legal/PrivacyPolicyView.vue'),
     },
     // --- AUTH (Accessible uniquement si NON connecté) ---
     {

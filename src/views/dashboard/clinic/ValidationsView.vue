@@ -24,13 +24,6 @@ const {
   correctCriticalFields,
 } = useAnimalValidation()
 
-// `isValidating` (composable) est un booléen GLOBAL partagé par tout appel à
-// validateAnimal(), pas un état par ligne (voir useAnimalValidation.js). On garde ici
-// l'id de l'Animal cliqué pour n'afficher le spinner que sur le bon bouton — et on
-// désactive les AUTRES boutons pendant ce temps (via `isValidating` seul) plutôt que de
-// laisser un second clic déclencher un appel concurrent sur ce ref partagé.
-const validatingAnimalId = ref(null)
-
 const speciesOptions = [
   { label: t('request.species.dog'), value: Species.DOG },
   { label: t('request.species.cat'), value: Species.CAT },
@@ -44,6 +37,15 @@ const speciesOptions = [
 // avant de valider l'Animal comme donneur.
 const editingAnimal = ref(null)
 const editForm = ref({ species: null, bloodGroup: null, weight: null, isVaccinated: false })
+
+// Scaffolding légal/RGPD (2026-08-25, docs/adr/0014) : attestation sur l'honneur, étape de
+// confirmation OBLIGATOIRE avant que "Valider" (bouton ci-dessous) n'ait le moindre effet --
+// remplace l'ancien appel direct à `validateAnimal(animal.id)` par un dialogue intermédiaire
+// (même structure que le dialogue de correction ci-dessus). `attestationChecked` : jamais
+// pré-cochée à l'ouverture (acte positif, même exigence que le consentement RGPD à
+// l'inscription, voir RegisterOwnerView.vue).
+const attestingAnimal = ref(null)
+const attestationChecked = ref(false)
 
 // Options du Select alimentées par BloodGroupsBySpecies (constants/enums.js), jamais de
 // liste en dur (voir R-15, BACKLOG.md, pour l'exemple précis de dette que ça évite) —
@@ -60,16 +62,32 @@ onMounted(() => {
   fetchPendingValidations()
 })
 
-const handleValidate = async (animal) => {
-  validatingAnimalId.value = animal.id
+const openAttestationDialog = (animal) => {
+  attestingAnimal.value = animal
+  attestationChecked.value = false
+}
+
+const closeAttestationDialog = () => {
+  attestingAnimal.value = null
+  attestationChecked.value = false
+}
+
+// `isValidating` (composable) est un booléen GLOBAL, pas un état par ligne
+// (useAnimalValidation.js) -- suffisant ici : un seul dialogue d'attestation peut être
+// ouvert à la fois (contrairement à l'ancien bouton "Valider" direct sur chaque ligne du
+// tableau, qui avait besoin de `validatingAnimalId` pour isoler le spinner sur la bonne
+// ligne), donc `isValidating` seul pilote le spinner du bouton de confirmation du dialogue.
+const confirmValidation = async () => {
+  const animal = attestingAnimal.value
   try {
-    await validateAnimal(animal.id)
+    await validateAnimal(animal.id, attestationChecked.value)
     toast.add({
       severity: 'success',
       summary: t('common.success'),
       detail: t('dashboard.validations.toasts.success', { name: animal.name }),
       life: 3000,
     })
+    closeAttestationDialog()
   } catch (e) {
     toast.add({
       severity: 'error',
@@ -77,8 +95,6 @@ const handleValidate = async (animal) => {
       detail: t(mapValidationErrorKey(e.message)),
       life: 4000,
     })
-  } finally {
-    validatingAnimalId.value = null
   }
 }
 
@@ -237,9 +253,8 @@ const handleSaveCorrection = async () => {
                     icon="pi pi-check"
                     size="small"
                     class="!bg-[#ff3b4e] !border-[#ff3b4e]"
-                    :loading="validatingAnimalId === slotProps.data.id"
-                    :disabled="isValidating && validatingAnimalId !== slotProps.data.id"
-                    @click="handleValidate(slotProps.data)"
+                    :disabled="isValidating || isCorrectingCriticalFields"
+                    @click="openAttestationDialog(slotProps.data)"
                   />
                 </div>
               </template>
@@ -308,6 +323,48 @@ const handleSaveCorrection = async () => {
           :disabled="!editForm.bloodGroup"
           class="!bg-[#ff3b4e] !border-[#ff3b4e]"
           @click="handleSaveCorrection"
+        />
+      </template>
+    </Dialog>
+
+    <!-- Attestation sur l'honneur (scaffolding légal/RGPD, 2026-08-25, docs/adr/0014) --
+         étape de confirmation obligatoire avant que "Valider" n'ait le moindre effet. Le
+         texte ci-dessous est un PLACEHOLDER (dashboard.validations.attestation.text,
+         src/locales/*.json) : le texte définitif sera fourni séparément après relecture
+         juridique. -->
+    <Dialog
+      :visible="!!attestingAnimal"
+      modal
+      :header="attestingAnimal ? $t('dashboard.validations.attestation.title', { name: attestingAnimal.name }) : ''"
+      :style="{ width: '450px' }"
+      @update:visible="closeAttestationDialog"
+    >
+      <div v-if="attestingAnimal" class="flex flex-col gap-4">
+        <p class="text-sm text-zinc-600 dark:text-zinc-300 leading-relaxed italic">
+          {{ $t('dashboard.validations.attestation.text') }}
+        </p>
+        <div class="flex items-start gap-2">
+          <Checkbox v-model="attestationChecked" :binary="true" input-id="attestation-checkbox" />
+          <label for="attestation-checkbox" class="text-sm cursor-pointer select-none">
+            {{ $t('dashboard.validations.attestation.checkbox_label') }}
+          </label>
+        </div>
+      </div>
+      <template #footer>
+        <Button
+          :label="$t('common.cancel')"
+          text
+          severity="secondary"
+          :disabled="isValidating"
+          @click="closeAttestationDialog"
+        />
+        <Button
+          :label="$t('dashboard.validations.attestation.confirm_btn')"
+          icon="pi pi-check"
+          :loading="isValidating"
+          :disabled="!attestationChecked"
+          class="!bg-[#ff3b4e] !border-[#ff3b4e]"
+          @click="confirmValidation"
         />
       </template>
     </Dialog>

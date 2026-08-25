@@ -71,6 +71,18 @@ const ownerCreateReadOnlyVetReadUpdate = (allow: any) => [
   allow.owner().to(['create', 'read']),
   allow.group('Veterinarians').to(['read', 'update']),
 ]
+// Write-once véritable (contrairement aux deux helpers ci-dessus, qui laissent toujours
+// quelqu'un faire `update`) : `create`+`read` seul, jamais `update`/`delete` accordé à QUI
+// QUE CE SOIT -- pas même au groupe qui a créé la ligne. Scaffolding légal/RGPD
+// (2026-08-25, voir docs/adr/0014) : `ConsentRecord` (consentement CGU/confidentialité) et
+// `DonorValidationAttestation` (attestation sur l'honneur du vétérinaire) doivent rester
+// des preuves infalsifiables une fois écrites -- une correction ultérieure, même par son
+// propre auteur, viderait leur valeur probante en cas de contrôle CNIL/litige (demande
+// produit explicite : "ne doit JAMAIS pouvoir être modifié ou supprimé après coup"). Pas de
+// paramètre `allow` distinct par modèle : les deux réutilisent la même règle de niveau
+// modèle ci-dessous, `.to(['create', 'read'])` posé directement sur `allow.ownerDefinedIn`/
+// `allow.group` (pas besoin d'un helper factorisé comme les deux ci-dessus : un seul appel
+// chacun, pas de répétition à casser en cas d'oubli).
 
 export const schema = a.schema({
   // ==========================================================
@@ -89,6 +101,23 @@ export const schema = a.schema({
     'NO_SHOW',
     'CANCELLED',
   ]),
+  // Scaffolding légal/RGPD (2026-08-25, docs/adr/0014) -- ConsentRecord.userRole : ni Owner
+  // ni Veterinarian ne portent de champ "role" explicite aujourd'hui (le rôle se déduit du
+  // MODÈLE lui-même, jamais d'un champ) ; ConsentRecord réutilise UN seul modèle pour les
+  // deux côtés (userID générique, pas de relation polymorphe formelle), donc a besoin de cet
+  // enum pour savoir de quel côté vient chaque ligne -- seul endroit du schéma où cette
+  // distinction doit être portée par une valeur plutôt que par le modèle cible.
+  AccountRole: a.enum(['OWNER', 'VETERINARIAN']),
+  // CGV incluse dès maintenant (page prévue par la demande produit, item 1) même si non
+  // capturée à l'inscription (item 2 -- Stripe non implémenté, hors périmètre V1 selon
+  // CONTEXT.md, donc pas de case CGV obligatoire tant qu'aucun paiement n'existe réellement)
+  // : réutilisable telle quelle le jour où CGV devient un consentement requis.
+  LegalDocumentType: a.enum(['CGU', 'PRIVACY_POLICY', 'CGV']),
+  // DonorValidationAttestation.eventType -- ATTESTATION à la validation d'un donneur,
+  // REVOCATION si une validation est un jour annulée (schéma prêt pour ce cas, voir
+  // commentaire du modèle plus bas -- aucune UI de révocation n'existe encore dans ce repo,
+  // écrit en prévision plutôt qu'en réaction à un besoin actuel constaté).
+  DonorValidationEventType: a.enum(['ATTESTATION', 'REVOCATION']),
 
   // 1. CLINIQUE & VÉTÉRINAIRES
   // ---------------------------------------------------------
@@ -143,6 +172,11 @@ export const schema = a.schema({
       // caché implicite -- correction MÉCANIQUE de traduction (le validateur de schéma Gen2
       // rejette une relation non appariée, voir docs/adr/0010), PAS une nouvelle fonctionnalité.
       validatedMissions: a.hasMany('Mission', 'validatedByVeterinarianID'),
+      // Contrepartie obligatoire de `DonorValidationAttestation.veterinarian` (`belongsTo`
+      // plus bas, voir docs/adr/0010 pour la raison mécanique) -- comme
+      // `validatedMissions` ci-dessus, aucun composable applicatif actuel ne le consomme
+      // (pas de vue "historique de mes attestations" à ce jour).
+      donorValidationAttestations: a.hasMany('DonorValidationAttestation', 'veterinarianID'),
     })
     .authorization((allow) => [
       allow.owner(),
@@ -235,6 +269,9 @@ export const schema = a.schema({
       ownerID: a.id().required(),
       ownerProfile: a.belongsTo('Owner', 'ownerID'),
       missions: a.hasMany('Mission', 'animalID'),
+      // Contrepartie obligatoire de `DonorValidationAttestation.animal` (`belongsTo` plus
+      // bas) -- même raison mécanique que `missions` ci-dessus (docs/adr/0010).
+      validationAttestations: a.hasMany('DonorValidationAttestation', 'animalID'),
     })
     .authorization((allow) => [allow.owner(), allow.group('Veterinarians').to(['read'])]),
 
@@ -405,7 +442,101 @@ export const schema = a.schema({
       allow.group('Veterinarians').to(['read', 'update']),
     ]),
 
-  // 4. MUTATIONS CUSTOM (logique non couverte par les mutations générées par défaut)
+  // 4. LÉGAL / CONFORMITÉ (RGPD, attestation vétérinaire)
+  // ---------------------------------------------------------
+  // Scaffolding technique (2026-08-25, docs/adr/0014) -- contenu des documents eux-mêmes
+  // (texte CGU/CGV/confidentialité, texte d'attestation) volontairement PAS ici : ces deux
+  // modèles ne stockent qu'une PREUVE d'acceptation/d'attestation (qui, quand, quelle
+  // version), jamais le texte lui-même (voir src/legal/*.md, src/constants/legal.js).
+
+  // Une ligne par (utilisateur, type de document, version) -- PAS un champ sur Owner/Clinic
+  // (option écartée, voir docs/adr/0014) : un champ unique serait écrasé par un futur
+  // re-consentement (CGU mises à jour), perdant tout historique -- exactement ce que la
+  // demande produit "traçabilité CNIL/litige, infalsifiable" interdit. `userID` générique
+  // (pas de relation `belongsTo` formelle vers Owner OU Veterinarian -- Gen2 n'a pas de
+  // relation polymorphe, et une relation dédiée par côté serait un couplage inutile pour un
+  // simple horodatage) : porte le `cognitoUserId`, identique à `Owner.id`/`Veterinarian.id`
+  // sur ce schéma. `userRole` (AccountRole) distingue les deux côtés puisque `userID` seul
+  // ne suffit pas à savoir dans quelle table chercher le profil correspondant.
+  // `documentVersion` : la version EXACTE acceptée (pas juste un booléen "a accepté") --
+  // permet de répondre à "quelle version des CGU cet Owner a-t-il acceptée le 12/03 ?".
+  // `createdAt` (auto, non déclaré ci-dessous) sert d'horodatage d'acceptation : posé par
+  // AppSync côté serveur au moment de l'écriture, jamais fourni par le client -- pas besoin
+  // d'un champ dédié. Léger décalage assumé avec l'instant réel du clic sur la case à cocher
+  // (le flux d'inscription confirme d'abord le code Cognito avant d'écrire cette ligne, voir
+  // useRegistrationCompletion.js) : documenté ici plutôt que construit une infrastructure de
+  // timestamp signé côté client pour un besoin non exprimé par la demande produit (qui ne
+  // demande un timestamp SERVEUR strict que pour l'attestation vétérinaire ci-dessous, pas
+  // pour le consentement RGPD).
+  ConsentRecord: a
+    .model({
+      userID: a.id().required(),
+      userRole: a.ref('AccountRole').required(),
+      documentType: a.ref('LegalDocumentType').required(),
+      documentVersion: a.string().required(),
+    })
+    // `ownerDefinedIn('userID')` (pas `allow.owner()` par défaut) -- même raison que
+    // `ClinicOwnerRelation` plus haut (docs/adr/0009) : la ligne est toujours créée par
+    // l'utilisateur lui-même juste après la création de son propre profil
+    // (`completeOwnerRegistration`/`completeVetRegistration`,
+    // useRegistrationCompletion.js), donc dans ce cas précis `allow.owner()` par défaut
+    // aurait suffi (auteur de la ligne = sujet du consentement) -- mais `ownerDefinedIn`
+    // explicite documente l'intention sans dépendre du champ caché auto-injecté, cohérent
+    // avec le seul autre modèle de ce schéma qui a le même besoin sémantique ("le champ
+    // ownerID/userID EST la source de vérité de qui possède cette ligne"). `.to(['create',
+    // 'read'])` seul : write-once, voir le commentaire de tête de fichier.
+    .authorization((allow) => [allow.ownerDefinedIn('userID').to(['create', 'read'])]),
+
+  // Attestation sur l'honneur du vétérinaire à la validation d'un Animal comme donneur --
+  // enregistrement DISTINCT de `Animal.isValidatedDonor`/`validationExpiresAt` (ADR-0002) :
+  // ceux-ci restent le statut opérationnel courant (peuvent en théorie être corrigés par un
+  // vétérinaire qui se serait trompé de ligne, voir `correctCriticalFields`,
+  // useAnimalValidation.js), alors que CETTE ligne est la preuve immuable de l'acte
+  // d'attestation lui-même, jamais réécrite. `eventType` distingue l'attestation initiale
+  // (`ATTESTATION`, écrite par `validateAnimal`) d'une éventuelle révocation
+  // (`REVOCATION`) -- demande produit explicite : "si la validation est un jour
+  // annulée/révoquée, ne supprime jamais l'attestation d'origine, crée un nouvel
+  // enregistrement à côté". Champ prêt (`revokedAttestationID`/`revocationReason`) mais
+  // AUCUNE UI de révocation n'existe encore dans ce repo (grep confirmé, 2026-08-25) : rien
+  // dans `useAnimalValidation.js`/`ValidationsView.vue`/`DonorsView.vue` ne permet
+  // aujourd'hui d'annuler une validation -- même statut que
+  // `Veterinarian.validatedMissions`/`Mission.activeForRequest` (ADR-0010) : câblage
+  // mécanique en avance sur l'usage, pas une fonctionnalité livrée dans cette PR.
+  DonorValidationAttestation: a
+    .model({
+      animalID: a.id().required(),
+      animal: a.belongsTo('Animal', 'animalID'),
+      veterinarianID: a.id().required(),
+      veterinarian: a.belongsTo('Veterinarian', 'veterinarianID'),
+      // Dénormalisé (pas de belongsTo dédié) : la clinique du vétérinaire AU MOMENT de
+      // l'attestation -- un vétérinaire qui change de clinique plus tard ne doit pas voir
+      // ses attestations passées se réattribuer silencieusement. Optionnel
+      // (`fetchVetClinicId()` peut légitimement renvoyer `null`, voir
+      // useAnimalValidation.js) : ne doit jamais bloquer l'attestation elle-même, qui est
+      // la partie critique.
+      clinicID: a.id(),
+      eventType: a.ref('DonorValidationEventType').required(),
+      // Version EXACTE du texte d'attestation affiché au vétérinaire au moment où il a
+      // coché la case (src/constants/legal.js) -- même raisonnement que
+      // `ConsentRecord.documentVersion`. `createdAt` (auto) sert d'horodatage SERVEUR,
+      // exigence explicite de la demande produit ("timestamp serveur, pas côté client") --
+      // déjà garanti par AppSync sans champ dédié, voir le commentaire de `ConsentRecord`
+      // ci-dessus pour le mécanisme.
+      attestationVersion: a.string().required(),
+      // Renseignés uniquement sur une ligne `REVOCATION` (voir doc du modèle ci-dessus) --
+      // pas de contrainte de schéma les rendant obligatoires seulement dans ce cas (Gen2 ne
+      // sait pas conditionner un `.required()` sur la valeur d'un autre champ, même limite
+      // que partout ailleurs dans ce schéma) : à la charge du futur code applicatif qui
+      // écrira une révocation.
+      revokedAttestationID: a.id(),
+      revocationReason: a.string(),
+    })
+    // `.to(['create', 'read'])` seul : write-once, voir le commentaire de tête de fichier --
+    // "jamais modifié ou supprimé après coup, y compris par le vétérinaire lui-même" est une
+    // exigence produit explicite, appliquée ici au niveau `@auth`, pas seulement dans l'UI.
+    .authorization((allow) => [allow.group('Veterinarians').to(['create', 'read'])]),
+
+  // 5. MUTATIONS CUSTOM (logique non couverte par les mutations générées par défaut)
   // ---------------------------------------------------------
 
   // Prérequis Phase 8, lot 3/3 sous-tâche 5 (voir

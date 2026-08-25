@@ -83,6 +83,19 @@ architecturales) et `.cursorrules` (conventions détaillées pour l'éditeur).
   (`amplify/functions/post-confirmation/`, TypeScript, `defineFunction`),
   référencé depuis `amplify/auth/resource.ts` — voir ADR-0008.
 - DynamoDB via les modèles `defineData` (`@model`/`a.model()`).
+- **Enregistrement write-once (preuve immuable)** : `.authorization()` de niveau modèle
+  posant `create`+`read` seul, sans jamais accorder `update`/`delete` à qui que ce soit,
+  même l'auteur de la ligne — troisième idiome `@auth` de ce schéma, à côté des deux
+  helpers de champ déjà établis (`ownerCreateReadOnlyVetReadUpdate`/
+  `ownerReadOnlyVetReadUpdate`, tous deux laissent quelqu'un faire `update`). Utilisé par
+  `ConsentRecord` (consentement CGU/confidentialité) et `DonorValidationAttestation`
+  (attestation vétérinaire sur l'honneur) — voir ADR-0014. Référence pour tout futur
+  enregistrement dont la valeur probante dépend de ne jamais pouvoir être réécrit.
+- **Pages légales versionnées, contenu hors code** : markdown par document/langue
+  (`public/legal/*.{fr,en}.md`, servi tel quel par Vite, jamais bundlé), chargé via
+  `fetch()` (`useLegalDocument.js`) et rendu via `marked`
+  (`src/services/legal-content-service.js`) — version en vigueur centralisée dans
+  `src/constants/legal.js`, séparée du contenu lui-même. Voir ADR-0014.
 - Les 12 composables/services applicatifs qui parlent GraphQL sont sur
   `client.models.X` (`aws-amplify/data`) : `useAnimals.js`,
   `useOwnerProfile.js`, `useOwnerAvailability.js`,

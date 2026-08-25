@@ -20,6 +20,7 @@ const animalCreateMock = vi.fn()
 const availabilityCreateMock = vi.fn()
 const clinicCreateMock = vi.fn()
 const vetCreateMock = vi.fn()
+const consentRecordCreateMock = vi.fn()
 
 vi.mock('aws-amplify/data', () => ({
   generateClient: () => ({
@@ -29,6 +30,7 @@ vi.mock('aws-amplify/data', () => ({
       OwnerAvailability: { create: (...args) => availabilityCreateMock(...args) },
       Clinic: { create: (...args) => clinicCreateMock(...args) },
       Veterinarian: { create: (...args) => vetCreateMock(...args) },
+      ConsentRecord: { create: (...args) => consentRecordCreateMock(...args) },
     },
   }),
 }))
@@ -41,8 +43,14 @@ const resetAllMocks = () => {
   availabilityCreateMock.mockReset()
   clinicCreateMock.mockReset()
   vetCreateMock.mockReset()
+  consentRecordCreateMock.mockReset()
+  consentRecordCreateMock.mockResolvedValue({ data: { id: 'consent-1' }, errors: undefined })
 }
 
+// cguAccepted/privacyAccepted par défaut à `true` (scaffolding légal/RGPD, 2026-08-25) :
+// RegisterOwnerView.vue/RegisterClinicView.vue bloquent déjà la progression tant que les
+// deux cases ne sont pas cochées -- le describe dédié plus bas ("garde-fou CONSENT_REQUIRED")
+// couvre le cas `false` explicitement, pas besoin de le répéter sur chaque test existant.
 const buildOwnerData = (overrides = {}) => ({
   role: 'owner',
   firstname: 'Jean',
@@ -62,6 +70,8 @@ const buildOwnerData = (overrides = {}) => ({
   animal_isVaccinated: true,
   animal_isSterilized: true,
   animal_donationFrequency: 'TWICE_YEAR',
+  cguAccepted: true,
+  privacyAccepted: true,
   ...overrides,
 })
 
@@ -76,17 +86,23 @@ const buildVetData = (overrides = {}) => ({
   longitude: '2.4',
   clinic_name: 'Clinique Vétérinaire Alfort',
   rpps: '12345678901',
+  cguAccepted: true,
+  privacyAccepted: true,
   ...overrides,
 })
 
 describe('useRegistrationCompletion.completeRegistration — chemin owner', () => {
   beforeEach(resetAllMocks)
 
-  it('appelle CreateOwner puis CreateAnimal (animal_name renseigné) puis CreateOwnerAvailability, dans cet ordre', async () => {
+  it('appelle CreateOwner puis 2x CreateConsentRecord (CGU/confidentialité) puis CreateAnimal (animal_name renseigné) puis CreateOwnerAvailability, dans cet ordre', async () => {
     const calls = []
     ownerCreateMock.mockImplementation(async (input) => {
       calls.push({ name: 'CreateOwner', input })
       return { data: { id: 'owner-123' }, errors: undefined }
+    })
+    consentRecordCreateMock.mockImplementation(async (input) => {
+      calls.push({ name: 'CreateConsentRecord', input })
+      return { data: { id: 'consent-1' }, errors: undefined }
     })
     animalCreateMock.mockImplementation(async (input) => {
       calls.push({ name: 'CreateAnimal', input })
@@ -102,8 +118,40 @@ describe('useRegistrationCompletion.completeRegistration — chemin owner', () =
 
     await completeRegistration(buildOwnerData(), 'cognito-user-1')
 
-    expect(calls.map((c) => c.name)).toEqual(['CreateOwner', 'CreateAnimal', 'CreateOwnerAvailability'])
+    expect(calls.map((c) => c.name)).toEqual([
+      'CreateOwner',
+      'CreateConsentRecord',
+      'CreateConsentRecord',
+      'CreateAnimal',
+      'CreateOwnerAvailability',
+    ])
     expect(isCompleting.value).toBe(false)
+  })
+
+  it('CreateConsentRecord (x2) reçoit userID = ownerID généré, userRole = OWNER, documentType CGU puis PRIVACY_POLICY, et la version en vigueur (constants/legal.js) -- jamais une version transmise par le client', async () => {
+    const consentInputs = []
+    ownerCreateMock.mockResolvedValue({ data: { id: 'owner-generated-id' }, errors: undefined })
+    consentRecordCreateMock.mockImplementation(async (input) => {
+      consentInputs.push(input)
+      return { data: { id: 'consent-1' }, errors: undefined }
+    })
+    animalCreateMock.mockResolvedValue({ data: { id: 'animal-1' }, errors: undefined })
+    availabilityCreateMock.mockResolvedValue({ data: { id: 'avail-1' }, errors: undefined })
+
+    const { completeRegistration } = useRegistrationCompletion()
+    // documentVersion falsifié côté "client" -- ne doit avoir aucun effet, la valeur écrite
+    // vient toujours de LEGAL_DOCUMENT_VERSIONS.
+    await completeRegistration(buildOwnerData({ documentVersion: '999.0' }), 'cognito-user-1')
+
+    expect(consentInputs).toEqual([
+      { userID: 'owner-generated-id', userRole: 'OWNER', documentType: 'CGU', documentVersion: '1.0' },
+      {
+        userID: 'owner-generated-id',
+        userRole: 'OWNER',
+        documentType: 'PRIVACY_POLICY',
+        documentVersion: '1.0',
+      },
+    ])
   })
 
   it("le Owner créé utilise l'id Cognito, et l'Animal/l'OwnerAvailability référencent bien l'ownerID retourné par CreateOwner (pas cognitoUserId directement)", async () => {
@@ -240,10 +288,11 @@ describe('useRegistrationCompletion.completeRegistration — chemin owner', () =
 describe('useRegistrationCompletion.completeRegistration — chemin vet', () => {
   beforeEach(resetAllMocks)
 
-  it('appelle CreateClinic puis CreateVeterinarian, dans cet ordre, et Veterinarian.id = cognitoUserId (jamais Clinic.id)', async () => {
+  it('appelle CreateClinic puis CreateVeterinarian puis 2x CreateConsentRecord, dans cet ordre, et Veterinarian.id = cognitoUserId (jamais Clinic.id)', async () => {
     const calls = []
     let vetInput = null
     let clinicInput = null
+    const consentInputs = []
 
     clinicCreateMock.mockImplementation(async (input) => {
       calls.push('CreateClinic')
@@ -255,14 +304,30 @@ describe('useRegistrationCompletion.completeRegistration — chemin vet', () => 
       vetInput = input
       return { data: { id: 'cognito-vet-1' }, errors: undefined }
     })
+    consentRecordCreateMock.mockImplementation(async (input) => {
+      calls.push('CreateConsentRecord')
+      consentInputs.push(input)
+      return { data: { id: 'consent-1' }, errors: undefined }
+    })
 
     const { completeRegistration } = useRegistrationCompletion()
     await completeRegistration(buildVetData(), 'cognito-vet-1')
 
-    expect(calls).toEqual(['CreateClinic', 'CreateVeterinarian'])
+    expect(calls).toEqual(['CreateClinic', 'CreateVeterinarian', 'CreateConsentRecord', 'CreateConsentRecord'])
     expect(clinicInput.id).toBeUndefined()
     expect(vetInput.id).toBe('cognito-vet-1')
     expect(vetInput.clinicID).toBe('clinic-generated-id')
+    // userID = cognitoUserId directement (pas Clinic.id) -- Veterinarian.id EST le
+    // cognitoUserId sur ce schéma, contrairement à Clinic qui a son propre id généré.
+    expect(consentInputs).toEqual([
+      { userID: 'cognito-vet-1', userRole: 'VETERINARIAN', documentType: 'CGU', documentVersion: '1.0' },
+      {
+        userID: 'cognito-vet-1',
+        userRole: 'VETERINARIAN',
+        documentType: 'PRIVACY_POLICY',
+        documentVersion: '1.0',
+      },
+    ])
   })
 
   it('relance (propage) une erreur GraphQL/@auth résolue par le client Gen2 sur CreateVeterinarian', async () => {
@@ -332,6 +397,54 @@ describe('useRegistrationCompletion.completeRegistration — échec au milieu de
     expect(isCompleting.value).toBe(false)
     expect(consoleErrorSpy).toHaveBeenCalled()
 
+    consoleErrorSpy.mockRestore()
+  })
+})
+
+// Scaffolding légal/RGPD (2026-08-25, docs/adr/0014) : défense en profondeur, voir le
+// commentaire de `completeOwnerRegistration`/`completeVetRegistration` dans
+// useRegistrationCompletion.js. Les deux vues d'inscription bloquent déjà la progression
+// tant que les cases ne sont pas cochées -- ce garde-fou couvre le cas où cette fonction
+// serait appelée par un autre chemin (test, futur appelant) sans passer par ces vues.
+describe('useRegistrationCompletion.completeRegistration — garde-fou CONSENT_REQUIRED', () => {
+  beforeEach(resetAllMocks)
+
+  it.each([
+    ['owner', buildOwnerData, { cguAccepted: false, privacyAccepted: true }],
+    ['owner', buildOwnerData, { cguAccepted: true, privacyAccepted: false }],
+    ['owner', buildOwnerData, { cguAccepted: false, privacyAccepted: false }],
+    ['vet', buildVetData, { cguAccepted: false, privacyAccepted: true }],
+    ['vet', buildVetData, { cguAccepted: true, privacyAccepted: false }],
+  ])(
+    "rejette avant toute création (%s) si l'une des deux cases n'est pas cochée (%j)",
+    async (_role, buildData, overrides) => {
+      const { completeRegistration } = useRegistrationCompletion()
+
+      await expect(
+        completeRegistration(buildData(overrides), 'cognito-user-1'),
+      ).rejects.toThrow('CONSENT_REQUIRED')
+
+      expect(ownerCreateMock).not.toHaveBeenCalled()
+      expect(clinicCreateMock).not.toHaveBeenCalled()
+      expect(vetCreateMock).not.toHaveBeenCalled()
+      expect(consentRecordCreateMock).not.toHaveBeenCalled()
+    },
+  )
+
+  it('CreateConsentRecord échoue (erreur GraphQL/@auth) : propage, CreateAnimal/CreateOwnerAvailability ne sont jamais appelés', async () => {
+    ownerCreateMock.mockResolvedValue({ data: { id: 'owner-123' }, errors: undefined })
+    consentRecordCreateMock.mockResolvedValue({
+      data: null,
+      errors: [{ message: 'Not Authorized to access createConsentRecord' }],
+    })
+
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { completeRegistration } = useRegistrationCompletion()
+
+    await expect(completeRegistration(buildOwnerData(), 'cognito-user-1')).rejects.toThrow()
+
+    expect(animalCreateMock).not.toHaveBeenCalled()
+    expect(availabilityCreateMock).not.toHaveBeenCalled()
     consoleErrorSpy.mockRestore()
   })
 })
