@@ -409,3 +409,41 @@ describe('amplify/data/resource.ts — linkRequestToMission (prérequis Phase 8,
     expect(mutationType).not.toContain('@aws_auth')
   })
 })
+
+describe('amplify/data/resource.ts — ConsentRecord/DonorValidationAttestation (scaffolding légal/RGPD, 2026-08-25, docs/adr/0014)', () => {
+  it('ConsentRecord et DonorValidationAttestation compilent tous les deux en @model', () => {
+    expect(extractType('ConsentRecord')).toContain('@model')
+    expect(extractType('DonorValidationAttestation')).toContain('@model')
+  })
+
+  // Write-once véritable : aucune des deux règles ne doit JAMAIS lister `update`/`delete`,
+  // pour personne -- exigence produit explicite ("jamais modifié ou supprimé après coup").
+  it('ConsentRecord : ownerDefinedIn("userID"), create+read seul, jamais update/delete', () => {
+    const consentRecordType = extractType('ConsentRecord')
+    expect(consentRecordType).toContain('ownerField: "userID"')
+    expect(consentRecordType).toContain('operations: [create, read]')
+    expect(consentRecordType).not.toContain('update')
+    expect(consentRecordType).not.toContain('delete')
+  })
+
+  it("DonorValidationAttestation : groupe Veterinarians, create+read seul, jamais update/delete", () => {
+    const attestationType = extractType('DonorValidationAttestation')
+    expect(attestationType).toContain('{allow: groups, operations: [create, read], groups: ["Veterinarians"]}')
+    expect(attestationType).not.toContain('update')
+    expect(attestationType).not.toContain('delete')
+  })
+
+  it('DonorValidationAttestation.animal/veterinarian compilent en belongsTo, appariés par Animal.validationAttestations/Veterinarian.donorValidationAttestations (ADR-0010)', () => {
+    const attestationType = extractType('DonorValidationAttestation')
+    expect(attestationType).toContain('animal: Animal @belongsTo')
+    expect(attestationType).toContain('veterinarian: Veterinarian @belongsTo')
+    expect(extractType('Animal')).toContain('validationAttestations: [DonorValidationAttestation] @hasMany')
+    expect(extractType('Veterinarian')).toContain('donorValidationAttestations: [DonorValidationAttestation] @hasMany')
+  })
+
+  it('les 3 enums (AccountRole/LegalDocumentType/DonorValidationEventType) compilent avec leurs valeurs exactes', () => {
+    expect(compiledSdl).toContain('enum AccountRole {\n  OWNER\n  VETERINARIAN\n}')
+    expect(compiledSdl).toContain('enum LegalDocumentType {\n  CGU\n  PRIVACY_POLICY\n  CGV\n}')
+    expect(compiledSdl).toContain('enum DonorValidationEventType {\n  ATTESTATION\n  REVOCATION\n}')
+  })
+})

@@ -52,6 +52,12 @@ const form = ref({
   animal_isVaccinated: false,
   animal_isSterilized: false,
   animal_donationFrequency: DonationFrequency.ASAP,
+
+  // Scaffolding légal/RGPD (2026-08-25, docs/adr/0014) — jamais pré-coché (le consentement
+  // doit être un acte positif, demande produit explicite) : `false` par défaut, pas
+  // d'initialisation à `true`.
+  cguAccepted: false,
+  privacyAccepted: false,
 })
 
 const bloodOptions = computed(() => {
@@ -94,6 +100,15 @@ const nextStep = () => {
 
   if (!form.value.latitude || !form.value.longitude) {
     auth.setError(t('errors.invalid_address'))
+    return
+  }
+
+  // Scaffolding légal/RGPD (2026-08-25, docs/adr/0014) : les deux cases ne sont jamais
+  // pré-cochées (voir `form` ci-dessus), donc bloquantes ici tant qu'elles ne sont pas
+  // explicitement cochées — même garde-fou repris côté composable
+  // (`useRegistrationCompletion.js`, `CONSENT_REQUIRED`) en défense en profondeur.
+  if (!form.value.cguAccepted || !form.value.privacyAccepted) {
+    auth.setError(t('errors.consent_required'))
     return
   }
 
@@ -256,6 +271,33 @@ const handleRegister = async () => {
             input-class="w-full !bg-zinc-200 dark:!bg-zinc-800 !border-none !text-zinc-900 dark:!text-white !p-3"
             required
           />
+        </div>
+
+        <div class="flex flex-col gap-2 mt-2">
+          <div class="flex items-start gap-2">
+            <Checkbox v-model="form.cguAccepted" :binary="true" input-id="reg-owner-cgu" />
+            <label for="reg-owner-cgu" class="text-sm cursor-pointer select-none">
+              <i18n-t keypath="auth.register_common.consent.cgu" tag="span">
+                <template #link>
+                  <router-link to="/legal/cgu" target="_blank" class="underline font-semibold">{{
+                    $t('auth.register_common.consent.cgu_link')
+                  }}</router-link>
+                </template>
+              </i18n-t>
+            </label>
+          </div>
+          <div class="flex items-start gap-2">
+            <Checkbox v-model="form.privacyAccepted" :binary="true" input-id="reg-owner-privacy" />
+            <label for="reg-owner-privacy" class="text-sm cursor-pointer select-none">
+              <i18n-t keypath="auth.register_common.consent.privacy" tag="span">
+                <template #link>
+                  <router-link to="/legal/privacy" target="_blank" class="underline font-semibold">{{
+                    $t('auth.register_common.consent.privacy_link')
+                  }}</router-link>
+                </template>
+              </i18n-t>
+            </label>
+          </div>
         </div>
 
         <Button

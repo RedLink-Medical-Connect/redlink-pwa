@@ -47,3 +47,17 @@ describe('router (Phase 6.B - pages légales/support)', () => {
     expect(resolved.meta.requiresAuth).toBeUndefined()
   })
 })
+
+// Scaffolding légal/RGPD (2026-08-25, docs/adr/0014) : LegalView.vue unique remplacée par
+// 4 vues dédiées (CGU/CGV/confidentialité/mentions légales), toutes publiques.
+describe('router (scaffolding légal/RGPD 2026-08-25 - CGU/CGV/confidentialité)', () => {
+  it.each([
+    ['/legal/cgu', 'legal-cgu'],
+    ['/legal/cgv', 'legal-cgv'],
+    ['/legal/privacy', 'legal-privacy'],
+  ])('resolves %s to the %s route, with no auth requirement', (path, name) => {
+    const resolved = router.resolve(path)
+    expect(resolved.name).toBe(name)
+    expect(resolved.meta.requiresAuth).toBeUndefined()
+  })
+})

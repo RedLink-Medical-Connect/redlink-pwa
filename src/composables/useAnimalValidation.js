@@ -4,6 +4,7 @@ import { getCurrentUser } from 'aws-amplify/auth'
 import { isValidatedDonor } from '@/services/eligibility-service'
 import { throwIfGraphqlError } from '@/services/graphql-error-service'
 import { resolveClinicOwnerRelationUpsert } from '@/services/clinic-owner-relation-service'
+import { DONOR_VALIDATION_ATTESTATION_VERSION } from '@/constants/legal.js'
 
 // Phase 8, sous-tâche 5 (lot 3/3) : migré sur le client Gen2 (`aws-amplify/data`,
 // `client.models.Animal.*`). `listAnimalsForValidation`/`validateAnimalDonorSimple`/
@@ -35,6 +36,7 @@ const VALIDATION_DURATION_MS = 365 * 24 * 60 * 60 * 1000
 // (erreur réseau, @auth...) retombe sur la clé générique.
 const VALIDATION_ERROR_KEYS = {
   BLOOD_GROUP_UNKNOWN: 'dashboard.validations.toasts.blood_group_unknown',
+  ATTESTATION_REQUIRED: 'dashboard.validations.toasts.attestation_required',
 }
 
 /**
@@ -279,15 +281,55 @@ export function useAnimalValidation() {
    * dans `pendingAnimals`), le rattachement clinique est silencieusement sauté -- pas
    * bloquant (best-effort par nature).
    *
+   * Scaffolding légal/RGPD (2026-08-25, docs/adr/0014) : refuse aussi (throw
+   * `ATTESTATION_REQUIRED`) si `attestationAccepted` n'est pas `true` -- défense en
+   * profondeur, ValidationsView.vue désactive déjà le bouton de confirmation tant que la
+   * case n'est pas cochée. Si accepté, écrit d'abord une `DonorValidationAttestation`
+   * (`eventType: 'ATTESTATION'`, preuve immuable -- voir amplify/data/resource.ts) AVANT de
+   * flipper `isValidatedDonor` : ORDRE délibéré, PAS le pattern "écriture secondaire
+   * best-effort" du reste du repo (`upsertClinicOwnerRelation` ci-dessous reste, lui,
+   * best-effort et APRÈS la mutation critique). Ici l'attestation EST la partie critique du
+   * point de vue légal (demande produit : preuve infalsifiable de qui a attesté quoi et
+   * quand) -- si son écriture échoue, `isValidatedDonor` ne doit JAMAIS passer à `true` :
+   * l'inverse (attestation écrite après coup, best-effort) laisserait possible un donneur
+   * marqué validé sans aucune preuve d'attestation associée, exactement ce que ce
+   * scaffolding existe pour empêcher. `clinicID` reste best-effort (résolution
+   * `fetchVetClinicId()` protégée par son propre `try/catch` local, jamais bloquant) : un
+   * clinicID non résolu dégrade seulement un champ dénormalisé de confort, pas la preuve
+   * elle-même (`veterinarianID`/`attestationVersion`/`createdAt` restent toujours présents).
+   *
    * @param {string} animalId
+   * @param {boolean} attestationAccepted La case d'attestation sur l'honneur a été cochée.
    */
-  const validateAnimal = async (animalId) => {
+  const validateAnimal = async (animalId, attestationAccepted) => {
     isValidating.value = true
     try {
+      if (!attestationAccepted) {
+        throw new Error('ATTESTATION_REQUIRED')
+      }
+
       const knownAnimal = pendingAnimals.value.find((a) => a.id === animalId)
       if (knownAnimal && (!knownAnimal.bloodGroup || knownAnimal.bloodGroup === 'UNKNOWN')) {
         throw new Error('BLOOD_GROUP_UNKNOWN')
       }
+
+      const { userId: veterinarianID } = await getCurrentUser()
+
+      let clinicID = null
+      try {
+        clinicID = await fetchVetClinicId()
+      } catch (e) {
+        console.error('Erreur résolution clinicID pour attestation (non bloquant) :', e)
+      }
+
+      const { errors: attestationErrors } = await client.models.DonorValidationAttestation.create({
+        animalID: animalId,
+        veterinarianID,
+        clinicID,
+        eventType: 'ATTESTATION',
+        attestationVersion: DONOR_VALIDATION_ATTESTATION_VERSION,
+      })
+      throwIfGraphqlError(attestationErrors, 'createDonorValidationAttestation')
 
       const validationExpiresAt = new Date(Date.now() + VALIDATION_DURATION_MS).toISOString()
 

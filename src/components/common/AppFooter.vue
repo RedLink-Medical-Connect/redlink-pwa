@@ -20,8 +20,10 @@ const currentYear = new Date().getFullYear();
         <div class="md:col-span-3 flex flex-col gap-3">
           <h4 class="font-bold text-lg border-l-4 border-white pl-3">{{ $t('layout.footer.legal_section') }}</h4>
           <nav class="flex flex-col gap-2 mt-2">
-            <router-link to="/legal" class="text-white/80 hover:text-white transition text-sm block">{{ $t('layout.footer.terms') }}</router-link>
-            <router-link to="/legal" class="text-white/80 hover:text-white transition text-sm block">{{ $t('layout.footer.privacy') }}</router-link>
+            <router-link to="/legal/cgu" class="text-white/80 hover:text-white transition text-sm block">{{ $t('layout.footer.terms') }}</router-link>
+            <router-link to="/legal/privacy" class="text-white/80 hover:text-white transition text-sm block">{{ $t('layout.footer.privacy') }}</router-link>
+            <router-link to="/legal/cgv" class="text-white/80 hover:text-white transition text-sm block">{{ $t('layout.footer.cgv') }}</router-link>
+            <router-link to="/legal" class="text-white/80 hover:text-white transition text-sm block">{{ $t('layout.footer.legal_notice') }}</router-link>
           </nav>
         </div>
 

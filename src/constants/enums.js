@@ -41,6 +41,23 @@ export const RequestType = Object.freeze({
   APPOINTMENT: 'APPOINTMENT'
 })
 
+// Scaffolding légal/RGPD (2026-08-25) — miroir front de `AccountRole`/`LegalDocumentType`
+// (amplify/data/resource.ts). Owner/Veterinarian n'ont pas de champ "role" côté schéma (le
+// rôle se déduit du modèle) : ces valeurs ne servent qu'à `ConsentRecord.userRole`, seul
+// endroit qui a besoin de le porter explicitement (voir docs/adr/0014).
+export const AccountRole = Object.freeze({
+  OWNER: 'OWNER',
+  VETERINARIAN: 'VETERINARIAN',
+})
+
+// CGV incluse même si non capturée à l'inscription aujourd'hui (Stripe hors périmètre V1,
+// voir src/constants/legal.js) — même raison que côté schéma.
+export const LegalDocumentType = Object.freeze({
+  CGU: 'CGU',
+  PRIVACY_POLICY: 'PRIVACY_POLICY',
+  CGV: 'CGV',
+})
+
 // Statut d'affichage "donneur validé" côté Owner (AnimalsView.vue) — dérivé de
 // `isValidatedDonor()`/`Animal.isValidatedDonor` (eligibility-service.js), jamais
 // persisté tel quel côté schéma.
