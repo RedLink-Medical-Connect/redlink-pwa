@@ -45,7 +45,16 @@ export const auth = defineAuth({
       required: false,
     },
   },
-  groups: ['Veterinarians', 'Owners'],
+  // 'Admins' (2026-08-26, double validation de Mission + notation) : ferme le gap
+  // préexistant documenté par docs/adr/0010 section 3 ("groupe Cognito Admins jamais
+  // provisionné par l'IaC, ni en Gen1 ni ici") -- `Mission`/`Veterinarian`/`Rating`
+  // référencent déjà `allow.group('Admins')` côté `amplify/data/resource.ts` (lecture
+  // seule pour Mission/Rating, lecture+suppression pour Veterinarian, ce dernier
+  // préexistant). Provisioning MANUEL d'un utilisateur dans ce groupe reste hors
+  // périmètre (pas d'assignation automatique à l'inscription) -- l'interface admin de
+  // résolution des Missions DISPUTED n'est pas construite dans cette sous-tâche non
+  // plus (voir amplify/data/resource.ts, section Mission).
+  groups: ['Veterinarians', 'Owners', 'Admins'],
   triggers: {
     postConfirmation,
   },

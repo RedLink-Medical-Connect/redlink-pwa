@@ -28,12 +28,44 @@ export const RequestStatus = Object.freeze({
   CANCELLED: 'CANCELLED',
 })
 
+// PENDING_VALIDATION/COMPLETED_AUTO/DISPUTED (2026-08-26, double validation de Mission,
+// amplify/data/resource.ts) ajoutés en miroir du schéma -- EN_ROUTE/ARRIVED existent côté
+// schéma (amplify/data/resource.ts, MissionStatus) mais n'avaient déjà pas d'équivalent ici
+// avant ce lot (gap préexistant, hors périmètre de cette sous-tâche, non ajouté ici pour ne
+// pas élargir le diff au-delà de ce qui est demandé). COMPLETED_AUTO n'est écrit par aucun
+// code applicatif à ce jour (réservé à une future Lambda planifiée, non implémentée) ;
+// exposé ici pour que le front puisse déjà le reconnaître en lecture (ex. libellé d'état)
+// sans attendre cette Lambda.
 export const MissionStatus = Object.freeze({
   ACCEPTED: 'ACCEPTED',
   PENDING_ARRIVAL: 'PENDING_ARRIVAL',
   COMPLETED: 'COMPLETED',
   NO_SHOW: 'NO_SHOW',
   CANCELLED: 'CANCELLED',
+  PENDING_VALIDATION: 'PENDING_VALIDATION',
+  COMPLETED_AUTO: 'COMPLETED_AUTO',
+  DISPUTED: 'DISPUTED',
+})
+
+// Miroir front de `MissionValidationOutcome` (amplify/data/resource.ts) -- même convention
+// que `AccountRole`/`LegalDocumentType` ci-dessus : seul endroit où le front a besoin de
+// connaître ces valeurs (soumission de `submitMissionValidation`, prochaine sous-tâche —
+// composables non implémentés dans cette étape 1/5, schéma uniquement). 'PENDING' est l'état
+// initial implicite (jamais écrit explicitement côté resolver, voir
+// amplify/data/resolvers/submit-mission-validation-write-side.js) — un champ non encore
+// validé apparaît comme `null`/absent côté client, pas littéralement 'PENDING'.
+export const MissionValidationOutcome = Object.freeze({
+  PENDING: 'PENDING',
+  CONFIRMED: 'CONFIRMED',
+  DENIED: 'DENIED',
+})
+
+// Miroir front de `RatingParticipantRole` (amplify/data/resource.ts) -- distingue les deux
+// côtés d'une `Rating` (Owner note la Clinic, Clinic note l'Owner). Voir
+// docs/adr/0015-rating-model-and-forgery-residual.md.
+export const RatingParticipantRole = Object.freeze({
+  OWNER: 'OWNER',
+  CLINIC: 'CLINIC',
 })
 
 export const RequestType = Object.freeze({

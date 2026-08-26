@@ -447,3 +447,101 @@ describe('amplify/data/resource.ts — ConsentRecord/DonorValidationAttestation 
     expect(compiledSdl).toContain('enum DonorValidationEventType {\n  ATTESTATION\n  REVOCATION\n}')
   })
 })
+
+describe('amplify/data/resource.ts — double validation de Mission + notation (2026-08-26)', () => {
+  it('les 3 nouveaux enums (MissionValidationOutcome/RatingParticipantRole/ClinicAccountStatus) compilent avec leurs valeurs exactes', () => {
+    expect(compiledSdl).toContain('enum MissionValidationOutcome {\n  PENDING\n  CONFIRMED\n  DENIED\n}')
+    expect(compiledSdl).toContain('enum RatingParticipantRole {\n  OWNER\n  CLINIC\n}')
+    expect(compiledSdl).toContain('enum ClinicAccountStatus {\n  ACTIVE\n  UNDER_REVIEW\n}')
+  })
+
+  it('MissionStatus conserve les 7 valeurs existantes et gagne PENDING_VALIDATION/COMPLETED_AUTO/DISPUTED', () => {
+    expect(compiledSdl).toContain(
+      'enum MissionStatus {\n  ACCEPTED\n  PENDING_ARRIVAL\n  EN_ROUTE\n  ARRIVED\n  COMPLETED\n  NO_SHOW\n  CANCELLED\n  PENDING_VALIDATION\n  COMPLETED_AUTO\n  DISPUTED\n}',
+    )
+  })
+
+  describe('Mission — 5 champs de double validation, lecture seule pour Owner ET Veterinarians (écart assumé vs. plan initial, voir resource.ts)', () => {
+    const missionType = extractType('Mission')
+
+    it('les 5 champs vivent bien dans le type Mission, tous nullable (pas de required)', () => {
+      expect(missionType).toContain('clinicValidationOutcome: MissionValidationOutcome @auth(')
+      expect(missionType).toContain('clinicValidatedAt: AWSDateTime @auth(')
+      expect(missionType).toContain('ownerValidationOutcome: MissionValidationOutcome @auth(')
+      expect(missionType).toContain('ownerValidatedAt: AWSDateTime @auth(')
+      expect(missionType).toContain('ownerDisputeReason: String @auth(')
+    })
+
+    it.each([
+      'clinicValidationOutcome',
+      'clinicValidatedAt',
+      'ownerValidationOutcome',
+      'ownerValidatedAt',
+      'ownerDisputeReason',
+    ])('%s : Owner ET Veterinarians ont "read" seul -- aucune mutation générée ne peut écrire ces champs', (fieldName) => {
+      const block = extractFieldAuthBlock(missionType, fieldName)
+      expect(block).toContain('{allow: owner, operations: [read]')
+      expect(block).toContain('{allow: groups, operations: [read], groups: ["Veterinarians"]}')
+      // Ni l'un ni l'autre ne doit conserver "update" hérité de la règle de niveau modèle --
+      // c'est exactement le résidu de sécurité que ce scoping de champ ferme (voir
+      // `missionValidationFieldsReadOnly` dans resource.ts).
+      expect(block).not.toContain('update')
+      expect(block).not.toContain('create')
+    })
+
+    it('la règle de type Mission gagne allow.group("Admins").to(["read"]) -- ferme le gap Admins (docs/adr/0010)', () => {
+      const typeAuthStart = compiledSdl.indexOf('type Mission @model @auth(')
+      const typeAuthEnd = compiledSdl.indexOf('])\n{', typeAuthStart)
+      const typeAuthBlock = compiledSdl.slice(typeAuthStart, typeAuthEnd)
+      expect(typeAuthBlock).toContain('{allow: groups, operations: [read], groups: ["Admins"]}')
+    })
+
+    it('Mission.ratings compile en hasMany, contrepartie de Rating.mission (ADR-0010)', () => {
+      expect(missionType).toContain('ratings: [Rating] @hasMany(references: ["missionID"])')
+    })
+  })
+
+  describe('Rating — clé composite (missionID, raterRole), notation privée', () => {
+    it('compile en @model', () => {
+      expect(extractType('Rating')).toContain('@model')
+    })
+
+    it('missionID porte @primaryKey(sortKeyFields: ["raterRole"]) -- identifier(["missionID", "raterRole"]) confirmé comme API réelle', () => {
+      const ratingType = extractType('Rating')
+      expect(ratingType).toContain('missionID: ID! @primaryKey(sortKeyFields: ["raterRole"])')
+    })
+
+    it('mission (belongsTo) apparié à Mission.ratings (hasMany)', () => {
+      expect(extractType('Rating')).toContain('mission: Mission @belongsTo(references: ["missionID"])')
+    })
+
+    it('règle @auth de type : ownerDefinedIn("raterID") create+read, Veterinarians create seul (pas read), Admins read seul', () => {
+      const typeAuthStart = compiledSdl.indexOf('type Rating @model @auth(')
+      const typeAuthEnd = compiledSdl.indexOf('])\n{', typeAuthStart)
+      const typeAuthBlock = compiledSdl.slice(typeAuthStart, typeAuthEnd)
+      expect(typeAuthBlock).toContain('{allow: owner, operations: [create, read], ownerField: "raterID"}')
+      expect(typeAuthBlock).toContain('{allow: groups, operations: [create], groups: ["Veterinarians"]}')
+      expect(typeAuthBlock).toContain('{allow: groups, operations: [read], groups: ["Admins"]}')
+      // Le résidu documenté par docs/adr/0015 : Veterinarians n'a PAS "read" en clair dans sa
+      // propre règle de groupe (fuite cross-clinique sinon) -- seul ownerDefinedIn le donne, sur
+      // sa propre ligne.
+      expect(typeAuthBlock).not.toContain('{allow: groups, operations: [create, read], groups: ["Veterinarians"]}')
+    })
+  })
+
+  describe('submitMissionValidation — mutation custom en pipeline (3 fonctions, voir resource.ts et les resolvers)', () => {
+    it('compile avec les bons arguments et retourne Mission', () => {
+      const mutationType = extractType('Mutation')
+      expect(mutationType).toContain(
+        'submitMissionValidation(missionId: ID!, outcome: MissionValidationOutcome!, disputeReason: String): Mission',
+      )
+    })
+
+    it('autorisation @aws_cognito_user_pools sans restriction de groupe (même niveau que linkRequestToMission)', () => {
+      const mutationType = extractType('Mutation')
+      expect(mutationType).toContain(
+        'submitMissionValidation(missionId: ID!, outcome: MissionValidationOutcome!, disputeReason: String): Mission @aws_cognito_user_pools',
+      )
+    })
+  })
+})

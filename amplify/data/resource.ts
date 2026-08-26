@@ -83,6 +83,31 @@ const ownerCreateReadOnlyVetReadUpdate = (allow: any) => [
 // modèle ci-dessous, `.to(['create', 'read'])` posé directement sur `allow.ownerDefinedIn`/
 // `allow.group` (pas besoin d'un helper factorisé comme les deux ci-dessus : un seul appel
 // chacun, pas de répétition à casser en cas d'oubli).
+// Lecture seule des DEUX côtés (variante champ de l'idiome "write-once véritable"
+// ci-dessus, qui lui est de niveau MODÈLE) -- double validation de Mission + notation
+// (2026-08-26). ÉCART ASSUMÉ par rapport au plan initial de cette sous-tâche, à signaler
+// explicitement en revue Lead Dev : le plan ne prévoyait AUCUNE `.authorization()` de champ
+// sur `clinicValidationOutcome`/`clinicValidatedAt`/`ownerValidationOutcome`/
+// `ownerValidatedAt`/`ownerDisputeReason`, en s'appuyant sur l'héritage des règles de
+// niveau modèle de `Mission` (`allow.owner().to(['create', 'read', 'delete'])` /
+// `allow.group('Veterinarians').to(['read', 'update'])`) -- avec le raisonnement "ni Owner
+// ni Veterinarian n'écrit ces champs via une mutation générée". C'est vrai côté Owner (la
+// règle owner de `Mission` n'a jamais eu `update`, ADR-0004), mais FAUX côté Veterinarian :
+// sans ce scoping de champ, l'héritage du `update` de niveau modèle aurait donné à N'IMPORTE
+// QUEL Veterinarian authentifié un accès `update` DIRECT sur ces 5 champs via
+// `client.models.Mission.update()` -- y compris `ownerValidationOutcome`/
+// `ownerDisputeReason`, le CÔTÉ DE L'OWNER, qu'un Veterinarian aurait alors pu falsifier
+// directement, cassant la garantie centrale de cette sous-tâche (double validation
+// MUTUELLE, chaque côté ne peut écrire QUE le sien, uniquement via
+// `submitMissionValidation`). D'où ce helper : les deux côtés passent en `[read]` seul au
+// niveau champ, la SEULE voie d'écriture réelle restant le resolver custom (bypass complet
+// du système `@auth`, comme `linkRequestToMission`/ADR-0011 -- ce scoping de champ protège
+// uniquement contre les mutations GÉNÉRÉES, pas contre le resolver lui-même, qui n'en a de
+// toute façon pas besoin puisqu'il cible directement la table).
+const missionValidationFieldsReadOnly = (allow: any) => [
+  allow.owner().to(['read']),
+  allow.group('Veterinarians').to(['read']),
+]
 
 export const schema = a.schema({
   // ==========================================================
@@ -92,6 +117,20 @@ export const schema = a.schema({
   DonationFrequency: a.enum(['ASAP', 'TWICE_YEAR', 'ONCE_YEAR']),
   RequestType: a.enum(['EMERGENCY', 'APPOINTMENT']),
   RequestStatus: a.enum(['OPEN', 'IN_PROGRESS', 'CLOSED', 'CANCELLED']),
+  // 'PENDING_VALIDATION'/'COMPLETED_AUTO'/'DISPUTED' (2026-08-26, double validation de
+  // Mission) : les valeurs existantes ne changent PAS de sens. 'PENDING_VALIDATION' est le
+  // statut intermédiaire une fois qu'un des deux côtés (Owner/Clinic) a soumis sa validation
+  // via `submitMissionValidation` mais pas l'autre (voir la mutation custom, section 5, et
+  // son resolver `amplify/data/resolvers/submit-mission-validation-*.js`) -- succède à
+  // `ARRIVED`/`PENDING_ARRIVAL` dans le cycle de vie réel, pas câblé ici dans une machine à
+  // états formelle (aucune des valeurs `MissionStatus` existantes ne l'était déjà).
+  // 'COMPLETED_AUTO' n'est écrit par AUCUN code de cette sous-tâche -- réservé à une future
+  // Lambda planifiée (délai de 7 jours sans réponse d'un des deux côtés), volontairement non
+  // implémentée ici (voir l'en-tête de `submit-mission-validation-write-side.js`). 'DISPUTED'
+  // est calculé par le resolver quand les deux côtés ont validé mais ne sont pas d'accord
+  // (un CONFIRMED + un DENIED) -- visible en lecture seule par le groupe `Admins` (règle de
+  // type ci-dessous), aucune interface de résolution admin n'est construite dans cette
+  // sous-tâche.
   MissionStatus: a.enum([
     'ACCEPTED',
     'PENDING_ARRIVAL',
@@ -100,6 +139,9 @@ export const schema = a.schema({
     'COMPLETED',
     'NO_SHOW',
     'CANCELLED',
+    'PENDING_VALIDATION',
+    'COMPLETED_AUTO',
+    'DISPUTED',
   ]),
   // Scaffolding légal/RGPD (2026-08-25, docs/adr/0014) -- ConsentRecord.userRole : ni Owner
   // ni Veterinarian ne portent de champ "role" explicite aujourd'hui (le rôle se déduit du
@@ -118,6 +160,31 @@ export const schema = a.schema({
   // commentaire du modèle plus bas -- aucune UI de révocation n'existe encore dans ce repo,
   // écrit en prévision plutôt qu'en réaction à un besoin actuel constaté).
   DonorValidationEventType: a.enum(['ATTESTATION', 'REVOCATION']),
+
+  // Double validation de Mission + notation par étoiles bidirectionnelle privée
+  // (2026-08-26) -- plan d'architecture validé avec le repo owner avant tout code, cette
+  // sous-tâche couvre le schéma/`@auth`/resolver (étape 1/5), pas les composables front ni
+  // la Lambda planifiée `COMPLETED_AUTO` (étapes suivantes, hors périmètre ici).
+  //
+  // 'PENDING' est l'état INITIAL implicite (aucune valeur écrite -- voir
+  // `submit-mission-validation-write-side.js` pour pourquoi un champ jamais écrit EST
+  // 'PENDING' côté logique, sans `.default()` de schéma) ; seuls 'CONFIRMED'/'DENIED' sont
+  // des soumissions valides via `submitMissionValidation`, rejeté explicitement sinon.
+  MissionValidationOutcome: a.enum(['PENDING', 'CONFIRMED', 'DENIED']),
+  // Distingue les deux côtés d'une `Rating` (voir section 3, modèle `Rating` plus bas) --
+  // même rôle structurel qu'`AccountRole` pour `ConsentRecord` (docs/adr/0014) : ni Owner ni
+  // Veterinarian ne porte de champ "role" natif, le modèle cible seul ne suffit pas à
+  // distinguer "qui note qui" sur une ligne `Rating` qui réutilise un seul modèle pour les
+  // deux sens de notation.
+  RatingParticipantRole: a.enum(['OWNER', 'CLINIC']),
+  // Déclaré pour cette sous-tâche (schéma) mais AUCUN champ ne le consomme encore -- aucune
+  // instruction du plan d'architecture ne demande d'ajouter un champ `Clinic.accountStatus`
+  // dans cette étape 1/5. Provisionné en avance de l'usage (même statut que
+  // `Veterinarian.validatedMissions`/`DonorValidationAttestation.revokedAttestationID`,
+  // ADR-0010/0014) pour qu'une future sous-tâche (interface admin de résolution des
+  // Missions `DISPUTED`, mentionnée mais non construite ici) puisse marquer une Clinic
+  // `UNDER_REVIEW` sans nouveau changement de schéma.
+  ClinicAccountStatus: a.enum(['ACTIVE', 'UNDER_REVIEW']),
 
   // 1. CLINIQUE & VÉTÉRINAIRES
   // ---------------------------------------------------------
@@ -429,6 +496,26 @@ export const schema = a.schema({
       // (Gen1 non plus : aucun champ réciproque n'existait sur Mission) ; nom choisi pour rester
       // lisible dans le client généré si un futur besoin apparaît, sans laisser un champ anonyme.
       activeForRequest: a.hasOne('Request', 'activeMissionID'),
+
+      // Double validation de Mission (2026-08-26) -- écrits UNIQUEMENT par la mutation custom
+      // `submitMissionValidation` (section 5, resolver `submit-mission-validation-*.js`, bypass
+      // `@auth` comme `linkRequestToMission`/ADR-0011). `.authorization()` de champ
+      // (`missionValidationFieldsReadOnly`, voir ce helper en tête de fichier pour l'écart
+      // assumé par rapport au plan initial) : Owner ET Veterinarians en lecture seule sur les
+      // 5 champs, aucune mutation générée (`client.models.Mission.update()`) ne peut les
+      // écrire, côté Owner comme côté Veterinarian.
+      clinicValidationOutcome: a.ref('MissionValidationOutcome').authorization(missionValidationFieldsReadOnly),
+      clinicValidatedAt: a.datetime().authorization(missionValidationFieldsReadOnly),
+      ownerValidationOutcome: a.ref('MissionValidationOutcome').authorization(missionValidationFieldsReadOnly),
+      ownerValidatedAt: a.datetime().authorization(missionValidationFieldsReadOnly),
+      ownerDisputeReason: a.string().authorization(missionValidationFieldsReadOnly),
+
+      // Contrepartie obligatoire de `Rating.mission` (`belongsTo` plus bas, voir docs/adr/0010
+      // pour la raison mécanique de cet appariement) -- notation par étoiles bidirectionnelle
+      // privée (2026-08-26). Historique complet des notations liées à cette Mission (au plus
+      // deux lignes, une par `RatingParticipantRole`, contrainte portée par
+      // `Rating.identifier(['missionID', 'raterRole'])`, pas ici).
+      ratings: a.hasMany('Rating', 'missionID'),
     })
     .authorization((allow) => [
       // Restreint aux opérations réellement utilisées (revue DevSecOps Gen1, Phase 5) : sans ce
@@ -440,6 +527,85 @@ export const schema = a.schema({
       // appelés côté Owner (useOwnerMissions.js -- createMissionSimple/deleteMissionSimple).
       allow.owner().to(['create', 'read', 'delete']),
       allow.group('Veterinarians').to(['read', 'update']),
+      // Double validation de Mission (2026-08-26) -- visibilité admin en LECTURE SEULE sur les
+      // Missions (en particulier `DISPUTED`, calculée par `submitMissionValidation`) : ferme le
+      // gap `Admins` documenté par docs/adr/0010 section 3 (groupe désormais provisionné,
+      // `amplify/auth/resource.ts`). Pas d'`update` : l'interface admin de résolution des
+      // litiges n'est pas construite dans cette sous-tâche (mentionné dans le plan comme hors
+      // périmètre), lecture seule uniquement pour l'instant.
+      allow.group('Admins').to(['read']),
+    ]),
+
+  // Notation par étoiles bidirectionnelle PRIVÉE (2026-08-26) -- une Mission clôturée (double
+  // validation ci-dessus) donne lieu à AU PLUS deux notations : l'Owner note la Clinic, la
+  // Clinic note l'Owner, chacune indépendante de l'autre. `.identifier(['missionID',
+  // 'raterRole'])` (clé composite, PAS le défaut `id` auto-généré) empêche mécaniquement une
+  // double soumission côté MÊME rôle sur la MÊME Mission -- une seconde `create` avec le même
+  // couple échoue nativement (contrainte de clé primaire DynamoDB), sans avoir besoin d'une
+  // condition d'écriture dédiée comme `submitMissionValidation` ci-dessus. Vérifié pour cette
+  // sous-tâche (pas deviné) : `.identifier([...])` est bien l'API réelle installée
+  // (`node_modules/@aws-amplify/data-schema/dist/esm/ModelType.d.ts`, JSDoc et exemple
+  // `.identifier(['name', 'email'])` correspondant exactement à l'usage ici).
+  //
+  // PAS de `.authorization()` séparée pour lire/écrire une éventuelle MOYENNE de notes par
+  // Clinic/Owner : cette agrégation n'existe pas encore (prochaine sous-tâche du plan --
+  // dénormalisation probable sur `Clinic`/`Owner`, hors périmètre schéma de cette étape 1/5).
+  // `Veterinarians` n'a délibérément PAS `read` dans la règle ci-dessous : seul
+  // `allow.ownerDefinedIn('raterID')` donne `read` à qui a ÉCRIT la ligne (donc au Veterinarian
+  // qui vient de noter, sur SA PROPRE notation) -- un `allow.group('Veterinarians').to(['read'])`
+  // supplémentaire aurait permis à N'IMPORTE QUEL Veterinarian authentifié de LISTER les notes
+  // reçues par N'IMPORTE QUELLE AUTRE clinique (fuite cross-clinique, aucune notion de
+  // "ma clinique" dans le système d'autorisation Gen2 pour ce modèle -- `ClinicOwnerRelation`
+  // n'aide pas ici, `Rating` n'a pas de FK vers `Clinic`). Notation reste donc PRIVÉE : chaque
+  // rater voit sa propre notation (`ownerDefinedIn`), personne d'autre ne peut lister celles des
+  // autres, sauf `Admins` (lecture seule, modération future -- non construite ici).
+  //
+  // Résidu ASSUMÉ, documenté en détail dans `docs/adr/0015-rating-model-and-forgery-residual.md`
+  // (même format qu'ADR-0004/0005) : un Veterinarian peut soumettre `raterID`/`targetID`
+  // ARBITRAIRES côté CLINIC (`allow.group('Veterinarians').to(['create'])` ci-dessous n'impose
+  // aucune contrainte sur la VALEUR de ces deux champs, même limite `@auth` que partout ailleurs
+  // dans ce fichier -- pas de contrainte serveur possible sur la valeur d'un champ, seulement sur
+  // l'ensemble d'opérations). Mitigation UNIQUEMENT côté client, dans le futur composable qui
+  // dérivera `raterID` du `clinicID` du Veterinarian authentifié plutôt que de faire confiance à
+  // un paramètre libre -- voir l'ADR pour l'analyse complète et l'alternative écartée (mutation
+  // custom dédiée, jugée disproportionnée pour ce pilote).
+  Rating: a
+    .model({
+      missionID: a.id().required(),
+      mission: a.belongsTo('Mission', 'missionID'),
+      raterID: a.id().required(),
+      // ÉCART DÉCOUVERT (vérifié, pas deviné) par rapport au plan initial -- qui prévoyait
+      // `a.ref('RatingParticipantRole').required()` ici, comme `targetRole` juste en dessous.
+      // `npx tsc --noEmit` ne l'a PAS attrapé (types valides), mais `schema.transform()` lève à
+      // l'exécution : "Invalid identifier definition. Field raterRole cannot be used in the
+      // identifier. Identifiers must reference required or DB-generated fields" --
+      // `validateNullableIdentifiers` (`node_modules/@aws-amplify/data-schema/src/
+      // SchemaProcessor.ts`) ne lit QUE `fieldDef.data.required` (positionné par
+      // `ModelField.required()`, ex. `a.id().required()`/`a.string().required()`) pour décider
+      // si un champ peut entrer dans `.identifier([...])` -- `RefType.required()` (un champ
+      // `a.ref(...)`, donc tout champ d'enum) positionne `data.valueRequired`, une propriété
+      // DIFFÉRENTE que ce validateur ne connaît pas. Résultat : AUCUN champ `a.ref()` d'enum ne
+      // peut faire partie d'une clé composite `.identifier()` avec la version installée de
+      // `@aws-amplify/data-schema`, quelle que soit sa déclaration -- pas un cas particulier de
+      // `RatingParticipantRole`. `raterRole` passe donc en `a.string().required()` UNIQUEMENT
+      // pour satisfaire cette contrainte du validateur ; `targetRole` (qui n'entre PAS dans
+      // l'identifiant) reste `a.ref('RatingParticipantRole').required()` sans ce problème.
+      // Résidu ASSUMÉ, documenté dans docs/adr/0015 : contrairement à `targetRole`, la valeur de
+      // `raterRole` n'est plus validée par le système de type GraphQL (un enum rejette une
+      // valeur hors énumération AU NIVEAU du schéma, une `String` non) -- seule mitigation :
+      // le futur composable n'enverra jamais que 'OWNER'/'CLINIC' (les valeurs de
+      // `RatingParticipantRole`), jamais une valeur arbitraire construite dynamiquement.
+      raterRole: a.string().required(),
+      targetID: a.id().required(),
+      targetRole: a.ref('RatingParticipantRole').required(),
+      stars: a.integer().required(),
+      comment: a.string(),
+    })
+    .identifier(['missionID', 'raterRole'])
+    .authorization((allow) => [
+      allow.ownerDefinedIn('raterID').to(['create', 'read']),
+      allow.group('Veterinarians').to(['create']),
+      allow.group('Admins').to(['read']),
     ]),
 
   // 4. LÉGAL / CONFORMITÉ (RGPD, attestation vétérinaire)
@@ -588,6 +754,55 @@ export const schema = a.schema({
     .handler(
       a.handler.custom({ dataSource: a.ref('Request'), entry: './resolvers/link-request-to-mission.js' }),
     ),
+
+  // Double validation de Mission (2026-08-26) -- même famille de pattern que
+  // `linkRequestToMission` ci-dessus (mutation custom, `dataSource: a.ref('Mission')`, bypass
+  // complet du système `@auth` de `Mission`, voir docs/adr/0011) mais avec un besoin métier que
+  // linkRequestToMission n'avait pas : écrire conditionnellement le côté de L'APPELANT PUIS
+  // dériver/écrire un second champ (`status`) à partir d'un état qui n'est connu qu'APRÈS cette
+  // première écriture. Un seul appel `ddb.update()` (unit resolver, un seul aller-retour vers la
+  // source de données par invocation) ne suffit pas -- `.handler([...])` prend ici un TABLEAU de
+  // 3 `a.handler.custom({...})`, compilé en un vrai resolver AppSync `kind: PIPELINE` (vérifié,
+  // pas deviné -- voir l'en-tête dense de
+  // `amplify/data/resolvers/submit-mission-validation-write-side.js` pour le détail complet :
+  // pourquoi un pipeline plutôt que le unit resolver du plan initial, pourquoi 3 fonctions et
+  // pas 2, la condition d'écriture optimiste anti-course de la 3e fonction). Les 3 fichiers,
+  // dans l'ordre d'exécution du pipeline :
+  // 1. `submit-mission-validation-write-side.js` -- détermine le rôle via `ctx.identity.groups`
+  //    (jamais un argument client), écrit le côté de l'appelant (write-once, conditionnel).
+  // 2. `submit-mission-validation-read-mission.js` -- relit la Mission à jour (les deux côtés).
+  // 3. `submit-mission-validation-finalize-status.js` -- calcule et écrit `Mission.status`
+  //    (matrice PENDING_VALIDATION/COMPLETED/NO_SHOW/DISPUTED), condition optimiste anti-course.
+  //
+  // `.authorization((allow) => [allow.authenticated()])` -- même niveau que
+  // `linkRequestToMission` juste au-dessus (tout utilisateur Cognito authentifié, peu importe le
+  // groupe) : le rôle RÉEL (Veterinarian vs Owner) est vérifié DANS le resolver (fonction 1),
+  // jamais fait confiance à un argument. `disputeReason` optionnel (`a.string()`, pas
+  // `.required()`) -- uniquement pertinent côté Owner sur un `outcome: DENIED`, jamais imposé
+  // au niveau schéma (même limite `@auth`/validation de valeur que partout ailleurs ici).
+  submitMissionValidation: a
+    .mutation()
+    .arguments({
+      missionId: a.id().required(),
+      outcome: a.ref('MissionValidationOutcome').required(),
+      disputeReason: a.string(),
+    })
+    .returns(a.ref('Mission'))
+    .authorization((allow) => [allow.authenticated()])
+    .handler([
+      a.handler.custom({
+        dataSource: a.ref('Mission'),
+        entry: './resolvers/submit-mission-validation-write-side.js',
+      }),
+      a.handler.custom({
+        dataSource: a.ref('Mission'),
+        entry: './resolvers/submit-mission-validation-read-mission.js',
+      }),
+      a.handler.custom({
+        dataSource: a.ref('Mission'),
+        entry: './resolvers/submit-mission-validation-finalize-status.js',
+      }),
+    ]),
 })
 
 export type Schema = ClientSchema<typeof schema>
