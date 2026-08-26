@@ -350,8 +350,7 @@ describe('amplify/data/resource.ts — Mission @auth (équivalent Gen2 ADR-0004,
     )
   })
 
-  it("status/requestID/animalID/appointmentDatetime n'ont AUCUN @auth au niveau champ -- createMissionSimple (Owner, à l'acceptation) doit pouvoir écrire status/requestID/animalID à la création", () => {
-    expect(missionType).toContain('status: MissionStatus!\n')
+  it("requestID/animalID/appointmentDatetime n'ont AUCUN @auth au niveau champ -- createMissionSimple (Owner, à l'acceptation) doit pouvoir écrire requestID/animalID à la création", () => {
     expect(missionType).toContain('requestID: ID!\n')
     expect(missionType).toContain('animalID: ID!\n')
     // Revue QA (sous-tâche 6, nettoyage) : le titre du test citait déjà `appointmentDatetime`
@@ -360,7 +359,29 @@ describe('amplify/data/resource.ts — Mission @auth (équivalent Gen2 ADR-0004,
     expect(missionType).toContain('appointmentDatetime: AWSDateTime\n')
   })
 
-  it("la règle de type Veterinarians garde 'update' -- rend une re-clôture (updateMission sur une Mission déjà COMPLETED/NO_SHOW) inoffensive côté serveur", () => {
+  // Correctif graphql-schema-reviewer (BLOQUANT, 2026-08-26) -- `status` portait AUPARAVANT
+  // AUCUN `@auth` de champ (assertion `status: MissionStatus!\n` dans le test précédent,
+  // retirée par ce même correctif), héritant donc en clair du `update` de niveau modèle
+  // accordé aux Veterinarians ci-dessous -- un Veterinarian pouvait écrire `status`
+  // directement via `client.models.Mission.update()`, contournant `submitMissionValidation`.
+  // Ce pin-test AURAIT ÉCHOUÉ avant ce correctif (aucune assertion `@auth(` sur `status`
+  // n'existait dans ce fichier) -- c'est précisément le trou que le reviewer a signalé comme
+  // non couvert par la suite de tests.
+  it("status porte désormais un @auth de champ dédié (missionStatusFieldAuth) -- Owner garde create+read (createMissionSimple), Veterinarians perd 'update' et ne garde que 'read', Admins lit", () => {
+    expect(missionType).toContain('status: MissionStatus! @auth(')
+    const block = extractFieldAuthBlock(missionType, 'status')
+    expect(block).toContain('{allow: owner, operations: [create, read]')
+    expect(block).toContain('{allow: groups, operations: [read], groups: ["Veterinarians"]}')
+    expect(block).toContain('{allow: groups, operations: [read], groups: ["Admins"]}')
+    // Le trou fermé par ce correctif : plus aucune trace d'un `update` accordé aux
+    // Veterinarians SPÉCIFIQUEMENT sur ce champ (le `update` de niveau modèle subsiste pour
+    // d'autres champs -- validationCode/scannedAt/etc. -- vérifié séparément ci-dessous, mais
+    // `.authorization()` de champ REMPLACE la règle de modèle pour `status` précisément,
+    // ADR-0009).
+    expect(block).not.toContain('operations: [read, update]')
+  })
+
+  it("la règle de type Veterinarians garde 'update' -- reste nécessaire aux AUTRES champs Veterinarian-writable de Mission (validationCode/scannedAt/validatedByVeterinarianID/stripePaymentIntentId/stripePaymentStatus, tous via ownerReadOnlyVetReadUpdate) ; n'accorde PLUS d'update sur 'status' depuis le correctif ci-dessus, dont le @auth de champ dédié REMPLACE ce update hérité pour ce champ précis (ADR-0009)", () => {
     const typeAuthStart = compiledSdl.indexOf('type Mission @model @auth(')
     const typeAuthEnd = compiledSdl.indexOf('])\n{', typeAuthStart)
     const typeAuthBlock = compiledSdl.slice(typeAuthStart, typeAuthEnd)
@@ -478,12 +499,17 @@ describe('amplify/data/resource.ts — double validation de Mission + notation (
       'ownerValidationOutcome',
       'ownerValidatedAt',
       'ownerDisputeReason',
-    ])('%s : Owner ET Veterinarians ont "read" seul -- aucune mutation générée ne peut écrire ces champs', (fieldName) => {
+    ])('%s : Owner ET Veterinarians ont "read" seul, Admins aussi (correctif graphql-schema-reviewer ÉLEVÉ, 2026-08-26) -- aucune mutation générée ne peut écrire ces champs', (fieldName) => {
       const block = extractFieldAuthBlock(missionType, fieldName)
       expect(block).toContain('{allow: owner, operations: [read]')
       expect(block).toContain('{allow: groups, operations: [read], groups: ["Veterinarians"]}')
-      // Ni l'un ni l'autre ne doit conserver "update" hérité de la règle de niveau modèle --
-      // c'est exactement le résidu de sécurité que ce scoping de champ ferme (voir
+      // Sans Admins ICI, le groupe perdait la lecture de ces 5 champs malgré son accès en
+      // lecture au niveau modèle (`.authorization()` de champ REMPLACE, ADR-0009) -- un Admin
+      // aurait pu voir `status = DISPUTED` sans jamais voir POURQUOI (ownerDisputeReason, les
+      // deux outcomes).
+      expect(block).toContain('{allow: groups, operations: [read], groups: ["Admins"]}')
+      // Aucun des trois ne doit conserver "update"/"create" hérité de la règle de niveau
+      // modèle -- c'est exactement le résidu de sécurité que ce scoping de champ ferme (voir
       // `missionValidationFieldsReadOnly` dans resource.ts).
       expect(block).not.toContain('update')
       expect(block).not.toContain('create')

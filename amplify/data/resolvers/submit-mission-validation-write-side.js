@@ -85,6 +85,27 @@
 // `submit-mission-validation-finalize-status.js`) et `PENDING_VALIDATION` (un seul côté a
 // validé) le sont. `COMPLETED_AUTO` est réservé à une future Lambda planifiée (délai de 7 jours
 // sans réponse d'un des deux côtés) qui n'est PAS implémentée dans cette sous-tâche.
+//
+// RÉSIDU DE ROBUSTESSE ASSUMÉ, signalé par le reviewer graphql-schema (MOYEN, 2026-08-26) :
+// aucun chemin de récupération n'existe si la fonction 2 (`submit-mission-validation-
+// read-mission.js`) ou la fonction 3 (`submit-mission-validation-finalize-status.js`) échoue
+// pour une raison AUTRE que la course anticipée entre les deux côtés (ex. throttle DynamoDB
+// transitoire, bug de déploiement, incident AppSync). CETTE fonction (1/3) étant write-once
+// PAR CÔTÉ, un échec dur en fonction 2/3 laisse l'appelant avec sa validation DURABLEMENT
+// écrite (la condition `attributeExists: false` empêche tout second appel) mais
+// `Mission.status` jamais recalculé -- la Mission reste bloquée sur son statut d'avant
+// l'appel (probablement `ARRIVED`/`PENDING_VALIDATION`) SANS AUCUN MOYEN de retenter côté
+// client : un second `submitMissionValidation` du même côté échoue immédiatement avec
+// `ALREADY_VALIDATED` (voir `response()` plus bas), avant même d'atteindre les fonctions 2/3.
+// Pas de mécanisme de récupération inventé ici (ex. rendre la fonction 1 idempotente sur un
+// second appel identique, ou une mutation admin de "recalcul forcé") -- disproportionné pour
+// ce pilote, même logique d'acceptation que les résidus déjà actés (ADR-0004/0005/0015 : un
+// compromis documenté plutôt qu'une infrastructure de résilience non demandée). Si ce résidu
+// devient un vrai risque opérationnel (volume réel, incidents constatés), la fermeture la
+// plus simple serait une mutation admin dédiée (groupe `Admins`, désormais provisionné) qui
+// relit la Mission et réexécute UNIQUEMENT la logique des fonctions 2/3 (recalcul du statut
+// à partir de l'état actuel des deux outcomes, sans toucher à `clinicValidationOutcome`/
+// `ownerValidationOutcome`, déjà écrits et corrects) -- hors périmètre de cette sous-tâche.
 import * as ddb from '@aws-appsync/utils/dynamodb'
 import { util } from '@aws-appsync/utils'
 

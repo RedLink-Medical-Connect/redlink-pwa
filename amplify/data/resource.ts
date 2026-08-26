@@ -104,9 +104,56 @@ const ownerCreateReadOnlyVetReadUpdate = (allow: any) => [
 // du système `@auth`, comme `linkRequestToMission`/ADR-0011 -- ce scoping de champ protège
 // uniquement contre les mutations GÉNÉRÉES, pas contre le resolver lui-même, qui n'en a de
 // toute façon pas besoin puisqu'il cible directement la table).
+//
+// Correctif graphql-schema-reviewer (2026-08-26, ÉLEVÉ) : `Admins` ajouté à cette règle.
+// `.authorization()` de champ REMPLACE (ne fusionne pas) la règle de niveau modèle pour ce
+// champ précis (ADR-0009) -- sans `Admins` explicitement listé ICI, le groupe perdait purement
+// et simplement l'accès en lecture aux 5 champs de double validation malgré
+// `allow.group('Admins').to(['read'])` posé au niveau modèle de `Mission` (ajouté
+// spécifiquement pour que les Admins puissent voir les Missions DISPUTED) : un Admin aurait pu
+// lire `Mission.status = DISPUTED` mais jamais `ownerDisputeReason` ni les deux outcomes qui
+// expliquent POURQUOI la Mission est disputée -- la règle de niveau modèle devenait inutile
+// pour l'usage même qui l'a motivée.
 const missionValidationFieldsReadOnly = (allow: any) => [
   allow.owner().to(['read']),
   allow.group('Veterinarians').to(['read']),
+  allow.group('Admins').to(['read']),
+]
+// Correctif graphql-schema-reviewer (2026-08-26, BLOQUANT) : `Mission.status` n'avait AUCUNE
+// `.authorization()` de champ dédiée -- il héritait donc en clair de
+// `allow.group('Veterinarians').to(['read', 'update'])` au niveau modèle de `Mission`
+// (ci-dessous), permettant à N'IMPORTE QUEL Veterinarian authentifié d'écrire `status`
+// directement via `client.models.Mission.update({ id, status: 'COMPLETED' })` -- contournant
+// INTÉGRALEMENT `submitMissionValidation` (double validation Owner+Clinic, le coeur de cette
+// sous-tâche). Exactement le trou que `missionValidationFieldsReadOnly` ci-dessus prétendait
+// fermer pour les 5 AUTRES champs de validation, laissé ouvert sur `status` lui-même par oubli.
+//
+// PAS `missionValidationFieldsReadOnly` tel quel sur `status` (contrairement à ce qu'une
+// première lecture du correctif suggérait) : ce helper n'a JAMAIS eu `create` pour l'Owner --
+// correct pour les 5 champs de validation (l'Owner ne les écrit JAMAIS, même pas à la
+// création), mais FAUX pour `status` : `createMissionSimple` (Owner, `useOwnerMissions.js`)
+// écrit `status: PENDING_ARRIVAL/ACCEPTED` À LA CRÉATION de chaque Mission -- un besoin actif,
+// pas un résidu. Réutiliser `missionValidationFieldsReadOnly` tel quel aurait donc retiré
+// `create` à l'Owner sur `status` et cassé la création de Mission ENTIÈREMENT (aucun Owner
+// n'aurait plus pu accepter de Request) -- une régression bien plus large et non demandée que
+// le trou identifié (l'écriture illégitime venait de Veterinarians via `update`, pas de
+// l'Owner via `create`). D'où ce second helper dédié, DISTINCT du premier : Owner garde
+// `create`+`read` (comme avant ce correctif, AUCUN changement pour lui, y compris le résidu
+// déjà documenté par ADR-0004 -- "un Owner peut toujours fabriquer un `createMission(status:
+// COMPLETED)`" reste vrai, non fermé par ce correctif, hors périmètre) ; Veterinarians perd
+// `update` et ne garde que `read` -- c'est le VRAI trou fermé ici. Conséquence ASSUMÉE et
+// VOULUE (confirmée par le reviewer) : `useMissionClosure.js` (`closeMission()`, `client
+// .models.Mission.update({ id: missionId, status: outcome })`) va désormais échouer en
+// autorisation -- cet appel doit migrer vers `client.mutations.submitMissionValidation(...)`
+// à l'étape 4 du plan (composables, hors périmètre de cette sous-tâche schéma). Ce n'est PAS
+// un oubli à corriger plus tard : la prochaine sous-tâche DOIT faire cette migration, ce
+// correctif casse intentionnellement l'ancien chemin pour forcer la bascule plutôt que de
+// laisser cohabiter deux voies d'écriture (une sûre via le resolver, une non sûre via
+// `update` direct).
+const missionStatusFieldAuth = (allow: any) => [
+  allow.owner().to(['create', 'read']),
+  allow.group('Veterinarians').to(['read']),
+  allow.group('Admins').to(['read']),
 ]
 
 export const schema = a.schema({
@@ -225,10 +272,20 @@ export const schema = a.schema({
       clinicID: a.id().required(),
       clinic: a.belongsTo('Clinic', 'clinicID'),
 
-      // Gap préexistant NON corrigé ici (voir docs/adr/0010, section "Gaps préexistants") :
-      // le groupe Cognito "Admins" référencé juste en-dessous n'a jamais été provisionné par
-      // l'IaC, ni en Gen1 ni dans `amplify/auth/resource.ts` (Gen2, sous-tâche 3). Reproduit
-      // à l'identique -- corriger ça changerait le périmètre de la sous-tâche 3, pas de celle-ci.
+      // Gap préexistant DÉSORMAIS FERMÉ (revue graphql-schema-reviewer, correctif du
+      // 2026-08-26 sur la sous-tâche double validation de Mission + notation) : le groupe
+      // Cognito "Admins" référencé juste en-dessous est maintenant provisionné par l'IaC
+      // (`amplify/auth/resource.ts`, `groups: [..., 'Admins']`), fermant le gap documenté par
+      // docs/adr/0010 ("Gaps préexistants" -- resté vrai de Gen1 jusqu'à ce correctif). Effet
+      // de bord RÉEL à assumer consciemment, pas seulement un texte de commentaire à corriger
+      // en passant : `allow.group('Admins').to(['read', 'delete'])` ci-dessous, déclaré depuis
+      // Gen1 mais jusqu'ici INATTEIGNABLE (aucun utilisateur ne pouvait appartenir à un groupe
+      // qui n'existait pas), devient pour la première fois une règle VIVANTE -- tout
+      // utilisateur Cognito placé manuellement dans `Admins` (provisioning manuel, aucune
+      // assignation automatique à l'inscription) peut désormais lire ET SUPPRIMER n'importe
+      // quel `Veterinarian`. Comportement inchangé par rapport à ce que Gen1 déclarait déjà
+      // (règle reproduite à l'identique depuis le début de la migration Gen2, sous-tâche 4) --
+      // seule sa RÉELLE atteignabilité change avec ce correctif, pas la règle elle-même.
       //
       // `validatedMissions` : en Gen1, `@hasMany` sans `indexName`/`fields` explicites --
       // jamais réellement câblé (le commentaire Gen1 le disait lui-même : "ajoutez @index(name:
@@ -457,7 +514,18 @@ export const schema = a.schema({
       animalID: a.id().required(),
       animal: a.belongsTo('Animal', 'animalID'),
 
-      status: a.ref('MissionStatus').required(),
+      // `.authorization(missionStatusFieldAuth)` (correctif graphql-schema-reviewer, BLOQUANT,
+      // 2026-08-26 -- voir ce helper en tête de fichier pour le détail complet). AVANT ce
+      // correctif, `status` ne portait AUCUNE `.authorization()` de champ et héritait donc de
+      // `allow.group('Veterinarians').to(['read', 'update'])` au niveau modèle -- un
+      // Veterinarian pouvait écrire `status` directement (`client.models.Mission.update({ id,
+      // status: 'COMPLETED' })`), contournant intégralement `submitMissionValidation` (double
+      // validation Owner+Clinic). `createMissionSimple` (Owner, `useOwnerMissions.js`) garde
+      // `create` sur ce champ (`missionStatusFieldAuth` distinct de
+      // `missionValidationFieldsReadOnly` précisément pour ça) ; Veterinarians perd `update`.
+      // Résidu ADR-0004 inchangé, non fermé par ce correctif (hors périmètre) : un Owner peut
+      // toujours fabriquer un `createMission(status: COMPLETED)` à la création.
+      status: a.ref('MissionStatus').required().authorization(missionStatusFieldAuth),
       appointmentDatetime: a.datetime(),
 
       // `.authorization()` de champ (revue graphql-schema-reviewer Gen1, Phase 5) : retirer
@@ -466,12 +534,7 @@ export const schema = a.schema({
       // `createMission(status: COMPLETED, validatedByVeterinarianID: "...")`, usurpant une
       // validation vétérinaire dès la création. Ces 5 champs sont par ailleurs inutilisés par
       // tout code applicatif actuel (flow QR-scan abandonné, Stripe hors périmètre V1) : aucune
-      // régression possible à les verrouiller entièrement aux Veterinarians. `status` reste hors
-      // de ce scoping champ-par-champ (pas de `.authorization()` dessus) : createMissionSimple
-      // (Owner, useOwnerMissions.js) doit pouvoir l'écrire à la création
-      // (PENDING_ARRIVAL/ACCEPTED). Limite connue, non fermée par la migration : un Owner peut
-      // toujours fabriquer un `createMission(status: COMPLETED)` en appelant l'API directement
-      // (hors UI) -- voir ADR-0004 pour l'analyse complète de ce résidu, inchangée en Gen2.
+      // régression possible à les verrouiller entièrement aux Veterinarians.
       validationCode: a
         .string()
         .authorization(ownerReadOnlyVetReadUpdate),
