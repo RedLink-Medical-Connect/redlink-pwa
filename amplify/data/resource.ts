@@ -155,6 +155,73 @@ const missionStatusFieldAuth = (allow: any) => [
   allow.group('Veterinarians').to(['read']),
   allow.group('Admins').to(['read']),
 ]
+// Agrégats de notation + modération de `Clinic` (2026-08-26, étape 3/5 -- voir ADR-0017) :
+// `averageRatingAsClinic`/`ratingCountAsClinic`/`needsAdminReview`/`needsAdminReviewSince`/
+// `accountStatus`. Troisième variante du même idiome de champ, la PLUS restrictive du fichier :
+// AUCUN rôle Cognito n'a `create` NI `update`, pas même l'auteur de la ligne -- contrairement à
+// `missionStatusFieldAuth` (qui garde `create` pour l'Owner, sans quoi `createMissionSimple`
+// casse) et à `missionValidationFieldsReadOnly` (lecture seule, mais pour trois rôles). Ces 5
+// champs ne sont JAMAIS écrits via AppSync : leur seule voie d'écriture est la Lambda
+// `rating-aggregation` (déclenchée par le flux DynamoDB de `Rating`), qui écrit en direct dans
+// la table managée avec sa propre identité IAM -- comme la Lambda de l'étape 2/5 pour
+// `Mission.status` (ADR-0016 §3). Un client qui pourrait les écrire pourrait falsifier sa propre
+// moyenne ou saboter celle d'un tiers, ce que ni `@auth` ni aucun resolver ne saurait empêcher
+// une fois l'opération accordée (limite "l'autorisation ne contraint jamais une VALEUR",
+// ADR-0002/0004/0015).
+//
+// La règle de niveau modèle de `Clinic` est délibérément NON reprise ici -- et c'est le point à
+// scruter en revue : elle contient `allow.authenticated().to(['read'])`, c'est-à-dire un accès
+// en lecture pour N'IMPORTE QUEL utilisateur Cognito, Owners inclus. L'hériter aurait exposé
+// l'état de modération interne d'une clinique (`needsAdminReview`, `accountStatus`,
+// `needsAdminReviewSince`) ET sa moyenne à tout Owner consultant son profil, alors que la
+// notation est PRIVÉE par construction dans cette feature (ADR-0015 : personne ne peut lister
+// les `Rating` d'un autre ; agréger côté serveur ne doit pas rouvrir par la bande ce que le
+// modèle `Rating` ferme). `allow.owner()` n'est pas repris non plus : le vétérinaire créateur de
+// la ligne appartient de toute façon au groupe `Veterinarians` (PostConfirmation, ADR-0008), donc
+// il ne perd rien -- et un `allow.owner()` SANS `.to([...])` lui rouvrirait `update`, exactement
+// le trou que ce helper existe pour fermer.
+//
+// RÉSIDU ASSUMÉ, signalé plutôt que caché (même famille qu'ADR-0015 §2) : `Veterinarians` est un
+// scope GLOBAL, pas "ma clinique" -- un vétérinaire de la clinique A peut donc lire la moyenne et
+// l'état de modération de la clinique B. Aucune notion de "ma clinique" n'existe dans le système
+// d'autorisation Gen2 pour `Clinic` (le seul modèle qui porte ce lien, `ClinicOwnerRelation`, lie
+// une clinique à un OWNER, pas un vétérinaire à sa clinique). Le choix est le même que celui déjà
+// tranché deux fois sur ce repo : un scope large mais HONNÊTE plutôt qu'un filtre qui simulerait
+// une garantie de sécurité que le modèle de données ne porte pas.
+const clinicRatingAndModerationFieldsReadOnly = (allow: any) => [
+  allow.group('Veterinarians').to(['read']),
+  allow.group('Admins').to(['read']),
+]
+// Pendant du helper ci-dessus pour `Owner` (`averageRatingAsOwner`/`ratingCountAsOwner`), avec
+// DEUX différences imposées par la règle de niveau modèle de `Owner`
+// (`allow.owner(), allow.group('Veterinarians').to(['read'])`), VÉRIFIÉE dans le SDL compilé
+// avant d'écrire ce helper (`schema.transform().schema`, pin-testé dans
+// `__tests__/resource.transform.test.ts`) plutôt que supposée :
+// 1. `allow.owner()` y est SANS `.to([...])` -> il compile en `{allow: owner}`, c'est-à-dire les
+//    QUATRE opérations (create/read/update/delete). Un Owner pouvait donc écrire n'importe quel
+//    champ de son propre profil via `client.models.Owner.update()` : exactement le trou de
+//    `Mission.status` avant le correctif de l'étape 1/5, transposé ici. D'où `allow.owner()
+//    .to(['read'])` : l'Owner VOIT sa moyenne (c'est le besoin produit) mais ne peut plus
+//    l'écrire. Pas besoin de garder `create` (contrairement à `missionStatusFieldAuth`) : ces
+//    deux champs sont nouveaux, aucun code applicatif ne les envoie à la création d'un `Owner`
+//    (`useRegistrationCompletion.js`), et une `@auth` de champ n'est évaluée que sur les champs
+//    réellement présents dans l'input.
+// 2. `Veterinarians` GARDE `read` (contrairement au helper `Clinic` ci-dessus, où
+//    `authenticated()` est retiré) -- ce n'est pas une inattention : la règle de modèle de
+//    `Owner` accorde déjà `read` aux seuls Veterinarians (pas à tous les authentifiés), donc le
+//    reprendre ne change RIEN au périmètre de lecture existant. Le retirer, en revanche,
+//    casserait toute lecture d'un `Owner` par un vétérinaire faite sans `selectionSet` explicite
+//    (AppSync renvoie alors une erreur d'autorisation sur le champ, que `throwIfGraphqlError`
+//    transforme en exception côté composable). Aucune lecture de ce type n'existe aujourd'hui
+//    (`useClinicDonors.js` sélectionne explicitement ses champs), mais l'écart ne se paierait
+//    qu'au premier composable qui l'oublierait.
+// Pas d'`Admins` ici (contrairement au helper `Clinic`) : la règle de niveau modèle de `Owner`
+// n'en accorde aucun -- l'ajouter au niveau CHAMP donnerait au groupe un accès qu'il n'a nulle
+// part ailleurs sur ce modèle, ce que cette sous-tâche n'a aucune raison d'introduire.
+const ownerRatingAggregateFieldsReadOnly = (allow: any) => [
+  allow.owner().to(['read']),
+  allow.group('Veterinarians').to(['read']),
+]
 
 /**
  * Nom PHYSIQUE du GSI DynamoDB posé sur `Mission.status` (voir `.secondaryIndexes()` sur le
@@ -173,6 +240,20 @@ const missionStatusFieldAuth = (allow: any) => [
  * IAM et côté `IndexName` de la Lambda -- deux endroits qui ont besoin de la valeur EXACTE.
  */
 export const MISSION_STATUS_INDEX_NAME = 'missionsByStatus'
+
+/**
+ * Nom PHYSIQUE du GSI DynamoDB posé sur `Rating` (partition `targetID`, tri `targetRole` -- voir
+ * `.secondaryIndexes()` sur le modèle `Rating` plus bas). Exporté pour les mêmes DEUX
+ * consommateurs hors de ce fichier que `MISSION_STATUS_INDEX_NAME` ci-dessus, avec la même
+ * raison de ne pas le recopier en dur :
+ * - `amplify/backend.ts` : ARN de la policy IAM (`<tableArn>/index/<nom>`) ET valeur de la
+ *   variable d'environnement passée à la Lambda `rating-aggregation`.
+ * - `amplify/functions/rating-aggregation/handler.ts` : `IndexName` du `QueryCommand` -- lu
+ *   depuis l'environnement, JAMAIS importé depuis ce fichier (un import depuis
+ *   `amplify/data/resource.ts` embarquerait tout `@aws-amplify/backend` dans le bundle esbuild
+ *   de la Lambda).
+ */
+export const RATING_TARGET_INDEX_NAME = 'ratingsByTarget'
 
 export const schema = a.schema({
   // ==========================================================
@@ -242,13 +323,14 @@ export const schema = a.schema({
   // distinguer "qui note qui" sur une ligne `Rating` qui réutilise un seul modèle pour les
   // deux sens de notation.
   RatingParticipantRole: a.enum(['OWNER', 'CLINIC']),
-  // Déclaré pour cette sous-tâche (schéma) mais AUCUN champ ne le consomme encore -- aucune
-  // instruction du plan d'architecture ne demande d'ajouter un champ `Clinic.accountStatus`
-  // dans cette étape 1/5. Provisionné en avance de l'usage (même statut que
-  // `Veterinarian.validatedMissions`/`DonorValidationAttestation.revokedAttestationID`,
-  // ADR-0010/0014) pour qu'une future sous-tâche (interface admin de résolution des
-  // Missions `DISPUTED`, mentionnée mais non construite ici) puisse marquer une Clinic
-  // `UNDER_REVIEW` sans nouveau changement de schéma.
+  // Déclaré à l'étape 1/5 (schéma) sans qu'aucun champ ne le consomme encore -- provisionné en
+  // avance de l'usage (même statut que `Veterinarian.validatedMissions`/
+  // `DonorValidationAttestation.revokedAttestationID`, ADR-0010/0014).
+  // DÉSORMAIS CONSOMMÉ (étape 3/5, 2026-08-26) par `Clinic.accountStatus`, écrit par la Lambda
+  // `rating-aggregation` quand la moyenne glissante d'une clinique passe sous le seuil de
+  // modération (docs/adr/0017). Le champ reste purement INFORMATIF à ce jour : aucune règle
+  // `@auth`, aucun garde-fou applicatif ne lit `UNDER_REVIEW` -- pas d'exclusion automatique,
+  // décision produit explicite.
   ClinicAccountStatus: a.enum(['ACTIVE', 'UNDER_REVIEW']),
 
   // 1. CLINIQUE & VÉTÉRINAIRES
@@ -267,6 +349,36 @@ export const schema = a.schema({
 
       transfusionsDone: a.integer(),
       donorOwnersCount: a.integer(),
+
+      // Agrégats DÉNORMALISÉS des notations reçues EN TANT QUE CLINIC (`Rating.targetRole =
+      // CLINIC`, section 3) + état de modération associé -- 2026-08-26, étape 3/5, voir
+      // docs/adr/0017. Dénormalisés et non calculés à la lecture : le `@auth` de `Rating`
+      // (ADR-0015) interdit délibérément à une clinique de LISTER les notes qu'elle a reçues
+      // (seul le rater voit sa propre ligne), donc aucun client ne PEUT calculer sa propre
+      // moyenne -- elle ne peut venir que d'un mécanisme serveur. Écrits EXCLUSIVEMENT par la
+      // Lambda `rating-aggregation` (flux DynamoDB Streams de la table `Rating`, SDK direct,
+      // hors AppSync) ; `.authorization(clinicRatingAndModerationFieldsReadOnly)` ferme
+      // l'écriture à TOUS les rôles Cognito et retire au passage la lecture accordée par
+      // `allow.authenticated()` au niveau modèle -- voir ce helper en tête de fichier pour le
+      // raisonnement complet et le résidu assumé (scope `Veterinarians` global, pas "ma
+      // clinique").
+      //
+      // `needsAdminReviewSince` est posé UNE SEULE FOIS, au premier franchissement du seuil
+      // (écriture conditionnelle côté Lambda), et n'est jamais réécrit par les notes suivantes :
+      // c'est la date d'ENTRÉE en revue, pas la date de la dernière mauvaise note. Aucun
+      // mécanisme n'efface ces trois champs de modération : la sortie de revue est une décision
+      // ADMIN (interface non construite ici, comme pour les Missions `DISPUTED`), pas un
+      // automatisme qui effacerait la trace dès qu'une bonne note fait remonter la moyenne.
+      averageRatingAsClinic: a.float().authorization(clinicRatingAndModerationFieldsReadOnly),
+      ratingCountAsClinic: a.integer().authorization(clinicRatingAndModerationFieldsReadOnly),
+      needsAdminReview: a.boolean().authorization(clinicRatingAndModerationFieldsReadOnly),
+      needsAdminReviewSince: a.datetime().authorization(clinicRatingAndModerationFieldsReadOnly),
+      // Premier champ à consommer l'enum `ClinicAccountStatus` (déclaré à l'étape 1/5 en avance
+      // de l'usage, voir son commentaire plus haut). PAS d'exclusion automatique : passer
+      // `UNDER_REVIEW` ne coupe AUCUN accès aujourd'hui (aucune règle `@auth`, aucun garde-fou
+      // de routeur ni de composable ne lit ce champ -- décision produit explicite du plan :
+      // "juste le flag, une interface admin future tranchera").
+      accountStatus: a.ref('ClinicAccountStatus').authorization(clinicRatingAndModerationFieldsReadOnly),
 
       veterinarians: a.hasMany('Veterinarian', 'clinicID'),
       requests: a.hasMany('Request', 'clinicID'),
@@ -340,6 +452,18 @@ export const schema = a.schema({
       longitude: a.float(),
       maxTravelDistance: a.integer().required(),
       totalDonations: a.integer(),
+
+      // Pendant Owner des agrégats de `Clinic` ci-dessus : notations reçues EN TANT QU'OWNER
+      // (`Rating.targetRole = OWNER`), écrites par la même Lambda `rating-aggregation`
+      // (docs/adr/0017). AUCUNE logique de modération de ce côté (hors périmètre du plan : le
+      // besoin exprimé ne porte que sur la modération des cliniques) -- pas de `needsAdminReview`
+      // ni d'`accountStatus` sur `Owner`, délibérément, plutôt qu'une symétrie décorative que
+      // rien ne consommerait.
+      // `.authorization(ownerRatingAggregateFieldsReadOnly)` : voir ce helper en tête de fichier
+      // -- l'Owner voit sa propre moyenne mais ne peut plus l'écrire (la règle de niveau modèle
+      // `allow.owner()`, sans `.to([...])`, lui donnait les 4 opérations, donc `update`).
+      averageRatingAsOwner: a.float().authorization(ownerRatingAggregateFieldsReadOnly),
+      ratingCountAsOwner: a.integer().authorization(ownerRatingAggregateFieldsReadOnly),
 
       animals: a.hasMany('Animal', 'ownerID'),
       availabilities: a.hasMany('OwnerAvailability', 'ownerID'),
@@ -674,9 +798,14 @@ export const schema = a.schema({
   // (`node_modules/@aws-amplify/data-schema/dist/esm/ModelType.d.ts`, JSDoc et exemple
   // `.identifier(['name', 'email'])` correspondant exactement à l'usage ici).
   //
-  // PAS de `.authorization()` séparée pour lire/écrire une éventuelle MOYENNE de notes par
-  // Clinic/Owner : cette agrégation n'existe pas encore (prochaine sous-tâche du plan --
-  // dénormalisation probable sur `Clinic`/`Owner`, hors périmètre schéma de cette étape 1/5).
+  // L'agrégation par Clinic/Owner, annoncée ici comme "prochaine sous-tâche" à l'étape 1/5,
+  // EXISTE depuis l'étape 3/5 (2026-08-26) : dénormalisée sur `Clinic`
+  // (`averageRatingAsClinic`/`ratingCountAsClinic` + les 3 champs de modération) et sur `Owner`
+  // (`averageRatingAsOwner`/`ratingCountAsOwner`), avec leurs propres `.authorization()` de
+  // champ (voir ces modèles plus haut et docs/adr/0017). Rien ne change ICI pour autant : le
+  // modèle `Rating` reste inchangé côté `@auth`, et c'est justement parce que PERSONNE ne peut
+  // lister les notes reçues par un tiers que l'agrégat doit être calculé et écrit côté SERVEUR
+  // (Lambda `rating-aggregation`, sur le flux DynamoDB de cette table), jamais par un client.
   // `Veterinarians` n'a délibérément PAS `read` dans la règle ci-dessous : seul
   // `allow.ownerDefinedIn('raterID')` donne `read` à qui a ÉCRIT la ligne (donc au Veterinarian
   // qui vient de noter, sur SA PROPRE notation) -- un `allow.group('Veterinarians').to(['read'])`
@@ -729,6 +858,50 @@ export const schema = a.schema({
       comment: a.string(),
     })
     .identifier(['missionID', 'raterRole'])
+    // GSI `(targetID, targetRole)` -- partition `targetID`, tri `targetRole` (2026-08-26, étape
+    // 3/5, docs/adr/0017). La clé PRIMAIRE de `Rating` répond à "qui a noté sur CETTE Mission ?"
+    // (`missionID` + `raterRole`) ; cet index répond à la question INVERSE, la seule dont la
+    // Lambda d'agrégation a besoin : "toutes les notes reçues par CETTE cible". Sans lui, la
+    // seule réponse possible serait un `Scan` complet de la table `Rating` à CHAQUE notation --
+    // pire que le cas de l'étape 2/5 (exécution planifiée quotidienne), puisque déclenché par le
+    // flux DynamoDB à chaque écriture.
+    //
+    // Sort key `targetRole` plutôt qu'un index sur `targetID` seul : `targetID` porte tantôt un
+    // `Clinic.id`, tantôt un `Owner.id` (deux espaces d'identifiants distincts, mais ce schéma en
+    // fabrique déjà la collision -- `Clinic.id === Veterinarian.id` à l'inscription, résidu connu
+    // de la Phase -1). Le tri sur `targetRole` rend la requête EXACTE (`targetID = :id AND
+    // targetRole = :role`) plutôt que "probablement sans collision", au prix d'aucune complexité
+    // côté handler.
+    //
+    // API vérifiée dans les paquets INSTALLÉS, pas devinée (même méthode qu'ADR-0015/0016, MCP
+    // `context7` toujours indisponible) : `index(pk).sortKeys([...])` existe bien
+    // (`node_modules/@aws-amplify/data-schema/dist/esm/ModelIndex.d.ts`, méthode `sortKeys`), et
+    // un champ `a.ref()` d'enum est accepté AUSSI BIEN en clé de partition qu'en clé de tri d'un
+    // index secondaire -- la validation runtime (`transformedSecondaryIndexesForModel`,
+    // `SchemaProcessor.mjs`) itère sur `[partitionKey, ...sortKeys]` avec le MÊME test (le `ref`
+    // doit pointer vers un enum). `targetRole` reste donc `a.ref('RatingParticipantRole')`,
+    // contrairement à `raterRole` que `.identifier()` a forcé en `a.string()` (ADR-0015) : deux
+    // validateurs différents, deux contraintes différentes -- ne pas généraliser l'un à l'autre.
+    //
+    // `.queryField(null)` -- même écart assumé qu'à l'étape 2/5 (`MISSION_STATUS_INDEX_NAME`) :
+    // le SEUL consommateur est la Lambda, qui interroge la table en DIRECT via le SDK (pas
+    // d'identité Cognito, bypass d'AppSync). Ici la raison est même plus forte que pour
+    // `Mission.status` : générer une query `listRatingByTargetIDAndTargetRole` ajouterait à
+    // l'API publique le point d'entrée exact que le `@auth` de `Rating` a été conçu pour ne pas
+    // offrir ("les notes reçues par X"), en s'en remettant au seul filtre d'autorisation de
+    // niveau modèle pour qu'il ne fuite rien. Réversible sans coût si une interface admin de
+    // modération en a besoin un jour : `queryField` ne touche QUE l'API GraphQL, pas la
+    // structure du GSI.
+    //
+    // Projection par défaut (`ALL`), comme le GSI de l'étape 2/5 et pour la même raison : une
+    // projection `INCLUDE ['stars']` collerait au besoin actuel du handler (qui ne lit QUE
+    // `stars`, via `ProjectionExpression`), mais figerait la liste des champs lisibles dans
+    // l'INFRASTRUCTURE -- toute lecture supplémentaire ultérieure (répartition des notes,
+    // dernier commentaire...) imposerait une mise à jour de GSI sur une table managée. Le
+    // sur-fetch est déjà évité là où il coûte, côté requête.
+    .secondaryIndexes((index) => [
+      index('targetID').sortKeys(['targetRole']).name(RATING_TARGET_INDEX_NAME).queryField(null),
+    ])
     .authorization((allow) => [
       allow.ownerDefinedIn('raterID').to(['create', 'read']),
       allow.group('Veterinarians').to(['create']),

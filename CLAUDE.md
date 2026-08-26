@@ -95,7 +95,24 @@ architecturales) et `.cursorrules` (conventions détaillées pour l'éditeur).
   Index secondaire : `.secondaryIndexes((index) => [index('champ').name(...)])` — un
   champ `a.ref()` d'enum y est éligible (contrairement à `.identifier()`, ADR-0015).
   Voir ADR-0016.
+- **Lambda déclenchée par un flux DynamoDB** : les tables managées Gen2 ont DÉJÀ
+  leurs Streams activés (`NEW_AND_OLD_IMAGES`, posé en dur par le transformer sur
+  toute table `AMPLIFY_TABLE`) — rien à activer, `tables['<Model>'].tableStreamArn`
+  est directement exploitable. `defineFunction` n'a pas de déclencheur "flux" :
+  câblage CDK dans `backend.ts` (`lambda.addEventSource(new DynamoEventSource(table,
+  {...}))`, qui pose l'`EventSourceMapping` ET les droits de lecture du flux).
+  Régler explicitement `retryAttempts` (défaut = rejeu INFINI, shard bloqué 24 h) et
+  filtrer sur `eventName` ; le handler doit être idempotent (le lot entier est rejoué
+  sur échec). Voir `amplify/functions/rating-aggregation/` et ADR-0017.
 - DynamoDB via les modèles `defineData` (`@model`/`a.model()`).
+- **Champ dénormalisé calculé côté serveur (agrégat)** : quatrième idiome `@auth` de ce
+  schéma — `.authorization()` de CHAMP n'accordant que `read`, à personne `create`/
+  `update` (`clinicRatingAndModerationFieldsReadOnly`/`ownerRatingAggregateFieldsReadOnly`,
+  agrégats de notation sur `Clinic`/`Owner`). Pour toute valeur qu'un client ne doit pas
+  pouvoir falsifier ni même calculer : l'écriture passe uniquement par une Lambda (SDK
+  direct). Attention en posant ce genre de règle : elle REMPLACE la règle de modèle
+  (ADR-0009), donc retirer un rôle qui y avait `read` casse toute lecture SANS
+  `selectionSet` explicite faite par ce rôle. Voir ADR-0017.
 - **Enregistrement write-once (preuve immuable)** : `.authorization()` de niveau modèle
   posant `create`+`read` seul, sans jamais accorder `update`/`delete` à qui que ce soit,
   même l'auteur de la ligne — troisième idiome `@auth` de ce schéma, à côté des deux

@@ -1,11 +1,14 @@
 import { defineBackend } from '@aws-amplify/backend'
-import { Names } from 'aws-cdk-lib'
+import { Duration, Names } from 'aws-cdk-lib'
 import { Policy, PolicyStatement } from 'aws-cdk-lib/aws-iam'
+import { FilterCriteria, FilterRule, StartingPosition } from 'aws-cdk-lib/aws-lambda'
+import { DynamoEventSource } from 'aws-cdk-lib/aws-lambda-event-sources'
 import { AwsCustomResource, AwsCustomResourcePolicy, PhysicalResourceId } from 'aws-cdk-lib/custom-resources'
 import { auth } from './auth/resource'
-import { data, MISSION_STATUS_INDEX_NAME } from './data/resource'
+import { data, MISSION_STATUS_INDEX_NAME, RATING_TARGET_INDEX_NAME } from './data/resource'
 import { postConfirmation } from './functions/post-confirmation/resource'
 import { missionValidationAutoFinalizer } from './functions/mission-validation-auto-finalizer/resource'
+import { ratingAggregation } from './functions/rating-aggregation/resource'
 
 /**
  * Phase 8, sous-tâche 4 (migration Gen1 -> Gen2) : `data` (defineData,
@@ -18,6 +21,7 @@ const backend = defineBackend({
   postConfirmation,
   data,
   missionValidationAutoFinalizer,
+  ratingAggregation,
 })
 
 // Permission IAM de la Lambda PostConfirmation (scopée à `cognito-idp:AdminAddUserToGroup`
@@ -145,6 +149,104 @@ backend.missionValidationAutoFinalizer.addEnvironment(
   clinicOwnerRelationTable.tableName,
 )
 backend.missionValidationAutoFinalizer.addEnvironment('CLINIC_TABLE_NAME', clinicTable.tableName)
+
+/**
+ * Lambda `rating-aggregation` (2026-08-26, étape 3/5 -- agrégats de notation + modération
+ * clinique, voir `amplify/functions/rating-aggregation/` et docs/adr/0017). Même famille que la
+ * Lambda planifiée ci-dessus (accès DynamoDB direct, IAM scopée), avec un déclencheur différent :
+ * le FLUX DynamoDB Streams de la table `Rating`.
+ *
+ * POINT VÉRIFIÉ, pas supposé (méthode de l'étape 2/5 : lecture des paquets installés, MCP
+ * `context7` indisponible) : il n'y a RIEN à activer côté table. Les tables managées par
+ * `defineData` sont provisionnées avec la stratégie `AMPLIFY_TABLE`
+ * (`@aws-amplify/backend-data/lib/convert_schema.js`, `provisionStrategy: 'AMPLIFY_TABLE'`), et
+ * le générateur de ressources correspondant crée CHAQUE table de modèle avec
+ * `stream: StreamViewType.NEW_AND_OLD_IMAGES` en dur
+ * (`@aws-amplify/graphql-api-construct/node_modules/@aws-amplify/graphql-model-transformer/lib/
+ * resources/amplify-dynamodb-table/amplify-dynamo-model-resource-generator.js`, `createModelTable`).
+ * `backend.data.resources.tables['Rating'].tableStreamArn` est donc défini et résout en
+ * `Fn::GetAtt[RatingTable, TableStreamArn]` -- confirmé par une synthèse CDK locale hors AWS
+ * (aucun déploiement). `AmplifyDynamoDbTableWrapper.streamSpecification`
+ * (`backend.data.resources.cfnResources.amplifyDynamoDbTables['Rating']`) existe pour CHANGER
+ * cette vue, mais serait ici une réécriture de la valeur déjà posée -- volontairement non
+ * utilisée.
+ *
+ * `DynamoEventSource` (`aws-cdk-lib/aws-lambda-event-sources`) crée l'`EventSourceMapping` ET
+ * accorde les permissions de lecture du flux (`table.grantStreamRead(fn)` :
+ * `dynamodb:DescribeStream`/`GetRecords`/`GetShardIterator` sur l'ARN EXACT du flux, plus
+ * `dynamodb:ListStreams` sur `*` -- ce dernier est codé en dur par le CDK
+ * (`aws-cdk-lib/aws-dynamodb/lib/stream-grants.js`, `list()`) parce que l'action `ListStreams`
+ * n'accepte pas de ressource nominative côté IAM ; c'est aussi ce que fait la policy managée AWS
+ * `AWSLambdaDynamoDBExecutionRole`. C'est la SEULE ressource `*` de cette sous-tâche, sur une
+ * action de listage sans lecture de donnée, et elle est signalée ici plutôt que subie).
+ *
+ * Réglages de l'`EventSourceMapping`, tous explicites parce que les défauts ne conviennent pas :
+ * - `filters` : seuls les `INSERT` invoquent la fonction. `Rating` est write-once (ADR-0015),
+ *   donc `MODIFY`/`REMOVE` n'existent pas côté applicatif -- ce filtre évite d'invoquer la
+ *   Lambda pour une écriture administrative directe. Le handler refait le même filtrage
+ *   (défense en profondeur : le filtre d'infrastructure peut être relâché sans que la logique
+ *   suive).
+ * - `startingPosition: LATEST` -- pas `TRIM_HORIZON` : au premier déploiement, rejouer jusqu'à
+ *   24 h d'historique du flux serait inoffensif (recalcul idempotent) mais massif et sans valeur.
+ * - `retryAttempts: 3` -- le défaut est -1, c'est-à-dire des rejeux INFINIS jusqu'à expiration
+ *   des enregistrements (24 h), pendant lesquels le shard concerné est BLOQUÉ. Le handler
+ *   échoue volontairement (fail-loud) sur une erreur d'infrastructure ; borner les rejeux est ce
+ *   qui empêche une erreur permanente de figer l'agrégation de toutes les autres cibles. Les
+ *   agrégats manqués sont recalculés à la notation suivante (chaque recalcul repart de zéro).
+ * - `bisectBatchOnError: true` : sur échec, le lot est coupé en deux -- une seule cible
+ *   problématique ne fait pas perdre les autres à l'épuisement des rejeux.
+ * - `batchSize`/`maxBatchingWindow` : petit lot, courte fenêtre. Une notation doit se voir
+ *   rapidement côté agrégat ; la fenêtre sert surtout à regrouper les notations d'une même cible
+ *   (dédoublonnées par le handler) sans faire attendre l'utilisateur.
+ * - `reportBatchItemFailures` NON activé : la valeur de retour du handler est donc ignorée par
+ *   Lambda (elle sert au test/aux logs), et un échec fait rejouer le lot ENTIER -- sans danger,
+ *   toutes les écritures étant idempotentes (voir l'en-tête du handler).
+ */
+const ratingTable = backend.data.resources.tables['Rating']
+const ownerTable = backend.data.resources.tables['Owner']
+const ratingAggregationLambda = backend.ratingAggregation.resources.lambda
+
+ratingAggregationLambda.addEventSource(
+  new DynamoEventSource(ratingTable, {
+    startingPosition: StartingPosition.LATEST,
+    batchSize: 25,
+    maxBatchingWindow: Duration.seconds(10),
+    retryAttempts: 3,
+    bisectBatchOnError: true,
+    filters: [FilterCriteria.filter({ eventName: FilterRule.isEqual('INSERT') })],
+  }),
+)
+
+ratingAggregationLambda.addToRolePolicy(
+  new PolicyStatement({
+    // Toutes les notes reçues par une cible -- sur l'ARN de l'INDEX (une action d'index n'est pas
+    // couverte par l'ARN de la table seule). Pas de `dynamodb:Scan` ni de `Query` sur la table
+    // elle-même : cette Lambda ne peut structurellement pas parcourir `Rating` autrement que par
+    // ce GSI, ni lire une notation par sa clé primaire.
+    actions: ['dynamodb:Query'],
+    resources: [`${ratingTable.tableArn}/index/${RATING_TARGET_INDEX_NAME}`],
+  }),
+)
+ratingAggregationLambda.addToRolePolicy(
+  new PolicyStatement({
+    // Agrégats + champs de modération de `Clinic`, agrégats d'`Owner`. `UpdateItem` SEUL : pas de
+    // `GetItem` (la condition d'écriture du flag remplace la lecture préalable -- voir
+    // `flagClinicForAdminReview`), pas de `PutItem`/`DeleteItem` (cette Lambda ne crée ni ne
+    // supprime jamais une Clinic/un Owner ; `attribute_exists(id)` côté handler ferme aussi
+    // l'upsert implicite de DynamoDB).
+    actions: ['dynamodb:UpdateItem'],
+    resources: [clinicTable.tableArn, ownerTable.tableArn],
+  }),
+)
+
+// Mêmes tokens CDK que pour la Lambda planifiée ci-dessus : injectés ici, jamais importés depuis
+// `amplify/data/resource.ts` par le handler (ça embarquerait tout `@aws-amplify/backend` dans son
+// bundle esbuild). Les deux SEULES valeurs statiques de cette fonction (les seuils de modération)
+// vivent dans `defineFunction({ environment })`, pas ici.
+backend.ratingAggregation.addEnvironment('RATING_TABLE_NAME', ratingTable.tableName)
+backend.ratingAggregation.addEnvironment('RATING_TARGET_INDEX_NAME', RATING_TARGET_INDEX_NAME)
+backend.ratingAggregation.addEnvironment('CLINIC_TABLE_NAME', clinicTable.tableName)
+backend.ratingAggregation.addEnvironment('OWNER_TABLE_NAME', ownerTable.tableName)
 
 /**
  * Geo (Amazon Location Service place index) -- prérequis découvert tardivement en

@@ -8,7 +8,7 @@
 // (backend Gen2, jamais exécuté côté navigateur en réalité), donc `node` est le bon
 // environnement ici -- pas un contournement, juste la bonne valeur pour ce fichier précis.
 import { describe, it, expect } from 'vitest'
-import { MISSION_STATUS_INDEX_NAME, schema } from '../resource'
+import { MISSION_STATUS_INDEX_NAME, RATING_TARGET_INDEX_NAME, schema } from '../resource'
 
 // Équivalent Gen2 de `src/graphql/__tests__/schema.test.js` (Gen1) : celui-ci lit le SDL
 // brut via `readFileSync` sur `schema.graphql` et pin par matching de texte des fragments
@@ -592,6 +592,160 @@ describe('amplify/data/resource.ts — double validation de Mission + notation (
 
     it("n'a pas altéré le type de status (a.ref('MissionStatus') indexable tel quel, contrairement à .identifier()/ADR-0015)", () => {
       expect(missionType).toContain('status: MissionStatus! @index(')
+    })
+  })
+
+  describe('Rating — GSI (targetID, targetRole) (étape 3/5, Lambda d’agrégation des notations)', () => {
+    const ratingType = extractType('Rating')
+
+    // Le nom PHYSIQUE de l'index est consommé hors de ce fichier (policy IAM + variable
+    // d'environnement de la Lambda, amplify/backend.ts) : un renommage silencieux casserait le
+    // `QueryCommand` du handler au runtime, jamais à la compilation.
+    it('compile en @index avec le nom exact exporté par resource.ts, sur targetID', () => {
+      expect(RATING_TARGET_INDEX_NAME).toBe('ratingsByTarget')
+      expect(ratingType).toContain(`targetID: ID! @index(name: "${RATING_TARGET_INDEX_NAME}"`)
+    })
+
+    // La sort key est ce qui rend la requête EXACTE plutôt que "probablement sans collision" :
+    // `targetID` porte tantôt un Clinic.id, tantôt un Owner.id (et ce schéma fabrique déjà la
+    // collision Clinic.id === Veterinarian.id à l'inscription).
+    it('porte bien targetRole en clé de tri — un a.ref() d’enum EST accepté comme sort key', () => {
+      expect(ratingType).toContain('sortKeyFields: ["targetRole"]')
+      expect(ratingType).toContain('targetRole: RatingParticipantRole!')
+    })
+
+    it('ne demande AUCUNE query GraphQL (queryField: null) — seul le SDK DynamoDB de la Lambda lit cet index', () => {
+      const indexDirective = ratingType
+        .split('\n')
+        .find((line) => line.includes('@index('))
+      expect(indexDirective).toContain('queryField: null')
+      expect(compiledSdl).not.toContain('listRatingByTargetID')
+    })
+
+    it("l'index porte sur targetID et sur aucun autre champ de Rating", () => {
+      const indexedFields = ratingType
+        .split('\n')
+        .filter((line) => line.includes('@index('))
+        .map((line) => line.trim().split(':')[0])
+      expect(indexedFields).toEqual(['targetID'])
+    })
+
+    it("la clé primaire composite (missionID, raterRole) d'ADR-0015 est intacte", () => {
+      expect(ratingType).toContain('missionID: ID! @primaryKey(sortKeyFields: ["raterRole"])')
+    })
+  })
+
+  describe('Clinic — 5 champs d’agrégation/modération, AUCUNE écriture accordée à aucun rôle (étape 3/5)', () => {
+    const clinicType = extractType('Clinic')
+    const clinicModerationFields = [
+      'averageRatingAsClinic',
+      'ratingCountAsClinic',
+      'needsAdminReview',
+      'needsAdminReviewSince',
+      'accountStatus',
+    ]
+
+    it('les 5 champs vivent bien dans le type Clinic, tous nullable', () => {
+      expect(clinicType).toContain('averageRatingAsClinic: Float @auth(')
+      expect(clinicType).toContain('ratingCountAsClinic: Int @auth(')
+      expect(clinicType).toContain('needsAdminReview: Boolean @auth(')
+      expect(clinicType).toContain('needsAdminReviewSince: AWSDateTime @auth(')
+      expect(clinicType).toContain('accountStatus: ClinicAccountStatus @auth(')
+    })
+
+    it.each(clinicModerationFields)(
+      '%s : Veterinarians et Admins en LECTURE seule, personne en écriture — ces champs ne sont écrits que par la Lambda rating-aggregation (SDK direct, hors AppSync)',
+      (fieldName) => {
+        const block = extractFieldAuthBlock(clinicType, fieldName)
+        expect(block).toContain('{allow: groups, operations: [read], groups: ["Veterinarians"]}')
+        expect(block).toContain('{allow: groups, operations: [read], groups: ["Admins"]}')
+        // Le coeur de la garantie : sans ça, une clinique pourrait falsifier sa propre moyenne
+        // (ou saboter celle d'un tiers) via `client.models.Clinic.update()`.
+        expect(block).not.toContain('update')
+        expect(block).not.toContain('create')
+        expect(block).not.toContain('delete')
+      },
+    )
+
+    it.each(clinicModerationFields)(
+      "%s : la règle `private` (TOUT utilisateur authentifié, Owners inclus) de niveau modèle ne s'applique PAS — l'état de modération d'une clinique n'est pas public",
+      (fieldName) => {
+        const block = extractFieldAuthBlock(clinicType, fieldName)
+        expect(block).not.toContain('allow: private')
+        // `allow.owner()` non repris non plus : sans `.to([...])` il rouvrirait les 4 opérations
+        // au vétérinaire créateur de la ligne (voir la règle de niveau modèle ci-dessous).
+        expect(block).not.toContain('allow: owner')
+      },
+    )
+
+    it("la règle de NIVEAU MODÈLE de Clinic est inchangée (allow.owner() sans restriction + Veterinarians create/read/update + private read) — ce sont bien les @auth de CHAMP qui la remplacent sur ces 5 champs", () => {
+      const typeAuthStart = compiledSdl.indexOf('type Clinic @model @auth(')
+      const typeAuthEnd = compiledSdl.indexOf('])\n{', typeAuthStart)
+      const typeAuthBlock = compiledSdl.slice(typeAuthStart, typeAuthEnd)
+      expect(typeAuthBlock).toContain('{allow: owner, ownerField: "owner"}')
+      expect(typeAuthBlock).toContain(
+        '{allow: groups, operations: [create, read, update], groups: ["Veterinarians"]}',
+      )
+      expect(typeAuthBlock).toContain('{allow: private, operations: [read]}')
+    })
+
+    it("aucun AUTRE champ de Clinic ne porte de @auth au niveau champ (name, rpps, transfusionsDone, coordonnées...)", () => {
+      let restOfType = clinicType.slice(clinicType.indexOf('name: String!'))
+      for (const fieldName of clinicModerationFields) {
+        restOfType = restOfType.replace(extractFieldAuthBlock(restOfType, fieldName), '')
+      }
+      expect(restOfType).not.toContain('@auth(')
+    })
+  })
+
+  describe('Owner — 2 champs d’agrégation, trou d’écriture hérité du modèle refermé (étape 3/5)', () => {
+    const ownerType = extractType('Owner')
+    const ownerAggregateFields = ['averageRatingAsOwner', 'ratingCountAsOwner']
+
+    it('les 2 champs vivent bien dans le type Owner, tous nullable', () => {
+      expect(ownerType).toContain('averageRatingAsOwner: Float @auth(')
+      expect(ownerType).toContain('ratingCountAsOwner: Int @auth(')
+    })
+
+    // Ce test est la RAISON d'être du scoping de champ côté Owner : la règle de niveau modèle
+    // `allow.owner()` est SANS `operations`, donc les 4 opérations -- un Owner pouvait écrire
+    // n'importe quel champ de son profil via `client.models.Owner.update()`. Même trou que
+    // `Mission.status` avant le correctif de l'étape 1/5. Si cette assertion casse un jour
+    // (règle de modèle resserrée), le scoping ci-dessous reste correct mais sa justification
+    // change -- d'où le pin explicite plutôt qu'un commentaire.
+    it("la règle de NIVEAU MODÈLE d'Owner accorde bien les 4 opérations à l'owner (aucune restriction) — c'est ce qui rendait ces champs falsifiables sans scoping de champ", () => {
+      const typeAuthStart = compiledSdl.indexOf('type Owner @model @auth(')
+      const typeAuthEnd = compiledSdl.indexOf('])\n{', typeAuthStart)
+      const typeAuthBlock = compiledSdl.slice(typeAuthStart, typeAuthEnd)
+      expect(typeAuthBlock).toContain('{allow: owner, ownerField: "owner"}')
+      expect(typeAuthBlock).not.toContain('{allow: owner, operations:')
+    })
+
+    it.each(ownerAggregateFields)(
+      "%s : l'Owner VOIT sa moyenne mais ne peut plus l'écrire (read seul)",
+      (fieldName) => {
+        const block = extractFieldAuthBlock(ownerType, fieldName)
+        expect(block).toContain('{allow: owner, operations: [read]')
+        expect(block).not.toContain('update')
+        expect(block).not.toContain('create')
+        expect(block).not.toContain('delete')
+      },
+    )
+
+    it.each(ownerAggregateFields)(
+      '%s : les Veterinarians GARDENT read (même périmètre que la règle de modèle) — le retirer casserait toute lecture d’Owner sans selectionSet explicite',
+      (fieldName) => {
+        const block = extractFieldAuthBlock(ownerType, fieldName)
+        expect(block).toContain('{allow: groups, operations: [read], groups: ["Veterinarians"]}')
+      },
+    )
+
+    it("aucun AUTRE champ d'Owner ne porte de @auth au niveau champ", () => {
+      let restOfType = ownerType.slice(ownerType.indexOf('firstname: String!'))
+      for (const fieldName of ownerAggregateFields) {
+        restOfType = restOfType.replace(extractFieldAuthBlock(restOfType, fieldName), '')
+      }
+      expect(restOfType).not.toContain('@auth(')
     })
   })
 
