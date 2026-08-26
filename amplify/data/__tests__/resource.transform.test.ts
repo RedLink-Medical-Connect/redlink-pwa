@@ -8,7 +8,7 @@
 // (backend Gen2, jamais exécuté côté navigateur en réalité), donc `node` est le bon
 // environnement ici -- pas un contournement, juste la bonne valeur pour ce fichier précis.
 import { describe, it, expect } from 'vitest'
-import { schema } from '../resource'
+import { MISSION_STATUS_INDEX_NAME, schema } from '../resource'
 
 // Équivalent Gen2 de `src/graphql/__tests__/schema.test.js` (Gen1) : celui-ci lit le SDL
 // brut via `readFileSync` sur `schema.graphql` et pin par matching de texte des fragments
@@ -368,7 +368,12 @@ describe('amplify/data/resource.ts — Mission @auth (équivalent Gen2 ADR-0004,
   // n'existait dans ce fichier) -- c'est précisément le trou que le reviewer a signalé comme
   // non couvert par la suite de tests.
   it("status porte désormais un @auth de champ dédié (missionStatusFieldAuth) -- Owner garde create+read (createMissionSimple), Veterinarians perd 'update' et ne garde que 'read', Admins lit", () => {
-    expect(missionType).toContain('status: MissionStatus! @auth(')
+    // `@index(...)` s'intercale désormais entre le champ et son `@auth` (GSI ajouté à l'étape
+    // 2/5, voir le describe dédié plus bas) -- assertion mise à jour pour pinner les deux
+    // directives DANS CET ORDRE plutôt que de relâcher la vérification.
+    expect(missionType).toContain(
+      'status: MissionStatus! @index(name: "missionsByStatus", queryField: null) @auth(',
+    )
     const block = extractFieldAuthBlock(missionType, 'status')
     expect(block).toContain('{allow: owner, operations: [create, read]')
     expect(block).toContain('{allow: groups, operations: [read], groups: ["Veterinarians"]}')
@@ -552,6 +557,41 @@ describe('amplify/data/resource.ts — double validation de Mission + notation (
       // propre règle de groupe (fuite cross-clinique sinon) -- seul ownerDefinedIn le donne, sur
       // sa propre ligne.
       expect(typeAuthBlock).not.toContain('{allow: groups, operations: [create, read], groups: ["Veterinarians"]}')
+    })
+  })
+
+  describe('Mission.status — GSI (étape 2/5, Lambda planifiée de finalisation automatique)', () => {
+    const missionType = extractType('Mission')
+
+    // Le nom PHYSIQUE de l'index est consommé hors de ce fichier (policy IAM + variable
+    // d'environnement de la Lambda, amplify/backend.ts) : un renommage silencieux casserait le
+    // `QueryCommand` du handler au runtime, jamais à la compilation. D'où ce pin sur la valeur
+    // exacte ET sur la constante exportée qui la porte.
+    it('compile en @index avec le nom exact exporté par resource.ts', () => {
+      expect(MISSION_STATUS_INDEX_NAME).toBe('missionsByStatus')
+      expect(missionType).toContain(`@index(name: "${MISSION_STATUS_INDEX_NAME}"`)
+    })
+
+    // `queryField: null` est le SEUL endroit vérifiable ici : le SDL produit par
+    // `schema.transform()` est le SDL d'ENTRÉE du transformer (directives `@model`/`@index`), les
+    // types `Query`/`Mutation` générés à partir des modèles n'y figurent pas encore (seules les
+    // opérations custom déclarées à la main y apparaissent). L'absence du nom par défaut
+    // `listMissionByStatus` dans tout le SDL confirme qu'aucune query n'est demandée.
+    it('ne demande AUCUNE query GraphQL (queryField: null) -- seul le SDK DynamoDB de la Lambda lit cet index', () => {
+      expect(missionType).toContain('queryField: null')
+      expect(compiledSdl).not.toContain('listMissionByStatus')
+    })
+
+    it("l'index porte bien sur status et sur aucun autre champ de Mission", () => {
+      const indexedFields = missionType
+        .split('\n')
+        .filter((line) => line.includes('@index('))
+        .map((line) => line.trim().split(':')[0])
+      expect(indexedFields).toEqual(['status'])
+    })
+
+    it("n'a pas altéré le type de status (a.ref('MissionStatus') indexable tel quel, contrairement à .identifier()/ADR-0015)", () => {
+      expect(missionType).toContain('status: MissionStatus! @index(')
     })
   })
 

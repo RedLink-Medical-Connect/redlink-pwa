@@ -156,6 +156,24 @@ const missionStatusFieldAuth = (allow: any) => [
   allow.group('Admins').to(['read']),
 ]
 
+/**
+ * Nom PHYSIQUE du GSI DynamoDB posé sur `Mission.status` (voir `.secondaryIndexes()` sur le
+ * modèle `Mission` plus bas). Exporté parce que DEUX consommateurs hors de ce fichier en
+ * dépendent et ne doivent pas le recopier en dur :
+ * - `amplify/backend.ts` : ARN de la policy IAM (`<tableArn>/index/<nom>`) ET valeur de la
+ *   variable d'environnement passée à la Lambda planifiée.
+ * - `amplify/functions/mission-validation-auto-finalizer/handler.ts` : `IndexName` du
+ *   `QueryCommand` -- lu depuis l'environnement, JAMAIS importé depuis ce fichier (un import
+ *   depuis `amplify/data/resource.ts` embarquerait tout `@aws-amplify/backend` dans le bundle
+ *   esbuild de la Lambda).
+ *
+ * Nom EXPLICITE (`.name(...)`) plutôt que le nom auto-généré par le transformer : sans lui, le
+ * nom physique du GSI est dérivé par `generateKeyAndQueryNameForConfig`
+ * (`@aws-amplify/graphql-index-transformer`) et ne serait pas garanti stable/prévisible côté
+ * IAM et côté `IndexName` de la Lambda -- deux endroits qui ont besoin de la valeur EXACTE.
+ */
+export const MISSION_STATUS_INDEX_NAME = 'missionsByStatus'
+
 export const schema = a.schema({
   // ==========================================================
   // ENUMS -- valeurs identiques à Gen1 (schema.graphql, section 4)
@@ -580,6 +598,52 @@ export const schema = a.schema({
       // `Rating.identifier(['missionID', 'raterRole'])`, pas ici).
       ratings: a.hasMany('Rating', 'missionID'),
     })
+    // GSI sur `status` (2026-08-26, étape 2/5 de la double validation de Mission). AJOUT
+    // STRICTEMENT ADDITIF, découvert nécessaire seulement en construisant la Lambda planifiée
+    // de finalisation automatique (`amplify/functions/mission-validation-auto-finalizer/`) --
+    // pas à l'étape 1/5 (schéma + resolver), qui n'accédait jamais aux Missions autrement que
+    // par leur clé primaire (`ddb.get`/`ddb.update` sur `{ id: missionId }`, les 3 fonctions du
+    // pipeline `submitMissionValidation`). La Lambda, elle, a besoin de la question INVERSE :
+    // "quelles Missions sont actuellement en `PENDING_VALIDATION` ?" -- sans index, la seule
+    // réponse possible est un Scan COMPLET de la table Mission à chaque exécution planifiée
+    // (coût et latence croissant indéfiniment avec l'historique des Missions clôturées, alors
+    // que l'ensemble réellement recherché reste minuscule).
+    //
+    // API vérifiée dans les types INSTALLÉS (pas devinée, MCP context7 indisponible dans cette
+    // session -- même méthode de vérification que `.identifier()`/ADR-0015) :
+    // `node_modules/@aws-amplify/data-schema/dist/esm/ModelType.d.ts` (méthode
+    // `secondaryIndexes((index) => [...])`, exemple JSDoc `index('type').sortKeys(['sort'])`) et
+    // `ModelIndex.d.ts` (`.name()`/`.queryField()`/`.projection()`). Point NON évident vérifié
+    // spécifiquement, parce que `.identifier()` a précisément le défaut inverse (ADR-0015 : un
+    // champ `a.ref()` d'enum y est REFUSÉ) : un champ `a.ref()` d'enum EST éligible comme clé de
+    // partition d'un index secondaire -- `ExtractSecondaryIndexIRFields` (ModelType.d.ts, "3.
+    // RefType that refers to a top level defined EnumType") et la validation runtime
+    // correspondante dans `transformedSecondaryIndexesForModel` (`SchemaProcessor.mjs`, qui lève
+    // explicitement si le `a.ref()` ne pointe PAS vers un enum). `status` reste donc
+    // `a.ref('MissionStatus')`, aucun changement de type à faire pour l'indexer.
+    //
+    // `.queryField(null)` -- écart ASSUMÉ par rapport au défaut du framework (qui générerait
+    // une query GraphQL `listMissionByStatus`), à scruter en revue : le SEUL consommateur de cet
+    // index est la Lambda planifiée, qui interroge la table DynamoDB EN DIRECT via le SDK (elle
+    // n'a pas d'identité Cognito et bypasse AppSync, comme les resolvers custom bypassent
+    // `@auth`). Générer une query publique sans aucun appelant élargirait la surface d'API pour
+    // rien -- et cette query hériterait des règles de NIVEAU MODÈLE de `Mission`
+    // (`allow.group('Veterinarians').to(['read'])`, sans notion de "ma clinique"), donnant à
+    // n'importe quel Veterinarian un chemin plus commode pour lister les Missions de TOUTES les
+    // cliniques par statut. Rien de nouveau en droit (`listMissions` le permet déjà), mais aucun
+    // besoin de l'ajouter. Réversible sans coût si une future interface admin des Missions
+    // `DISPUTED` en a besoin : `queryField` ne touche QUE l'API GraphQL (resolvers), pas la
+    // structure du GSI -- le rétablir plus tard ne provoque aucune mise à jour de table.
+    //
+    // Pas de sort key ni de projection restreinte (défaut `ALL`) : aucun champ du modèle ne
+    // porte l'échéance (choix d'architecture délibéré -- pas de `validationDeadline`, la Lambda
+    // la dérive de `MIN(clinicValidatedAt, ownerValidatedAt)` + N jours), donc aucun candidat
+    // sort key ne permettrait de filtrer côté DynamoDB plutôt que côté Lambda. `ALL` évite au
+    // handler un GetItem de rattrapage par Mission (il consomme animalID/requestID/les 4 champs
+    // de validation) ; une projection `INCLUDE` figerait la liste exacte des champs lus dans
+    // l'infrastructure, au prix d'une mise à jour de GSI (déploiement itératif) à chaque champ
+    // supplémentaire lu plus tard.
+    .secondaryIndexes((index) => [index('status').name(MISSION_STATUS_INDEX_NAME).queryField(null)])
     .authorization((allow) => [
       // Restreint aux opérations réellement utilisées (revue DevSecOps Gen1, Phase 5) : sans ce
       // `.to([...])`, la règle owner à elle seule autoriserait un Owner authentifié à appeler

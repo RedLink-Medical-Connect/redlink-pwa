@@ -3,8 +3,9 @@ import { Names } from 'aws-cdk-lib'
 import { Policy, PolicyStatement } from 'aws-cdk-lib/aws-iam'
 import { AwsCustomResource, AwsCustomResourcePolicy, PhysicalResourceId } from 'aws-cdk-lib/custom-resources'
 import { auth } from './auth/resource'
-import { data } from './data/resource'
+import { data, MISSION_STATUS_INDEX_NAME } from './data/resource'
 import { postConfirmation } from './functions/post-confirmation/resource'
+import { missionValidationAutoFinalizer } from './functions/mission-validation-auto-finalizer/resource'
 
 /**
  * Phase 8, sous-tâche 4 (migration Gen1 -> Gen2) : `data` (defineData,
@@ -16,6 +17,7 @@ const backend = defineBackend({
   auth,
   postConfirmation,
   data,
+  missionValidationAutoFinalizer,
 })
 
 // Permission IAM de la Lambda PostConfirmation (scopée à `cognito-idp:AdminAddUserToGroup`
@@ -42,6 +44,107 @@ cfnUserPool.policies = {
     requireUppercase: false,
   },
 }
+
+/**
+ * Lambda planifiée `mission-validation-auto-finalizer` (2026-08-26, étape 2/5 de la double
+ * validation de Mission) : accès DIRECT aux tables DynamoDB managées par `defineData`, avec sa
+ * propre identité IAM (jamais un utilisateur Cognito). Voir l'en-tête de
+ * `amplify/functions/mission-validation-auto-finalizer/handler.ts` pour POURQUOI ce chemin
+ * plutôt que le client Data en mode IAM (`allow.resource()`) -- résumé : les mutations générées
+ * n'exposent aucun `condition` DynamoDB (ADR-0011) alors que l'écriture de `Mission.status` en a
+ * impérativement besoin, et les règles `@auth` DE CHAMP de `Mission` (qui REMPLACENT celles de
+ * niveau modèle, ADR-0009) obligeraient à rouvrir en écriture les champs que l'étape 1/5 vient
+ * précisément de verrouiller.
+ *
+ * `backend.data.resources.tables['<Model>']` : point d'accès aux tables managées (clé = nom du
+ * modèle), vérifié dans le paquet installé -- `@aws-amplify/graphql-api-construct`
+ * (`amplify-graphql-api.js`, exemple `api.resources.tables["Todo"].tableArn` ; mapping construit
+ * par `getGeneratedResources`, `lib/internal/construct-exports.js`).
+ *
+ * Discipline IAM identique au reste de ce fichier (ADR-0008/0012/0013) : une action par usage
+ * RÉEL, sur l'ARN EXACT de chaque table, jamais de wildcard, jamais `dynamodb:*`. En
+ * particulier :
+ * - `Query` est accordé sur l'ARN de l'INDEX (`<tableArn>/index/<nom du GSI>`), pas sur la
+ *   table : une action d'index n'est pas couverte par l'ARN de la table seule. Et la Lambda n'a
+ *   PAS `dynamodb:Scan` sur `Mission` -- elle ne peut donc structurellement pas retomber sur un
+ *   Scan de table complète si le GSI venait à manquer, elle échouerait bruyamment.
+ * - `Request` (5e table, absente du périmètre initial de la sous-tâche) : LECTURE SEULE. Le
+ *   modèle `Mission` ne porte pas de `clinicID`, seulement `requestID` -- côté front,
+ *   `RequestsView.vue` passe le `clinicID` déjà chargé à `closeMission()`, mais ici personne ne
+ *   le fournit : il faut le résoudre pour pouvoir écrire `ClinicOwnerRelation` et les compteurs
+ *   de la `Clinic`. Signalé explicitement plutôt qu'ajouté en silence.
+ * - `Clinic` : `UpdateItem` seul, sans `GetItem` -- l'incrément des compteurs est atomique
+ *   (`if_not_exists(...) + :one`), donc aucune lecture préalable n'est nécessaire (contrairement
+ *   à `useMissionClosure.js`, qui lit puis écrit faute de pouvoir faire autrement depuis le
+ *   client Data).
+ */
+const missionTable = backend.data.resources.tables['Mission']
+const animalTable = backend.data.resources.tables['Animal']
+const requestTable = backend.data.resources.tables['Request']
+const clinicTable = backend.data.resources.tables['Clinic']
+const clinicOwnerRelationTable = backend.data.resources.tables['ClinicOwnerRelation']
+
+const autoFinalizerLambda = backend.missionValidationAutoFinalizer.resources.lambda
+
+autoFinalizerLambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: ['dynamodb:Query'],
+    resources: [`${missionTable.tableArn}/index/${MISSION_STATUS_INDEX_NAME}`],
+  }),
+)
+autoFinalizerLambda.addToRolePolicy(
+  new PolicyStatement({
+    // Écriture conditionnelle du statut final (`ConditionExpression: status = PENDING_VALIDATION`).
+    actions: ['dynamodb:UpdateItem'],
+    resources: [missionTable.tableArn],
+  }),
+)
+autoFinalizerLambda.addToRolePolicy(
+  new PolicyStatement({
+    // `GetItem` : Animal.ownerID ; `UpdateItem` : Animal.lastDonationDate (Frequency Rule).
+    actions: ['dynamodb:GetItem', 'dynamodb:UpdateItem'],
+    resources: [animalTable.tableArn],
+  }),
+)
+autoFinalizerLambda.addToRolePolicy(
+  new PolicyStatement({
+    // Request.clinicID uniquement -- aucune écriture sur les Requests.
+    actions: ['dynamodb:GetItem'],
+    resources: [requestTable.tableArn],
+  }),
+)
+autoFinalizerLambda.addToRolePolicy(
+  new PolicyStatement({
+    // `Scan` (filtré sur ownerID, équivalent exact du `list({ filter })` du client Data : aucun
+    // GSI applicatif n'existe sur ClinicOwnerRelation) + `PutItem` pour la relation créée.
+    actions: ['dynamodb:Scan', 'dynamodb:PutItem'],
+    resources: [clinicOwnerRelationTable.tableArn],
+  }),
+)
+autoFinalizerLambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: ['dynamodb:UpdateItem'],
+    resources: [clinicTable.tableArn],
+  }),
+)
+
+// Noms de tables/index : tokens CDK résolus seulement à la synthèse, donc injectés ici et pas en
+// statique dans `defineFunction({ environment })` (qui ne porte que le délai configurable,
+// MISSION_VALIDATION_TIMEOUT_DAYS -- seule source de vérité de la durée, voir `resource.ts` de
+// la fonction). Le handler ne lit JAMAIS ces noms depuis `amplify/data/resource.ts` : un import
+// depuis ce module embarquerait tout `@aws-amplify/backend` dans son bundle esbuild.
+backend.missionValidationAutoFinalizer.addEnvironment('MISSION_TABLE_NAME', missionTable.tableName)
+backend.missionValidationAutoFinalizer.addEnvironment(
+  'MISSION_STATUS_INDEX_NAME',
+  MISSION_STATUS_INDEX_NAME,
+)
+backend.missionValidationAutoFinalizer.addEnvironment('ANIMAL_TABLE_NAME', animalTable.tableName)
+backend.missionValidationAutoFinalizer.addEnvironment('REQUEST_TABLE_NAME', requestTable.tableName)
+backend.missionValidationAutoFinalizer.addEnvironment(
+  'CLINIC_OWNER_RELATION_TABLE_NAME',
+  clinicOwnerRelationTable.tableName,
+)
+backend.missionValidationAutoFinalizer.addEnvironment('CLINIC_TABLE_NAME', clinicTable.tableName)
 
 /**
  * Geo (Amazon Location Service place index) -- prérequis découvert tardivement en

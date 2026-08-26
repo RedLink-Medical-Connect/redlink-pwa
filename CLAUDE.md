@@ -82,6 +82,19 @@ architecturales) et `.cursorrules` (conventions détaillées pour l'éditeur).
 - Lambda : trigger PostConfirmation sur le modèle de fonctions Gen2
   (`amplify/functions/post-confirmation/`, TypeScript, `defineFunction`),
   référencé depuis `amplify/auth/resource.ts` — voir ADR-0008.
+- **Lambda planifiée + accès DynamoDB direct** : `defineFunction({ schedule: { cron,
+  timezone } })` (`amplify/functions/mission-validation-auto-finalizer/`, EventBridge
+  Scheduler ; cron EventBridge à 5-6 champs, `day-of-month` OU `day-of-week` à `?`).
+  Une Lambda qui doit écrire dans les données managées par `defineData` passe par le
+  **SDK DynamoDB sur la table managée** (`backend.data.resources.tables['<Model>']`,
+  policy IAM scopée à l'ARN exact — l'ARN de l'INDEX pour un `Query` sur GSI), pas par
+  le client Data en mode IAM (`allow.resource()`) : les mutations générées n'ont pas de
+  `condition` (ADR-0011) et une règle `allow.resource()` de niveau modèle ne s'applique
+  pas aux champs portant un `@auth` de CHAMP (ADR-0009). Corollaire : écrire en direct
+  bypasse AppSync, donc `createdAt`/`updatedAt`/`__typename` sont à poser à la main.
+  Index secondaire : `.secondaryIndexes((index) => [index('champ').name(...)])` — un
+  champ `a.ref()` d'enum y est éligible (contrairement à `.identifier()`, ADR-0015).
+  Voir ADR-0016.
 - DynamoDB via les modèles `defineData` (`@model`/`a.model()`).
 - **Enregistrement write-once (preuve immuable)** : `.authorization()` de niveau modèle
   posant `create`+`read` seul, sans jamais accorder `update`/`delete` à qui que ce soit,
