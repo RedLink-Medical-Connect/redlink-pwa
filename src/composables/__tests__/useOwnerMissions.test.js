@@ -27,6 +27,7 @@ const animalListMock = vi.fn()
 const missionCreateMock = vi.fn()
 const missionDeleteMock = vi.fn()
 const linkRequestToMissionMock = vi.fn()
+const submitMissionValidationMock = vi.fn()
 
 vi.mock('aws-amplify/data', () => ({
   generateClient: () => ({
@@ -40,6 +41,7 @@ vi.mock('aws-amplify/data', () => ({
     },
     mutations: {
       linkRequestToMission: (...args) => linkRequestToMissionMock(...args),
+      submitMissionValidation: (...args) => submitMissionValidationMock(...args),
     },
   }),
 }))
@@ -48,7 +50,11 @@ vi.mock('aws-amplify/auth', () => ({
   getCurrentUser: vi.fn(async () => ({ userId: 'owner-1' })),
 }))
 
-import { useOwnerMissions } from '@/composables/useOwnerMissions'
+import {
+  useOwnerMissions,
+  mapSubmitDonationValidationError,
+} from '@/composables/useOwnerMissions'
+import { MissionStatus, MissionValidationOutcome } from '@/constants/enums'
 
 // Une Request telle que renvoyée par Request.get().
 const buildRequest = (overrides = {}) => ({
@@ -81,6 +87,7 @@ const resetAllMocks = () => {
   missionCreateMock.mockReset()
   missionDeleteMock.mockReset()
   linkRequestToMissionMock.mockReset()
+  submitMissionValidationMock.mockReset()
 }
 
 const mockHappyPathBeforeLink = ({ request, animal }) => {
@@ -408,5 +415,283 @@ describe('useOwnerMissions.acceptMission', () => {
     // Pas de deleteMission tenté : ce n'est pas un échec de condition, donc pas de Mission
     // orpheline à nettoyer selon la logique de l'implémentation.
     expect(missionDeleteMock).not.toHaveBeenCalled()
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────────────────
+// Double validation de Mission (2026-08-26, étape 4/5) — côté OWNER.
+// Pendant de `closeMission` (useMissionClosure.js) : même mutation custom, mais l'Owner parle
+// directement le vocabulaire du resolver (CONFIRMED/DENIED), sans table de traduction — le rôle
+// n'est jamais envoyé, il est déduit côté serveur de `ctx.identity.groups`.
+describe('useOwnerMissions.submitDonationValidation', () => {
+  beforeEach(resetAllMocks)
+
+  const mockValidationResult = (status) => {
+    submitMissionValidationMock.mockImplementation(async (input) => ({
+      data: { id: input.missionId, status },
+      errors: undefined,
+    }))
+  }
+
+  it('CONFIRMED : appelle submitMissionValidation avec missionId + outcome, et RIEN d’autre (pas de rôle, pas de raterID — déterminés côté serveur)', async () => {
+    mockValidationResult(MissionStatus.PENDING_VALIDATION)
+
+    const { submitDonationValidation } = useOwnerMissions()
+    const status = await submitDonationValidation(
+      'mission-1',
+      MissionValidationOutcome.CONFIRMED,
+    )
+
+    expect(submitMissionValidationMock).toHaveBeenCalledTimes(1)
+    expect(submitMissionValidationMock).toHaveBeenCalledWith({
+      missionId: 'mission-1',
+      outcome: 'CONFIRMED',
+    })
+    expect(status).toBe('PENDING_VALIDATION')
+  })
+
+  it('DENIED avec disputeReason : transmet le motif (trimé) au resolver', async () => {
+    mockValidationResult(MissionStatus.DISPUTED)
+
+    const { submitDonationValidation } = useOwnerMissions()
+    const status = await submitDonationValidation(
+      'mission-1',
+      MissionValidationOutcome.DENIED,
+      '  Rendez-vous annulé par la clinique  ',
+    )
+
+    expect(submitMissionValidationMock).toHaveBeenCalledWith({
+      missionId: 'mission-1',
+      outcome: 'DENIED',
+      disputeReason: 'Rendez-vous annulé par la clinique',
+    })
+    expect(status).toBe('DISPUTED')
+  })
+
+  it('DENIED sans motif (ou motif vide/espaces) : n’envoie pas la clé disputeReason du tout', async () => {
+    mockValidationResult(MissionStatus.NO_SHOW)
+
+    const { submitDonationValidation } = useOwnerMissions()
+    await submitDonationValidation('mission-1', MissionValidationOutcome.DENIED)
+    await submitDonationValidation('mission-2', MissionValidationOutcome.DENIED, '   ')
+
+    expect(submitMissionValidationMock.mock.calls[0][0]).not.toHaveProperty('disputeReason')
+    expect(submitMissionValidationMock.mock.calls[1][0]).not.toHaveProperty('disputeReason')
+  })
+
+  it('CONFIRMED + disputeReason fourni : le motif est IGNORÉ (décision assumée — ownerDisputeReason est write-once et contredirait un outcome confirmé)', async () => {
+    mockValidationResult(MissionStatus.COMPLETED)
+
+    const { submitDonationValidation } = useOwnerMissions()
+    await submitDonationValidation(
+      'mission-1',
+      MissionValidationOutcome.CONFIRMED,
+      'motif fourni par erreur',
+    )
+
+    expect(submitMissionValidationMock).toHaveBeenCalledWith({
+      missionId: 'mission-1',
+      outcome: 'CONFIRMED',
+    })
+  })
+
+  it.each([
+    MissionValidationOutcome.PENDING,
+    MissionStatus.COMPLETED,
+    MissionStatus.NO_SHOW,
+    'confirmed',
+    '',
+    null,
+    undefined,
+  ])(
+    'outcome invalide (%s) : throw INVALID_OUTCOME AVANT tout appel réseau — PENDING inclus (état initial, pas une soumission)',
+    async (badOutcome) => {
+      const { submitDonationValidation, isSubmittingValidation } = useOwnerMissions()
+
+      await expect(submitDonationValidation('mission-1', badOutcome)).rejects.toThrow(
+        'INVALID_OUTCOME',
+      )
+      expect(submitMissionValidationMock).not.toHaveBeenCalled()
+      expect(isSubmittingValidation.value).toBe(false)
+    },
+  )
+
+  it('ALREADY_VALIDATED : une réponse résolue portant errorType ALREADY_VALIDATED est normalisée en Error("ALREADY_VALIDATED")', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    submitMissionValidationMock.mockResolvedValue({
+      data: null,
+      errors: [
+        {
+          errorType: 'ALREADY_VALIDATED',
+          message: 'Ce côté a déjà soumis sa validation pour cette Mission.',
+        },
+      ],
+    })
+
+    const { submitDonationValidation, isSubmittingValidation } = useOwnerMissions()
+
+    await expect(
+      submitDonationValidation('mission-1', MissionValidationOutcome.CONFIRMED),
+    ).rejects.toThrow('ALREADY_VALIDATED')
+    expect(isSubmittingValidation.value).toBe(false)
+    consoleErrorSpy.mockRestore()
+  })
+
+  it("ne travestit PAS une autre erreur GraphQL (Unauthorized) en ALREADY_VALIDATED : elle est propagée telle quelle", async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const unauthorizedErrors = [{ errorType: 'Unauthorized', message: 'Unauthorized' }]
+    submitMissionValidationMock.mockResolvedValue({ data: null, errors: unauthorizedErrors })
+
+    const { submitDonationValidation } = useOwnerMissions()
+    const error = await submitDonationValidation(
+      'mission-1',
+      MissionValidationOutcome.CONFIRMED,
+    ).catch((e) => e)
+
+    expect(error).toBeInstanceOf(Error)
+    expect(error.message).not.toBe('ALREADY_VALIDATED')
+    expect(error.errors).toEqual(unauthorizedErrors)
+    consoleErrorSpy.mockRestore()
+  })
+
+  it("une panne réseau (exception JS sans .errors) est propagée telle quelle, jamais confondue avec ALREADY_VALIDATED", async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    submitMissionValidationMock.mockRejectedValue(new Error('Network error'))
+
+    const { submitDonationValidation, isSubmittingValidation } = useOwnerMissions()
+
+    await expect(
+      submitDonationValidation('mission-1', MissionValidationOutcome.DENIED),
+    ).rejects.toThrow('Network error')
+    expect(isSubmittingValidation.value).toBe(false)
+    consoleErrorSpy.mockRestore()
+  })
+
+  it('isSubmittingValidation : true pendant l’appel, false après — et distinct de isAccepting', async () => {
+    let duringCall = null
+    let acceptingDuringCall = null
+    const { submitDonationValidation, isSubmittingValidation, isAccepting } = useOwnerMissions()
+    submitMissionValidationMock.mockImplementation(async () => {
+      duringCall = isSubmittingValidation.value
+      acceptingDuringCall = isAccepting.value
+      return { data: { id: 'mission-1', status: MissionStatus.PENDING_VALIDATION }, errors: undefined }
+    })
+
+    await submitDonationValidation('mission-1', MissionValidationOutcome.CONFIRMED)
+
+    expect(duringCall).toBe(true)
+    expect(acceptingDuringCall).toBe(false)
+    expect(isSubmittingValidation.value).toBe(false)
+  })
+
+  it('met à jour le statut de la Mission concernée dans myMissions (et uniquement celle-là), pour que les computed reflètent le nouvel état sans re-fetch', async () => {
+    mockValidationResult(MissionStatus.COMPLETED)
+
+    const { submitDonationValidation, myMissions, activeMissions, historyMissions } =
+      useOwnerMissions()
+    myMissions.value = [
+      { id: 'mission-1', status: MissionStatus.PENDING_ARRIVAL },
+      { id: 'mission-2', status: MissionStatus.PENDING_ARRIVAL },
+    ]
+
+    await submitDonationValidation('mission-1', MissionValidationOutcome.CONFIRMED)
+
+    expect(myMissions.value.find((m) => m.id === 'mission-1').status).toBe('COMPLETED')
+    expect(myMissions.value.find((m) => m.id === 'mission-2').status).toBe('PENDING_ARRIVAL')
+    expect(activeMissions.value.map((m) => m.id)).toEqual(['mission-2'])
+    expect(historyMissions.value.map((m) => m.id)).toEqual(['mission-1'])
+  })
+
+  it("n'écrit AUCUNE écriture secondaire (Animal/ClinicOwnerRelation/Clinic) : elles sont réservées au côté vétérinaire", async () => {
+    // Le mock du client de ce fichier n'expose NI Animal.update, NI ClinicOwnerRelation, NI
+    // Clinic : si `submitDonationValidation` tentait l'une de ces écritures, l'appel lèverait
+    // ici (`undefined is not a function`). Ce test le verrouille de façon structurelle.
+    mockValidationResult(MissionStatus.COMPLETED)
+
+    const { submitDonationValidation } = useOwnerMissions()
+
+    await expect(
+      submitDonationValidation('mission-1', MissionValidationOutcome.CONFIRMED),
+    ).resolves.toBe('COMPLETED')
+    expect(submitMissionValidationMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('réponse sans data exploitable (défensif) : retourne null et laisse myMissions inchangé', async () => {
+    submitMissionValidationMock.mockResolvedValue({ data: null, errors: undefined })
+
+    const { submitDonationValidation, myMissions } = useOwnerMissions()
+    myMissions.value = [{ id: 'mission-1', status: MissionStatus.PENDING_ARRIVAL }]
+
+    await expect(
+      submitDonationValidation('mission-1', MissionValidationOutcome.CONFIRMED),
+    ).resolves.toBeNull()
+    expect(myMissions.value[0].status).toBe('PENDING_ARRIVAL')
+  })
+})
+
+describe('mapSubmitDonationValidationError', () => {
+  it('traduit ALREADY_VALIDATED et INVALID_OUTCOME en messages utilisateur dédiés', () => {
+    expect(mapSubmitDonationValidationError('ALREADY_VALIDATED')).toContain('déjà répondu')
+    expect(mapSubmitDonationValidationError('INVALID_OUTCOME')).toContain('invalide')
+  })
+
+  it('retombe sur le fallback pour un code inconnu (erreur réseau, @auth...)', () => {
+    expect(mapSubmitDonationValidationError('BOOM')).toBe(
+      'Impossible d’enregistrer votre réponse pour cette mission.',
+    )
+    expect(mapSubmitDonationValidationError(undefined, 'repli custom')).toBe('repli custom')
+  })
+})
+
+describe('useOwnerMissions — computed de statuts (double validation)', () => {
+  beforeEach(resetAllMocks)
+
+  const allStatuses = [
+    { id: 'accepted', status: MissionStatus.ACCEPTED },
+    { id: 'pending-arrival', status: MissionStatus.PENDING_ARRIVAL },
+    { id: 'pending-validation', status: MissionStatus.PENDING_VALIDATION },
+    { id: 'completed', status: MissionStatus.COMPLETED },
+    { id: 'completed-auto', status: MissionStatus.COMPLETED_AUTO },
+    { id: 'no-show', status: MissionStatus.NO_SHOW },
+    { id: 'disputed', status: MissionStatus.DISPUTED },
+    { id: 'cancelled', status: MissionStatus.CANCELLED },
+  ]
+
+  it('historyMissions inclut COMPLETED_AUTO et DISPUTED en plus de COMPLETED/NO_SHOW/CANCELLED (sans elles, une Mission finalisée par la Lambda ou en litige disparaîtrait de l’écran du propriétaire)', () => {
+    const { myMissions, historyMissions } = useOwnerMissions()
+    myMissions.value = allStatuses
+
+    expect(historyMissions.value.map((m) => m.id).sort()).toEqual(
+      ['cancelled', 'completed', 'completed-auto', 'disputed', 'no-show'].sort(),
+    )
+  })
+
+  it('awaitingValidationMissions ne contient QUE PENDING_VALIDATION', () => {
+    const { myMissions, awaitingValidationMissions } = useOwnerMissions()
+    myMissions.value = allStatuses
+
+    expect(awaitingValidationMissions.value.map((m) => m.id)).toEqual(['pending-validation'])
+  })
+
+  it('activeMissions reste limité à ACCEPTED/PENDING_ARRIVAL : PENDING_VALIDATION n’y est PAS (décision documentée — plus d’action de terrain, donc pas dans le compteur de missions actives)', () => {
+    const { myMissions, activeMissions } = useOwnerMissions()
+    myMissions.value = allStatuses
+
+    expect(activeMissions.value.map((m) => m.id)).toEqual(['accepted', 'pending-arrival'])
+  })
+
+  it('les trois computed sont mutuellement exclusifs et couvrent tous les statuts connus (aucune Mission invisible, aucune comptée deux fois)', () => {
+    const { myMissions, activeMissions, awaitingValidationMissions, historyMissions } =
+      useOwnerMissions()
+    myMissions.value = allStatuses
+
+    const covered = [
+      ...activeMissions.value,
+      ...awaitingValidationMissions.value,
+      ...historyMissions.value,
+    ].map((m) => m.id)
+
+    expect(covered.sort()).toEqual(allStatuses.map((m) => m.id).sort())
+    expect(new Set(covered).size).toBe(covered.length)
   })
 })
