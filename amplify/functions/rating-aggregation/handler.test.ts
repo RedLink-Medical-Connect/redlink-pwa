@@ -238,6 +238,33 @@ describe('rating-aggregation handler — modération clinique', () => {
     expect(summary.clinicsFlaggedForReview).toBe(0)
   })
 
+  // Frontière exacte demandée par la revue QA (2026-08-27) : EXACTEMENT 5 avis (borne de volume
+  // atteinte, inclusive) à EXACTEMENT 3,0 de moyenne (borne de moyenne stricte, NON franchie).
+  // Testée ici en plus du module pur (`resolve-rating-aggregation.test.ts`) parce que ce n'est
+  // pas la même garantie : ce test prouve que le handler transmet bien l'agrégat CALCULÉ tel
+  // quel au comparateur — un arrondi ou une coercition intermédiaire côté handler ferait
+  // basculer ce cas sans qu'aucun test de fonction pure ne bouge.
+  it('ne signale PAS une clinique à EXACTEMENT 5 avis pour EXACTEMENT 3,0 de moyenne (écriture de l’agrégat seule)', async () => {
+    respondWith(starsPage([3, 3, 3, 3, 3]), {})
+
+    const summary = await invoke(streamEvent(insertRecord('clinic-1', 'CLINIC')))
+
+    const updates = sentCommands().filter((command) => command.commandName === 'Update')
+    expect(updates).toHaveLength(1)
+    expect(updates[0].input.ExpressionAttributeValues).toMatchObject({ ':average': 3, ':count': 5 })
+    expect(summary.clinicsFlaggedForReview).toBe(0)
+  })
+
+  it('signale en revanche la MÊME clinique dès que la moyenne passe juste sous 3 avec 5 avis', async () => {
+    // 14/5 = 2,8 : un seul avis d'écart avec le cas ci-dessus fait basculer la décision.
+    respondWith(starsPage([3, 3, 3, 3, 2]), {}, {})
+
+    const summary = await invoke(streamEvent(insertRecord('clinic-1', 'CLINIC')))
+
+    expect(sentCommands().filter((command) => command.commandName === 'Update')).toHaveLength(2)
+    expect(summary.clinicsFlaggedForReview).toBe(1)
+  })
+
   it('ne signale JAMAIS un Owner, même très mal noté (aucune modération de ce côté)', async () => {
     respondWith(starsPage([1, 1, 1, 1, 1, 1]), {})
 

@@ -151,6 +151,22 @@ describe('resolveAutoFinalizationOutcome — calcul de l’échéance', () => {
     expect(outcome.kind).toBe('FINALIZE')
   })
 
+  // Complète la frontière ci-dessus (passe QA, 2026-08-27) : les trois points contigus
+  // -1 ms / échéance exacte / +1 ms sont désormais tous couverts, donc un basculement de
+  // `<` en `<=` (ou l'inverse) est détecté quel que soit le sens de l'erreur.
+  it('est dépassée une milliseconde APRÈS l’échéance', () => {
+    const outcome = resolveAutoFinalizationOutcome(
+      { clinicValidationOutcome: 'CONFIRMED', clinicValidatedAt: VALIDATED_AT },
+      { nowMs: VALIDATED_AT_MS + 7 * DAY_MS + 1, timeoutDays: 7 },
+    )
+
+    expect(outcome).toMatchObject({
+      kind: 'FINALIZE',
+      finalStatus: 'COMPLETED_AUTO',
+      deadlineMs: VALIDATED_AT_MS + 7 * DAY_MS,
+    })
+  })
+
   // Le délai est un PARAMÈTRE, pas une constante : la même Mission, au même instant, bascule
   // d'un côté ou de l'autre selon la seule valeur de MISSION_VALIDATION_TIMEOUT_DAYS.
   it('la même Mission au même instant dépend uniquement du délai configuré', () => {
