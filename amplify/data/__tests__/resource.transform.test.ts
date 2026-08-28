@@ -749,7 +749,7 @@ describe('amplify/data/resource.ts — double validation de Mission + notation (
     })
   })
 
-  describe('submitMissionValidation — mutation custom en pipeline (3 fonctions, voir resource.ts et les resolvers)', () => {
+  describe('submitMissionValidation — mutation custom en pipeline (7 fonctions, voir resource.ts et les resolvers)', () => {
     it('compile avec les bons arguments et retourne Mission', () => {
       const mutationType = extractType('Mutation')
       expect(mutationType).toContain(
@@ -762,6 +762,59 @@ describe('amplify/data/resource.ts — double validation de Mission + notation (
       expect(mutationType).toContain(
         'submitMissionValidation(missionId: ID!, outcome: MissionValidationOutcome!, disputeReason: String): Mission @aws_cognito_user_pools',
       )
+    })
+
+    // Correctif de sécurité du 2026-08-27 (docs/adr/0018) : 4 fonctions de vérification
+    // d'identité AVANT l'écriture write-once. Le SDL compilé ne dit RIEN du pipeline (une
+    // mutation custom n'expose ni ses fonctions ni leurs sources de données) — ce pin passe donc
+    // par `schema.transform().jsFunctions`, la structure que `defineData` transmet ensuite à
+    // `convertJsResolverDefinition` (`@aws-amplify/backend-data`), qui crée une
+    // `CfnFunctionConfiguration` par entrée avec son propre `dataSourceName`.
+    //
+    // Ce que ce test attrape et qu'aucun autre n'attraperait : un RÉORDONNANCEMENT du tableau
+    // `.handler([...])`. Rien dans les fichiers de resolver ne connaît sa propre position ;
+    // déplacer l'écriture (`write-side`) avant les vérifications réintroduirait exactement le
+    // trou fermé ici (côté écrit puis « annulé » — sauf qu'il est write-once, donc jamais
+    // annulable), et le pipeline continuerait de fonctionner sur le chemin nominal.
+    it('le pipeline compte 7 fonctions, dans l’ordre exact vérification -> écriture, chacune sur la bonne source de données', () => {
+      const jsFunctions = (
+        schema.transform() as unknown as {
+          jsFunctions: {
+            typeName: string
+            fieldName: string
+            handlers: { dataSource: string; entry: { relativePath: string } }[]
+          }[]
+        }
+      ).jsFunctions
+
+      const pipeline = jsFunctions.find(
+        (fn) => fn.typeName === 'Mutation' && fn.fieldName === 'submitMissionValidation',
+      )
+
+      expect(
+        pipeline?.handlers.map((h) => [h.entry.relativePath, h.dataSource]),
+      ).toEqual([
+        ['./resolvers/submit-mission-validation-resolve-parties.js', 'MissionTable'],
+        ['./resolvers/submit-mission-validation-verify-owner-party.js', 'AnimalTable'],
+        ['./resolvers/submit-mission-validation-load-vet-clinic.js', 'VeterinarianTable'],
+        ['./resolvers/submit-mission-validation-verify-clinic-party.js', 'RequestTable'],
+        ['./resolvers/submit-mission-validation-write-side.js', 'MissionTable'],
+        ['./resolvers/submit-mission-validation-read-mission.js', 'MissionTable'],
+        ['./resolvers/submit-mission-validation-finalize-status.js', 'MissionTable'],
+      ])
+    })
+
+    // AppSync plafonne un resolver de pipeline à 10 fonctions : ce pipeline en consomme 7. Le
+    // pin sert d'alerte précoce si une future sous-tâche s'en approche sans le savoir.
+    it('reste sous le plafond AppSync de 10 fonctions par resolver de pipeline', () => {
+      const jsFunctions = (
+        schema.transform() as unknown as {
+          jsFunctions: { fieldName: string; handlers: unknown[] }[]
+        }
+      ).jsFunctions
+      const pipeline = jsFunctions.find((fn) => fn.fieldName === 'submitMissionValidation')
+
+      expect(pipeline!.handlers.length).toBeLessThanOrEqual(10)
     })
   })
 })

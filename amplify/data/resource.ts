@@ -1062,24 +1062,51 @@ export const schema = a.schema({
   // dériver/écrire un second champ (`status`) à partir d'un état qui n'est connu qu'APRÈS cette
   // première écriture. Un seul appel `ddb.update()` (unit resolver, un seul aller-retour vers la
   // source de données par invocation) ne suffit pas -- `.handler([...])` prend ici un TABLEAU de
-  // 3 `a.handler.custom({...})`, compilé en un vrai resolver AppSync `kind: PIPELINE` (vérifié,
+  // `a.handler.custom({...})`, compilé en un vrai resolver AppSync `kind: PIPELINE` (vérifié,
   // pas deviné -- voir l'en-tête dense de
   // `amplify/data/resolvers/submit-mission-validation-write-side.js` pour le détail complet :
-  // pourquoi un pipeline plutôt que le unit resolver du plan initial, pourquoi 3 fonctions et
-  // pas 2, la condition d'écriture optimiste anti-course de la 3e fonction). Les 3 fichiers,
-  // dans l'ordre d'exécution du pipeline :
-  // 1. `submit-mission-validation-write-side.js` -- détermine le rôle via `ctx.identity.groups`
+  // pourquoi un pipeline plutôt que le unit resolver du plan initial, pourquoi ces 3 fonctions
+  // d'écriture et pas 2, la condition d'écriture optimiste anti-course de la dernière).
+  //
+  // CORRECTIF DE SÉCURITÉ (2026-08-27, passe QA -- docs/adr/0018) : 4 fonctions de VÉRIFICATION
+  // D'IDENTITÉ ajoutées EN TÊTE du pipeline (3 -> 7 fonctions). Avant elles, le pipeline
+  // vérifiait uniquement l'appartenance à un groupe Cognito, jamais que l'appelant soit PARTIE à
+  // CETTE Mission -- n'importe quel Owner (via `Request.list({ selectionSet: ['mission.id'] })`,
+  // `read` accordé à `allow.authenticated()` sur `Request`) ou n'importe quel Veterinarian (via
+  // `Mission.list()`, scope de groupe GLOBAL) pouvait voter à la place de la vraie partie et,
+  // l'écriture étant write-once par côté, la priver DÉFINITIVEMENT de son vote. Voir l'en-tête
+  // de `submit-mission-validation-resolve-parties.js` pour l'analyse complète.
+  //
+  // Les 7 fichiers, dans l'ordre d'exécution du pipeline (noter que ce sont les 4 premiers qui
+  // portent une source de données AUTRE que `Mission` -- une fonction AppSync ne peut
+  // interroger qu'UNE source, d'où le découpage) :
+  // 1. `submit-mission-validation-resolve-parties.js` (`Mission`) -- rôle de l'appelant +
+  //    `animalID`/`requestID` de la Mission, rangés dans `ctx.stash` (espace serveur).
+  // 2. `submit-mission-validation-verify-owner-party.js` (`Animal`) -- côté Owner :
+  //    `Animal.ownerID === ctx.identity.sub`, sinon `Forbidden`. No-op si l'appelant est une
+  //    clinique (`runtime.earlyReturn`).
+  // 3. `submit-mission-validation-load-vet-clinic.js` (`Veterinarian`) -- côté Clinic : lit le
+  //    `clinicID` du vétérinaire appelant (`id` = `ctx.identity.sub`). No-op côté Owner.
+  // 4. `submit-mission-validation-verify-clinic-party.js` (`Request`) -- côté Clinic :
+  //    `Request.clinicID === clinicID du vétérinaire appelant`, sinon `Forbidden`. No-op côté
+  //    Owner.
+  // 5. `submit-mission-validation-write-side.js` -- détermine le rôle via `ctx.identity.groups`
   //    (jamais un argument client), écrit le côté de l'appelant (write-once, conditionnel).
-  // 2. `submit-mission-validation-read-mission.js` -- relit la Mission à jour (les deux côtés).
-  // 3. `submit-mission-validation-finalize-status.js` -- calcule et écrit `Mission.status`
+  // 6. `submit-mission-validation-read-mission.js` -- relit la Mission à jour (les deux côtés).
+  // 7. `submit-mission-validation-finalize-status.js` -- calcule et écrit `Mission.status`
   //    (matrice PENDING_VALIDATION/COMPLETED/NO_SHOW/DISPUTED), condition optimiste anti-course.
+  //
+  // À SURVEILLER pour toute évolution future : AppSync plafonne un resolver de pipeline à 10
+  // fonctions. Ce pipeline en consomme désormais 7 -- il reste 3 places, ce qui n'est plus
+  // beaucoup si une future vérification demandait encore une table supplémentaire.
   //
   // `.authorization((allow) => [allow.authenticated()])` -- même niveau que
   // `linkRequestToMission` juste au-dessus (tout utilisateur Cognito authentifié, peu importe le
-  // groupe) : le rôle RÉEL (Veterinarian vs Owner) est vérifié DANS le resolver (fonction 1),
-  // jamais fait confiance à un argument. `disputeReason` optionnel (`a.string()`, pas
-  // `.required()`) -- uniquement pertinent côté Owner sur un `outcome: DENIED`, jamais imposé
-  // au niveau schéma (même limite `@auth`/validation de valeur que partout ailleurs ici).
+  // groupe) : le rôle RÉEL (Veterinarian vs Owner) ET le fait d'être partie à la Mission sont
+  // vérifiés DANS le resolver, jamais fait confiance à un argument. `disputeReason` optionnel
+  // (`a.string()`, pas `.required()`) -- uniquement pertinent côté Owner sur un
+  // `outcome: DENIED`, jamais imposé au niveau schéma (même limite `@auth`/validation de valeur
+  // que partout ailleurs ici).
   submitMissionValidation: a
     .mutation()
     .arguments({
@@ -1090,6 +1117,22 @@ export const schema = a.schema({
     .returns(a.ref('Mission'))
     .authorization((allow) => [allow.authenticated()])
     .handler([
+      a.handler.custom({
+        dataSource: a.ref('Mission'),
+        entry: './resolvers/submit-mission-validation-resolve-parties.js',
+      }),
+      a.handler.custom({
+        dataSource: a.ref('Animal'),
+        entry: './resolvers/submit-mission-validation-verify-owner-party.js',
+      }),
+      a.handler.custom({
+        dataSource: a.ref('Veterinarian'),
+        entry: './resolvers/submit-mission-validation-load-vet-clinic.js',
+      }),
+      a.handler.custom({
+        dataSource: a.ref('Request'),
+        entry: './resolvers/submit-mission-validation-verify-clinic-party.js',
+      }),
       a.handler.custom({
         dataSource: a.ref('Mission'),
         entry: './resolvers/submit-mission-validation-write-side.js',

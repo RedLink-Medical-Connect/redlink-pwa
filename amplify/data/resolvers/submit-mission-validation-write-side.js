@@ -1,5 +1,10 @@
-// Fonction 1/3 du pipeline AppSync JS de la mutation custom `submitMissionValidation`
-// (`amplify/data/resource.ts`, double validation de Mission -- 2026-08-26).
+// Fonction 5/7 du pipeline AppSync JS de la mutation custom `submitMissionValidation`
+// (`amplify/data/resource.ts`, double validation de Mission -- 2026-08-26). PREMIÈRE fonction
+// qui ÉCRIT : les 4 qui la précèdent (ajoutées le 2026-08-27, docs/adr/0018) ne font que
+// vérifier que l'appelant est réellement PARTIE à cette Mission, sans jamais écrire -- voir
+// l'en-tête de `submit-mission-validation-resolve-parties.js`. Les renvois « fonction 1 / 2 /
+// 3 » ci-dessous désignent les TROIS fonctions d'écriture historiques de ce pipeline
+// (aujourd'hui 5/7, 6/7 et 7/7) : leur raisonnement est inchangé, seule leur position l'est.
 //
 // Même bypass `@auth` que `linkRequestToMission` (`dataSource: a.ref('Mission')` cible
 // directement la table managée du modèle -- voir docs/adr/0011, section 3.2, pour la preuve

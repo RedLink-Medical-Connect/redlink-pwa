@@ -1,4 +1,7 @@
-// Fonction 2/3 du pipeline `submitMissionValidation` (voir l'en-tête de
+// Fonction 6/7 du pipeline `submitMissionValidation` (ex-2/3 -- 4 fonctions de vérification
+// d'identité ont été ajoutées en tête le 2026-08-27, docs/adr/0018 ; les renvois « fonction 1 /
+// 2 / 3 » ci-dessous désignent toujours les trois fonctions d'ÉCRITURE, aujourd'hui 5/7 à 7/7).
+// Voir l'en-tête de
 // `submit-mission-validation-write-side.js` pour le raisonnement complet du pipeline -- bypass
 // `@auth`, choix d'un pipeline à 3 fonctions plutôt qu'un unit resolver, pourquoi une lecture
 // EXPLICITE plutôt que de faire confiance à la valeur de retour de l'update de la fonction 1).

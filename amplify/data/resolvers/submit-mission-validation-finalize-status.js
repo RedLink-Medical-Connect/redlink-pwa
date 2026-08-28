@@ -1,4 +1,7 @@
-// Fonction 3/3 (dernière) du pipeline `submitMissionValidation` (voir l'en-tête de
+// Fonction 7/7 (dernière) du pipeline `submitMissionValidation` (ex-3/3 -- 4 fonctions de
+// vérification d'identité ont été ajoutées en tête le 2026-08-27, docs/adr/0018 ; les renvois
+// « fonction 1 / 2 / 3 » ci-dessous désignent toujours les trois fonctions d'ÉCRITURE,
+// aujourd'hui 5/7 à 7/7). Voir l'en-tête de
 // `submit-mission-validation-write-side.js` pour le raisonnement complet du pipeline).
 //
 // Calcule le statut agrégé de la Mission à partir des DEUX champs de validation (lus fraîchement
