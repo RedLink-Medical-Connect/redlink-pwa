@@ -98,8 +98,8 @@ ici sans preuve.
 Fuseau **explicite** `Europe/Paris`, comme la Lambda et pour la même raison : un resolver
 s'exécute côté serveur (horloge UTC), pas dans le navigateur d'un vétérinaire — la logique
 `getFullYear()/getMonth()/getDate()` de `todayAsAWSDate()`
-(`src/composables/mission-completion-side-effects.js`, fuseau LOCAL du navigateur) n'est pas
-transposable. Sans fuseau explicite, toute validation soumise entre 00h00 et 02h00 heure de Paris
+(`src/composables/mission-completion-side-effects.js`, fuseau LOCAL du navigateur — helper
+**supprimé le 2026-08-28**, voir §4) n'est pas transposable. Sans fuseau explicite, toute validation soumise entre 00h00 et 02h00 heure de Paris
 daterait le don de la veille et raccourcirait la Frequency Rule d'un jour (même bug de frontière
 que celui trouvé en QA sur la Phase 2.1).
 
