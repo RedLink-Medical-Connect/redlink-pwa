@@ -28,7 +28,18 @@ prérequis à la validation elle-même — il n'existe pas d'Animal Validated Do
 groupe sanguin inconnu. Un Animal qui n'est pas (ou plus) Validated Donor n'est jamais
 candidat à une Request, quelle que soit sa compatibilité par ailleurs.
 _Avoid_: Vacciné / Stérilisé (attributs médicaux distincts, sans lien avec l'agrément
-donneur)
+donneur) ; Mission Validation (voir plus bas — même mot, concept sans rapport)
+
+**Mission Validation** (double validation) :
+La confirmation, par LES DEUX parties d'une Mission (Owner ET Clinic, indépendamment
+l'une de l'autre), que le don a réellement eu lieu — condition requise pour qu'une
+Mission passe à `COMPLETED`. Sans réponse d'un des deux côtés sous un délai
+configurable, la Mission est finalisée automatiquement (`COMPLETED_AUTO`) ; en cas de
+réponses contradictoires, elle passe `DISPUTED`. Voir `submitMissionValidation`
+(`amplify/data/resource.ts`), ADR-0018/0019/0020.
+_Avoid_: Validation (seul, ambigu avec Validated Donor ci-dessus), Clôture (l'ancien
+terme, avant la double validation — une seule partie ne peut plus "clore" une Mission
+unilatéralement)
 
 **Frequency Rule**:
 La règle qui rend un Animal temporairement inéligible entre deux dons, selon la date
