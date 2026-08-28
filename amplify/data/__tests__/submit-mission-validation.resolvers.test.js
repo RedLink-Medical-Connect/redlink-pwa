@@ -48,6 +48,16 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 // que les deux formes de condition réellement utilisées par ces resolvers.
 
 const NOW = '2026-08-26T10:00:00.000Z'
+// Date CIVILE correspondante dans le fuseau de référence métier (`Europe/Paris`), telle que
+// `util.time.nowFormatted('yyyy-MM-dd', 'Europe/Paris')` la renverrait côté AppSync — voir la
+// fonction 8/8 (`submit-mission-validation-record-donation-date.js`) et son en-tête pour pourquoi
+// le fuseau est explicite et pourquoi ce n'est PAS `Intl` qui est utilisé.
+const TODAY_IN_PARIS = '2026-08-26'
+// Chaque appel de `util.time.nowFormatted` est enregistré ici : le harnais doit pouvoir prouver
+// que le resolver demande bien un format `AWSDate` ET un fuseau explicite — un resolver qui
+// renverrait la date UTC daterait un don de la veille entre 00h et 02h heure de Paris (même bug
+// de frontière que celui trouvé en QA sur la Phase 2.1, côté navigateur).
+const nowFormattedCalls = []
 
 vi.mock('@aws-appsync/utils/dynamodb', () => ({
   // Les helpers renvoient normalement un payload marshallé ; ici on conserve les arguments
@@ -79,7 +89,18 @@ vi.mock('@aws-appsync/utils', () => ({
       error.data = data
       throw error
     },
-    time: { nowISO8601: () => NOW },
+    time: {
+      nowISO8601: () => NOW,
+      // Surcharge `nowFormatted(formatString, timezone)` de `TimeUtils`
+      // (`node_modules/@aws-appsync/utils/lib/time-utils.d.ts`) : « Returns a string of the
+      // current timestamp for a timezone using the specified format and timezone ». Le double ici
+      // ne réimplémente PAS le formatage (ce serait tester le runtime AWS, pas le resolver) — il
+      // enregistre les arguments et renvoie la date attendue.
+      nowFormatted: (formatString, timezone) => {
+        nowFormattedCalls.push({ formatString, timezone })
+        return TODAY_IN_PARIS
+      },
+    },
   },
   runtime: {
     earlyReturn: (value) => {
@@ -95,6 +116,7 @@ import * as verifyClinicParty from '../resolvers/submit-mission-validation-verif
 import * as writeSide from '../resolvers/submit-mission-validation-write-side'
 import * as readMission from '../resolvers/submit-mission-validation-read-mission'
 import * as finalizeStatus from '../resolvers/submit-mission-validation-finalize-status'
+import * as recordDonationDate from '../resolvers/submit-mission-validation-record-donation-date'
 
 // ─────────────────────────────────────────────────────────────────────────────────────────
 // Magasin en mémoire + exécuteur de pipeline
@@ -150,6 +172,12 @@ function applyGet(store, payload) {
 // fonction AppSync ne pouvant en interroger qu'une. L'ordre et les sources sont par ailleurs
 // pin-testés sur le schéma compilé (`resource.transform.test.ts`, `schema.transform()
 // .jsFunctions`) : si les deux divergent un jour, ce harnais ne modélise plus la production.
+//
+// ÉTENDU LE 2026-08-28 (docs/adr/0019) : une 8e fonction termine le pipeline
+// (`record-donation-date`, source `Animal`) — elle écrit `Animal.lastDonationDate` quand la 7e
+// vient d'écrire `COMPLETED`, quel que soit le côté qui a voté en second. C'est le seul endroit
+// du système qui peut le faire quand c'est l'OWNER qui finalise (il n'a que `[read]` sur ce
+// champ, ADR-0003).
 const PIPELINE = [
   { fn: resolveParties, table: 'missions' },
   { fn: verifyOwnerParty, table: 'animals' },
@@ -158,6 +186,7 @@ const PIPELINE = [
   { fn: writeSide, table: 'missions' },
   { fn: readMission, table: 'missions' },
   { fn: finalizeStatus, table: 'missions' },
+  { fn: recordDonationDate, table: 'animals' },
 ]
 
 const OWNER_SUB = 'owner-sub-1'
@@ -234,6 +263,7 @@ let store
 let world
 
 beforeEach(() => {
+  nowFormattedCalls.length = 0
   store = new Map()
   store.set('mission-1', buildMission())
 
@@ -431,6 +461,10 @@ describe('submit-mission-validation-read-mission (6/7, ex-2/3)', () => {
 // Fonction 3/3 — LA matrice de réconciliation
 // ─────────────────────────────────────────────────────────────────────────────────────────
 describe('submit-mission-validation-finalize-status (7/7, ex-3/3) — matrice de réconciliation', () => {
+  // `stash: {}` : toujours présent côté AppSync (le resolver de tête généré par le framework y
+  // écrit lui-même `awsAppsyncApiId`, `@aws-amplify/backend-data/lib/assets/
+  // js_resolver_handler.js`). Requis depuis le 2026-08-28 : cette fonction y range le statut
+  // qu'elle écrit, pour la fonction 8/8 (docs/adr/0019).
   const statusFor = (clinicOutcome, ownerOutcome) =>
     finalizeStatus.request({
       args: { missionId: 'mission-1' },
@@ -442,6 +476,7 @@ describe('submit-mission-validation-finalize-status (7/7, ex-3/3) — matrice de
           ownerValidationOutcome: ownerOutcome,
         },
       },
+      stash: {},
     }).update.status
 
   it.each([
@@ -484,6 +519,7 @@ describe('submit-mission-validation-finalize-status (7/7, ex-3/3) — matrice de
     const payload = finalizeStatus.request({
       args: { missionId: 'mission-1' },
       prev: { result: { id: 'mission-1', status: 'PENDING_VALIDATION' } },
+      stash: {},
     })
 
     expect(payload.condition).toEqual({ status: { eq: 'PENDING_VALIDATION' } })
@@ -492,13 +528,17 @@ describe('submit-mission-validation-finalize-status (7/7, ex-3/3) — matrice de
 
   it('response() : une condition non satisfaite N’EST PAS une erreur pour l’appelant — l’état lu par la fonction 2/3 est renvoyé', () => {
     const previous = { id: 'mission-1', status: 'PENDING_VALIDATION' }
-
-    const result = finalizeStatus.response({
+    // Le stash porte le statut CALCULÉ par `request()` : il doit être neutralisé quand l'écriture
+    // n'a finalement pas eu lieu, sinon la fonction 8/8 daterait un don sur la foi d'un
+    // `COMPLETED` écrit par l'AUTRE pipeline (qui, lui, fait déjà cette écriture).
+    const ctx = {
       error: { type: 'DynamoDB:ConditionalCheckFailedException', message: 'failed' },
       prev: { result: previous },
-    })
+      stash: { finalMissionStatus: 'COMPLETED' },
+    }
 
-    expect(result).toEqual(previous)
+    expect(finalizeStatus.response(ctx)).toEqual(previous)
+    expect(ctx.stash.finalMissionStatus).toBeNull()
   })
 
   it('response() : une autre erreur est bien remontée', () => {
@@ -506,6 +546,7 @@ describe('submit-mission-validation-finalize-status (7/7, ex-3/3) — matrice de
       finalizeStatus.response({
         error: { type: 'DynamoDB:ThrottlingException', message: 'boom' },
         prev: { result: {} },
+        stash: {},
       }),
     ).toThrow('boom')
   })
@@ -1046,5 +1087,250 @@ describe('submitMissionValidation — vérification d’identité jouée sur le 
     // `isAlreadyValidatedError` (useOwnerMissions.js) reconnaît un message contenant « déjà
     // soumis sa validation » : ce rejet ne doit surtout pas être confondu avec ce cas-là.
     expect(notMyMission.errors[0].message).not.toContain('déjà soumis sa validation')
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────────────────
+// FONCTION 8/8 — `Animal.lastDonationDate` sur un COMPLETED réel (2026-08-28, docs/adr/0019)
+//
+// Ce que ces tests verrouillent, et que rien ne verrouillait : quand c'est le vote de l'OWNER
+// qui fait passer la Mission en COMPLETED, `Animal.lastDonationDate` n'était JAMAIS écrit —
+// l'Owner n'a que `[read]` sur ce champ (`ownerReadOnlyVetReadUpdate`, ADR-0003), donc aucun
+// code client de son côté ne pouvait le porter. La Frequency Rule (CONTEXT.md) n'était donc
+// jamais réarmée sur ce chemin : un animal réellement prélevé restait immédiatement rééligible.
+// ─────────────────────────────────────────────────────────────────────────────────────────
+
+describe('submit-mission-validation-record-donation-date (8/8) — écriture isolée', () => {
+  const completedCtx = (overrides = {}) => ({
+    args: { missionId: 'mission-1', outcome: 'CONFIRMED' },
+    identity: { groups: ['Owners'], sub: OWNER_SUB },
+    prev: { result: buildMission({ status: 'COMPLETED' }) },
+    stash: {
+      callerRole: 'OWNER',
+      missionAnimalID: 'animal-1',
+      missionRequestID: 'request-1',
+      finalMissionStatus: 'COMPLETED',
+    },
+    ...overrides,
+  })
+
+  it('écrit lastDonationDate sur l’Animal de la Mission (id venu du stash, JAMAIS d’un argument client)', () => {
+    const payload = recordDonationDate.request(completedCtx())
+
+    expect(payload.operation).toBe('UpdateItem')
+    expect(payload.key).toEqual({ id: 'animal-1' })
+    expect(payload.update.lastDonationDate).toBe(TODAY_IN_PARIS)
+  })
+
+  // LE point de correction de cette fonction : un resolver tourne côté serveur (horloge UTC), pas
+  // dans le navigateur du vétérinaire. Sans fuseau explicite, une validation soumise entre 00h et
+  // 02h heure de Paris daterait le don de la veille et raccourcirait la Frequency Rule d'un jour.
+  it('la date vient de util.time.nowFormatted au format AWSDate ET dans un fuseau EXPLICITE (jamais la date UTC implicite)', () => {
+    recordDonationDate.request(completedCtx())
+
+    expect(nowFormattedCalls).toEqual([{ formatString: 'yyyy-MM-dd', timezone: 'Europe/Paris' }])
+  })
+
+  it('garde anti-upsert : la condition exige l’existence de l’Animal (sinon UpdateItem créerait un Animal partiel)', () => {
+    expect(recordDonationDate.request(completedCtx()).condition).toEqual({
+      id: { attributeExists: true },
+    })
+  })
+
+  it('n’écrit QUE lastDonationDate/updatedAt — aucun autre champ d’Animal n’est touché', () => {
+    expect(Object.keys(recordDonationDate.request(completedCtx()).update).sort()).toEqual([
+      'lastDonationDate',
+      'updatedAt',
+    ])
+  })
+
+  it.each(['PENDING_VALIDATION', 'NO_SHOW', 'DISPUTED', 'COMPLETED_AUTO', null, undefined, ''])(
+    'statut final %s : earlyReturn, AUCUNE écriture ni lecture sur la table Animal',
+    (finalMissionStatus) => {
+      const ctx = completedCtx()
+      ctx.stash.finalMissionStatus = finalMissionStatus
+
+      expect(() => recordDonationDate.request(ctx)).toThrow(EarlyReturn)
+      expect(nowFormattedCalls).toEqual([])
+    },
+  )
+
+  // `finalMissionStatus` vaut `null` quand la condition optimiste de la fonction 7/8 a échoué :
+  // le statut a été écrit par l'AUTRE pipeline, dont la propre 8/8 porte l'écriture. Sans ce
+  // no-op, les deux pipelines écriraient la date.
+  it('condition optimiste de la 7/8 non satisfaite (finalMissionStatus remis à null) : no-op', () => {
+    const ctx = completedCtx()
+    ctx.stash.finalMissionStatus = null
+
+    expect(() => recordDonationDate.request(ctx)).toThrow(EarlyReturn)
+  })
+
+  it('Mission sans animalID dans le stash (inatteignable via la 1/8, défense en profondeur) : no-op, jamais une clé undefined', () => {
+    const ctx = completedCtx()
+    ctx.stash.missionAnimalID = undefined
+
+    expect(() => recordDonationDate.request(ctx)).toThrow(EarlyReturn)
+  })
+
+  // Cette fonction est la DERNIÈRE du pipeline : sa valeur de retour EST celle de la mutation,
+  // typée `Mission`. Renvoyer `ctx.result` (l'Animal) casserait `data.status`, lu juste après par
+  // `useOwnerMissions`/`useMissionClosure`.
+  it('response() renvoie la MISSION (ctx.prev.result), jamais l’Animal écrit', () => {
+    const ctx = completedCtx()
+    ctx.result = { id: 'animal-1', lastDonationDate: TODAY_IN_PARIS }
+
+    expect(recordDonationDate.response(ctx)).toEqual(buildMission({ status: 'COMPLETED' }))
+  })
+
+  // Décision documentée (ADR-0019 §3) : best-effort, PAS critique. Le vote de l'appelant est déjà
+  // écrit (write-once) et la Mission déjà COMPLETED — lui remonter une erreur non actionnable
+  // ferait en plus sauter, côté client, l'upsert `ClinicOwnerRelation` (les deux composables
+  // passent leurs `errors` à `throwIfGraphqlError`, qui lève).
+  it.each([
+    ['Animal inexistant (condition non satisfaite)', 'DynamoDB:ConditionalCheckFailedException'],
+    ['échec dur (throttle, incident)', 'DynamoDB:ThrottlingException'],
+  ])('response() : %s est avalé — la Mission est quand même renvoyée à l’appelant', (_label, type) => {
+    const ctx = completedCtx()
+    ctx.error = { type, message: 'boom' }
+
+    expect(recordDonationDate.response(ctx)).toEqual(buildMission({ status: 'COMPLETED' }))
+  })
+})
+
+describe('submitMissionValidation — Frequency Rule réarmée, pipeline COMPLET (8 fonctions)', () => {
+  const lastDonationDateOf = (animalId) => world.animals.get(animalId)?.lastDonationDate
+
+  // LE bug que cette sous-tâche ferme : dans le flux nominal (le vétérinaire clôture d'abord
+  // depuis RequestsView.vue), c'est le vote de l'OWNER qui finalise — et lui ne peut pas écrire
+  // ce champ.
+  it('l’OWNER vote en second : la Mission passe COMPLETED et lastDonationDate EST écrit (le seul chemin qui pouvait le porter)', () => {
+    runSubmitMissionValidation(store, {
+      args: { missionId: 'mission-1', outcome: 'CONFIRMED' },
+      groups: ['Veterinarians'],
+      sub: VET_SUB,
+    })
+    expect(lastDonationDateOf('animal-1')).toBeUndefined()
+
+    const ownerSide = runSubmitMissionValidation(store, {
+      args: { missionId: 'mission-1', outcome: 'CONFIRMED' },
+      groups: ['Owners'],
+      sub: OWNER_SUB,
+    })
+
+    expect(ownerSide.errors).toBeUndefined()
+    expect(ownerSide.data.status).toBe('COMPLETED')
+    expect(lastDonationDateOf('animal-1')).toBe(TODAY_IN_PARIS)
+  })
+
+  it('le VÉTÉRINAIRE vote en second : même écriture serveur (le pipeline ne dépend pas du côté qui finalise)', () => {
+    runSubmitMissionValidation(store, {
+      args: { missionId: 'mission-1', outcome: 'CONFIRMED' },
+      groups: ['Owners'],
+      sub: OWNER_SUB,
+    })
+    const clinicSide = runSubmitMissionValidation(store, {
+      args: { missionId: 'mission-1', outcome: 'CONFIRMED' },
+      groups: ['Veterinarians'],
+      sub: VET_SUB,
+    })
+
+    expect(clinicSide.data.status).toBe('COMPLETED')
+    expect(lastDonationDateOf('animal-1')).toBe(TODAY_IN_PARIS)
+  })
+
+  it('un seul côté a voté (PENDING_VALIDATION) : rien n’est écrit — un don n’est pas encore confirmé', () => {
+    const first = runSubmitMissionValidation(store, {
+      args: { missionId: 'mission-1', outcome: 'CONFIRMED' },
+      groups: ['Veterinarians'],
+      sub: VET_SUB,
+    })
+
+    expect(first.data.status).toBe('PENDING_VALIDATION')
+    expect(lastDonationDateOf('animal-1')).toBeUndefined()
+  })
+
+  it.each([
+    ['NO_SHOW (les deux infirment)', 'DENIED', 'DENIED', 'NO_SHOW'],
+    ['DISPUTED (désaccord, clinique CONFIRMED)', 'CONFIRMED', 'DENIED', 'DISPUTED'],
+    ['DISPUTED (désaccord, Owner CONFIRMED)', 'DENIED', 'CONFIRMED', 'DISPUTED'],
+  ])(
+    '%s : lastDonationDate n’est JAMAIS écrit (ni un no-show ni un litige n’est un don réalisé)',
+    (_label, clinicOutcome, ownerOutcome, expectedStatus) => {
+      runSubmitMissionValidation(store, {
+        args: { missionId: 'mission-1', outcome: clinicOutcome },
+        groups: ['Veterinarians'],
+        sub: VET_SUB,
+      })
+      const second = runSubmitMissionValidation(store, {
+        args: { missionId: 'mission-1', outcome: ownerOutcome },
+        groups: ['Owners'],
+        sub: OWNER_SUB,
+      })
+
+      expect(second.data.status).toBe(expectedStatus)
+      expect(lastDonationDateOf('animal-1')).toBeUndefined()
+    },
+  )
+
+  it('l’Animal d’une AUTRE Mission n’est jamais touché (la clé vient bien de la Mission validée)', () => {
+    store.set('mission-2', buildMission({ id: 'mission-2', animalID: 'animal-2' }))
+
+    runSubmitMissionValidation(store, {
+      args: { missionId: 'mission-2', outcome: 'CONFIRMED' },
+      groups: ['Veterinarians'],
+      sub: VET_SUB,
+    })
+    runSubmitMissionValidation(store, {
+      args: { missionId: 'mission-2', outcome: 'CONFIRMED' },
+      groups: ['Owners'],
+      sub: OTHER_OWNER_SUB,
+    })
+
+    expect(lastDonationDateOf('animal-2')).toBe(TODAY_IN_PARIS)
+    expect(lastDonationDateOf('animal-1')).toBeUndefined()
+  })
+
+  // Best-effort + garde anti-upsert éprouvés ensemble sur le pipeline réel : l'Animal disparaît
+  // entre les deux votes (cas rare mais possible — un Owner peut supprimer son animal).
+  it('Animal supprimé entre les deux votes : AUCUN Animal fantôme créé, et l’appelant voit quand même sa validation réussir', () => {
+    runSubmitMissionValidation(store, {
+      args: { missionId: 'mission-1', outcome: 'CONFIRMED' },
+      groups: ['Owners'],
+      sub: OWNER_SUB,
+    })
+    world.animals.delete('animal-1')
+
+    const clinicSide = runSubmitMissionValidation(store, {
+      args: { missionId: 'mission-1', outcome: 'CONFIRMED' },
+      groups: ['Veterinarians'],
+      sub: VET_SUB,
+    })
+
+    expect(clinicSide.errors).toBeUndefined()
+    expect(clinicSide.data.status).toBe('COMPLETED')
+    expect(store.get('mission-1').status).toBe('COMPLETED')
+    expect(world.animals.has('animal-1')).toBe(false)
+  })
+
+  // Cohérence des deux fonctions qui parlent du statut final : la 8/8 ne redérive PAS la matrice,
+  // elle lit le stash posé par la 7/8 — ce test échouerait si l'une des deux était modifiée seule.
+  it('le stash finalMissionStatus reflète exactement le statut écrit dans la table Mission', () => {
+    const ctx = {
+      args: { missionId: 'mission-1' },
+      prev: {
+        result: {
+          id: 'mission-1',
+          status: 'PENDING_VALIDATION',
+          clinicValidationOutcome: 'CONFIRMED',
+          ownerValidationOutcome: 'CONFIRMED',
+        },
+      },
+      stash: {},
+    }
+
+    const payload = finalizeStatus.request(ctx)
+
+    expect(payload.update.status).toBe('COMPLETED')
+    expect(ctx.stash.finalMissionStatus).toBe('COMPLETED')
   })
 })

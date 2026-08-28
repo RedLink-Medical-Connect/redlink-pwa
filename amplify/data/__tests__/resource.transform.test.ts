@@ -749,7 +749,7 @@ describe('amplify/data/resource.ts — double validation de Mission + notation (
     })
   })
 
-  describe('submitMissionValidation — mutation custom en pipeline (7 fonctions, voir resource.ts et les resolvers)', () => {
+  describe('submitMissionValidation — mutation custom en pipeline (8 fonctions, voir resource.ts et les resolvers)', () => {
     it('compile avec les bons arguments et retourne Mission', () => {
       const mutationType = extractType('Mutation')
       expect(mutationType).toContain(
@@ -776,7 +776,12 @@ describe('amplify/data/resource.ts — double validation de Mission + notation (
     // déplacer l'écriture (`write-side`) avant les vérifications réintroduirait exactement le
     // trou fermé ici (côté écrit puis « annulé » — sauf qu'il est write-once, donc jamais
     // annulable), et le pipeline continuerait de fonctionner sur le chemin nominal.
-    it('le pipeline compte 7 fonctions, dans l’ordre exact vérification -> écriture, chacune sur la bonne source de données', () => {
+    // Étendu le 2026-08-28 (docs/adr/0019) : une 8e fonction termine désormais le pipeline
+    // (`record-donation-date`, source `Animal`) — elle écrit `Animal.lastDonationDate` quand la
+    // 7e vient d'écrire `COMPLETED`. Sa POSITION est aussi une garantie de correction, pas un
+    // détail de style : elle lit `ctx.stash.finalMissionStatus`, posé par la 7e, et doit donc
+    // s'exécuter APRÈS elle (avant, elle n'écrirait jamais rien).
+    it('le pipeline compte 8 fonctions, dans l’ordre exact vérification -> écriture -> effet de bord, chacune sur la bonne source de données', () => {
       const jsFunctions = (
         schema.transform() as unknown as {
           jsFunctions: {
@@ -801,10 +806,11 @@ describe('amplify/data/resource.ts — double validation de Mission + notation (
         ['./resolvers/submit-mission-validation-write-side.js', 'MissionTable'],
         ['./resolvers/submit-mission-validation-read-mission.js', 'MissionTable'],
         ['./resolvers/submit-mission-validation-finalize-status.js', 'MissionTable'],
+        ['./resolvers/submit-mission-validation-record-donation-date.js', 'AnimalTable'],
       ])
     })
 
-    // AppSync plafonne un resolver de pipeline à 10 fonctions : ce pipeline en consomme 7. Le
+    // AppSync plafonne un resolver de pipeline à 10 fonctions : ce pipeline en consomme 8. Le
     // pin sert d'alerte précoce si une future sous-tâche s'en approche sans le savoir.
     it('reste sous le plafond AppSync de 10 fonctions par resolver de pipeline', () => {
       const jsFunctions = (

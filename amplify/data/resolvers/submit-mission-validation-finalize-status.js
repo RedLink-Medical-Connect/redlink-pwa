@@ -1,7 +1,12 @@
-// Fonction 7/7 (dernière) du pipeline `submitMissionValidation` (ex-3/3 -- 4 fonctions de
-// vérification d'identité ont été ajoutées en tête le 2026-08-27, docs/adr/0018 ; les renvois
-// « fonction 1 / 2 / 3 » ci-dessous désignent toujours les trois fonctions d'ÉCRITURE,
-// aujourd'hui 5/7 à 7/7). Voir l'en-tête de
+// Fonction 7/8 du pipeline `submitMissionValidation` (ex-3/3, puis 7/7 -- 4 fonctions de
+// vérification d'identité ont été ajoutées en tête le 2026-08-27, docs/adr/0018, et une 8e et
+// DERNIÈRE fonction a été ajoutée à la suite le 2026-08-28,
+// `submit-mission-validation-record-donation-date.js`, docs/adr/0019 : elle écrit
+// `Animal.lastDonationDate` quand CETTE fonction vient d'écrire `COMPLETED` ; les renvois
+// « fonction 1 / 2 / 3 » ci-dessous désignent toujours les trois fonctions d'ÉCRITURE
+// HISTORIQUES, aujourd'hui 5/8 à 7/8 -- les autres fichiers du pipeline gardent, eux, leur
+// numérotation « /7 » d'avant le 2026-08-28, non retouchée pour garder ce correctif minimal).
+// Voir l'en-tête de
 // `submit-mission-validation-write-side.js` pour le raisonnement complet du pipeline).
 //
 // Calcule le statut agrégé de la Mission à partir des DEUX champs de validation (lus fraîchement
@@ -56,6 +61,19 @@ export function request(ctx) {
   const mission = ctx.prev.result
   const finalStatus = computeAggregateStatus(mission.clinicValidationOutcome, mission.ownerValidationOutcome)
 
+  // AJOUT 2026-08-28 (docs/adr/0019) -- SEULE modification de cette fonction : le statut calculé
+  // est rangé dans `ctx.stash` pour la fonction 8/8
+  // (`submit-mission-validation-record-donation-date.js`), qui écrit `Animal.lastDonationDate`
+  // sur un `COMPLETED`. Passer par le stash plutôt que de laisser la 8/8 relire
+  // `ctx.prev.result.status` est délibéré : `ctx.prev.result` vaudra ici la valeur de retour de
+  // `ddb.update()`, dont l'en-tête de la fonction 5/8 documente qu'on ne peut PAS vérifier
+  // localement qu'elle contient l'item complet (`ReturnValues: ALL_NEW`) -- et dupliquer
+  // `computeAggregateStatus` dans la 8/8 rouvrirait le risque de divergence entre deux
+  // dérivations de la même règle (le problème que la 1/8 évite déjà pour le rôle de l'appelant).
+  // Aucun effet sur le comportement de CETTE fonction : le stash est un espace serveur, jamais
+  // renvoyé au client.
+  ctx.stash.finalMissionStatus = finalStatus
+
   return ddb.update({
     key: { id: ctx.args.missionId },
     condition: { status: { eq: mission.status } },
@@ -71,6 +89,14 @@ export function response(ctx) {
       // la fonction 2 (pas celui, plus frais, que l'autre pipeline vient d'écrire -- afficher
       // cet état exact demanderait une 4e fonction de lecture, non justifiée ici : le prochain
       // fetch de l'appelant, quel qu'il soit, verra l'état correct).
+      //
+      // AJOUT 2026-08-28 (docs/adr/0019) : le statut calculé plus haut n'a PAS été écrit par ce
+      // pipeline-ci. La fonction 8/8 ne doit donc pas écrire `Animal.lastDonationDate` sur sa
+      // base -- soit c'est l'autre pipeline qui a écrit `COMPLETED`, et c'est SON exécution de la
+      // 8/8 qui porte l'écriture (sinon elle serait faite deux fois), soit il a écrit autre
+      // chose, et il n'y a alors aucun don confirmé à dater.
+      ctx.stash.finalMissionStatus = null
+
       return ctx.prev.result
     }
     util.error(ctx.error.message, ctx.error.type, ctx.result)

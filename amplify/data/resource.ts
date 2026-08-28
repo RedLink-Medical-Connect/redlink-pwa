@@ -1077,8 +1077,8 @@ export const schema = a.schema({
   // l'écriture étant write-once par côté, la priver DÉFINITIVEMENT de son vote. Voir l'en-tête
   // de `submit-mission-validation-resolve-parties.js` pour l'analyse complète.
   //
-  // Les 7 fichiers, dans l'ordre d'exécution du pipeline (noter que ce sont les 4 premiers qui
-  // portent une source de données AUTRE que `Mission` -- une fonction AppSync ne peut
+  // Les 8 fichiers, dans l'ordre d'exécution du pipeline (noter que ce sont les 4 premiers et le
+  // DERNIER qui portent une source de données AUTRE que `Mission` -- une fonction AppSync ne peut
   // interroger qu'UNE source, d'où le découpage) :
   // 1. `submit-mission-validation-resolve-parties.js` (`Mission`) -- rôle de l'appelant +
   //    `animalID`/`requestID` de la Mission, rangés dans `ctx.stash` (espace serveur).
@@ -1094,11 +1094,32 @@ export const schema = a.schema({
   //    (jamais un argument client), écrit le côté de l'appelant (write-once, conditionnel).
   // 6. `submit-mission-validation-read-mission.js` -- relit la Mission à jour (les deux côtés).
   // 7. `submit-mission-validation-finalize-status.js` -- calcule et écrit `Mission.status`
-  //    (matrice PENDING_VALIDATION/COMPLETED/NO_SHOW/DISPUTED), condition optimiste anti-course.
+  //    (matrice PENDING_VALIDATION/COMPLETED/NO_SHOW/DISPUTED), condition optimiste anti-course,
+  //    et range le statut effectivement écrit dans `ctx.stash.finalMissionStatus`.
+  // 8. `submit-mission-validation-record-donation-date.js` (`Animal`) -- écrit
+  //    `Animal.lastDonationDate` (date du jour, fuseau `Europe/Paris`) UNIQUEMENT quand la
+  //    fonction 7 vient d'écrire `COMPLETED`, quel que soit le côté qui a voté en second. No-op
+  //    (`runtime.earlyReturn`) sinon.
+  //
+  // CORRECTIF DU 2026-08-28 (docs/adr/0019) : c'est cette 8e fonction. Avant elle, une Mission
+  // finalisée par le vote de l'OWNER ne réarmait JAMAIS la Frequency Rule (ADR-0003) --
+  // `Animal.lastDonationDate` est réservé en écriture aux `Veterinarians`
+  // (`ownerReadOnlyVetReadUpdate`), donc aucun code client côté Owner ne pouvait le porter (voir
+  // `src/composables/mission-completion-side-effects.js`, qui ferme la partie faisable côté
+  // client et pointe explicitement vers ce resolver pour le reste). Un animal réellement prélevé
+  // restait immédiatement rééligible.
   //
   // À SURVEILLER pour toute évolution future : AppSync plafonne un resolver de pipeline à 10
-  // fonctions. Ce pipeline en consomme désormais 7 -- il reste 3 places, ce qui n'est plus
-  // beaucoup si une future vérification demandait encore une table supplémentaire.
+  // fonctions. Ce pipeline en consomme désormais 8 -- il ne reste que 2 places. C'est la raison
+  // pour laquelle les DEUX autres écritures secondaires de fin de Mission (upsert
+  // `ClinicOwnerRelation`, incrément `Clinic.transfusionsDone`/`donorOwnersCount`) n'ont PAS été
+  // ajoutées ici : la première est déjà portée côté client par les DEUX composables (donc quel
+  // que soit le côté qui vote en second), la seconde est un compteur de tableau de bord à faible
+  // enjeu dont la dérive est déjà documentée (ADR-0019 §4). Le coût de cette seconde serait par
+  // ailleurs de DEUX fonctions supplémentaires (9/10 puis 10/10) : le `clinicID` n'est dans le
+  // stash que sur le chemin CLINIQUE (la fonction 4 est un no-op côté Owner), il faudrait donc
+  // relire la `Request` avant d'incrémenter -- et `donorOwnersCount` resterait faux, sa valeur
+  // dépendant de la création ou non d'une `ClinicOwnerRelation`, décidée côté client.
   //
   // `.authorization((allow) => [allow.authenticated()])` -- même niveau que
   // `linkRequestToMission` juste au-dessus (tout utilisateur Cognito authentifié, peu importe le
@@ -1144,6 +1165,10 @@ export const schema = a.schema({
       a.handler.custom({
         dataSource: a.ref('Mission'),
         entry: './resolvers/submit-mission-validation-finalize-status.js',
+      }),
+      a.handler.custom({
+        dataSource: a.ref('Animal'),
+        entry: './resolvers/submit-mission-validation-record-donation-date.js',
       }),
     ]),
 })

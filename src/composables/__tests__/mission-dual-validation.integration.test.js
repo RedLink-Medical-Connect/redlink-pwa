@@ -134,7 +134,13 @@ function applyUpdate(payload) {
 
 /** Rejoue le pipeline `submitMissionValidation` (3 fonctions) comme le ferait AppSync. */
 const fakeSubmitMissionValidation = async (args) => {
-  const ctx = { args, identity: { groups: currentGroups }, prev: {} }
+  // `stash` : espace serveur partagé entre les fonctions d'un pipeline AppSync (`Context.stash`).
+  // Toujours présent en production ; ajouté ici le 2026-08-28 parce que la fonction de
+  // finalisation y range désormais le statut qu'elle vient d'écrire, pour la 8e fonction du
+  // pipeline (`submit-mission-validation-record-donation-date.js`, docs/adr/0019) — laquelle
+  // n'est délibérément PAS rejouée par ce harnais front, qui ne modélise pas la table `Animal`
+  // (voir le commentaire du test « Clinic CONFIRME puis Owner CONFIRME » plus bas).
+  const ctx = { args, identity: { groups: currentGroups }, prev: {}, stash: {} }
 
   try {
     for (const fn of [writeSide, readMission, finalizeStatus]) {
@@ -305,10 +311,17 @@ describe('double validation bout-en-bout : composable Owner + composable Clinic 
       // qui a voté en second (c'était le coeur du bug).
       relationList: 1,
       relationCreate: 1,
-      // ❌ toujours 0, et c'est structurel : `Animal.lastDonationDate` (ADR-0003) et les
-      // compteurs `Clinic` ne sont pas écrivables par un Owner. RÉSIDU OUVERT — la Frequency
-      // Rule n'est pas réarmée sur ce chemin ; sa fermeture demande un chemin serveur (le
-      // resolver au moment où il finalise en COMPLETED, ou une Lambda sur flux DynamoDB).
+      // Toujours 0 CÔTÉ CLIENT, et c'est structurel : `Animal.lastDonationDate` (ADR-0003) et
+      // les compteurs `Clinic` ne sont pas écrivables par un Owner.
+      // MISE À JOUR 2026-08-28 (docs/adr/0019) : le résidu « Frequency Rule non réarmée » n'est
+      // plus ouvert — il est fermé CÔTÉ SERVEUR, par la 8e fonction du pipeline
+      // (`submit-mission-validation-record-donation-date.js`), qui écrit `Animal
+      // .lastDonationDate` dès que la Mission atteint réellement COMPLETED. Ce harnais front ne
+      // rejoue que les 3 fonctions d'écriture du resolver et ne modélise pas la table `Animal` :
+      // l'assertion ci-dessous reste donc exacte (le COMPOSABLE n'émet rien), mais elle ne dit
+      // plus rien du réarmement lui-même — c'est
+      // `amplify/data/__tests__/submit-mission-validation.resolvers.test.js` qui le verrouille.
+      // Les compteurs `Clinic`, eux, restent un résidu assumé sur ce chemin (ADR-0019 §4).
       animal: 0,
       clinicGet: 0,
       clinicUpdate: 0,
@@ -523,6 +536,10 @@ describe('accord de vocabulaire front (enums) / resolver AppSync / Lambda planif
           ownerValidationOutcome: ownerOutcome,
         },
       },
+      // Toujours présent côté AppSync (le resolver de tête généré par le framework y écrit
+      // lui-même `awsAppsyncApiId`) ; requis depuis le 2026-08-28 (docs/adr/0019), la
+      // finalisation y rangeant le statut qu'elle écrit pour la 8e fonction du pipeline.
+      stash: {},
     }).update.status
 
   // Le maillon exact de la chaîne : le resolver ÉCRIT cette chaîne, la Lambda l'INTERROGE sur
