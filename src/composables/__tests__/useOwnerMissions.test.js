@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 // Sous-tâche Phase 0.3 (ADR-0001) : acceptMission(request) -> acceptMission(requestId, animalId).
 // La fonction recharge elle-même la Request (getRequest) et l'Animal (listMyAnimalsSimple)
@@ -26,17 +26,42 @@ const requestGetMock = vi.fn()
 const animalListMock = vi.fn()
 const missionCreateMock = vi.fn()
 const missionDeleteMock = vi.fn()
+const missionGetMock = vi.fn()
 const linkRequestToMissionMock = vi.fn()
 const submitMissionValidationMock = vi.fn()
+// Correctif QA (2026-08-27) : le côté Owner déclenche désormais une écriture secondaire quand
+// SON vote fait passer la Mission en COMPLETED (upsert ClinicOwnerRelation, module partagé
+// `mission-completion-side-effects.js`). `Animal.update`/`Clinic.*` sont mockés eux aussi, non
+// pas parce que ce composable les appelle, mais précisément pour pouvoir prouver qu'il ne les
+// appelle JAMAIS : un Owner n'a pas le droit `@auth` de les écrire (voir le bloc de tests
+// dédié plus bas). Les omettre du mock ne prouverait rien — une tentative d'appel serait
+// avalée par le traitement best-effort du module partagé.
+const relationListMock = vi.fn()
+const relationCreateMock = vi.fn()
+const animalUpdateMock = vi.fn()
+const clinicGetMock = vi.fn()
+const clinicUpdateMock = vi.fn()
 
 vi.mock('aws-amplify/data', () => ({
   generateClient: () => ({
     models: {
       Request: { get: (...args) => requestGetMock(...args) },
-      Animal: { list: (...args) => animalListMock(...args) },
+      Animal: {
+        list: (...args) => animalListMock(...args),
+        update: (...args) => animalUpdateMock(...args),
+      },
       Mission: {
         create: (...args) => missionCreateMock(...args),
         delete: (...args) => missionDeleteMock(...args),
+        get: (...args) => missionGetMock(...args),
+      },
+      ClinicOwnerRelation: {
+        list: (...args) => relationListMock(...args),
+        create: (...args) => relationCreateMock(...args),
+      },
+      Clinic: {
+        get: (...args) => clinicGetMock(...args),
+        update: (...args) => clinicUpdateMock(...args),
       },
     },
     mutations: {
@@ -50,6 +75,7 @@ vi.mock('aws-amplify/auth', () => ({
   getCurrentUser: vi.fn(async () => ({ userId: 'owner-1' })),
 }))
 
+import { getCurrentUser } from 'aws-amplify/auth'
 import {
   useOwnerMissions,
   mapSubmitDonationValidationError,
@@ -86,8 +112,31 @@ const resetAllMocks = () => {
   animalListMock.mockReset()
   missionCreateMock.mockReset()
   missionDeleteMock.mockReset()
+  missionGetMock.mockReset()
   linkRequestToMissionMock.mockReset()
   submitMissionValidationMock.mockReset()
+  relationListMock.mockReset()
+  relationCreateMock.mockReset()
+  animalUpdateMock.mockReset()
+  clinicGetMock.mockReset()
+  clinicUpdateMock.mockReset()
+}
+
+/**
+ * Serveur "nominal" pour les écritures secondaires déclenchées côté Owner sur COMPLETED :
+ * la Mission résout bien sa clinique (`Mission.request.clinicID`) et l'Owner n'a encore aucune
+ * `ClinicOwnerRelation`.
+ */
+const mockOwnerSideEffectsOk = (existingRelations = []) => {
+  missionGetMock.mockResolvedValue({
+    data: { request: { clinicID: 'clinic-1' } },
+    errors: undefined,
+  })
+  relationListMock.mockResolvedValue({ data: existingRelations, errors: undefined })
+  relationCreateMock.mockImplementation(async (input) => ({
+    data: { id: 'relation-new', ...input },
+    errors: undefined,
+  }))
 }
 
 const mockHappyPathBeforeLink = ({ request, animal }) => {
@@ -424,7 +473,10 @@ describe('useOwnerMissions.acceptMission', () => {
 // directement le vocabulaire du resolver (CONFIRMED/DENIED), sans table de traduction — le rôle
 // n'est jamais envoyé, il est déduit côté serveur de `ctx.identity.groups`.
 describe('useOwnerMissions.submitDonationValidation', () => {
-  beforeEach(resetAllMocks)
+  beforeEach(() => {
+    resetAllMocks()
+    mockOwnerSideEffectsOk()
+  })
 
   const mockValidationResult = (status) => {
     submitMissionValidationMock.mockImplementation(async (input) => ({
@@ -602,20 +654,6 @@ describe('useOwnerMissions.submitDonationValidation', () => {
     expect(historyMissions.value.map((m) => m.id)).toEqual(['mission-1'])
   })
 
-  it("n'écrit AUCUNE écriture secondaire (Animal/ClinicOwnerRelation/Clinic) : elles sont réservées au côté vétérinaire", async () => {
-    // Le mock du client de ce fichier n'expose NI Animal.update, NI ClinicOwnerRelation, NI
-    // Clinic : si `submitDonationValidation` tentait l'une de ces écritures, l'appel lèverait
-    // ici (`undefined is not a function`). Ce test le verrouille de façon structurelle.
-    mockValidationResult(MissionStatus.COMPLETED)
-
-    const { submitDonationValidation } = useOwnerMissions()
-
-    await expect(
-      submitDonationValidation('mission-1', MissionValidationOutcome.CONFIRMED),
-    ).resolves.toBe('COMPLETED')
-    expect(submitMissionValidationMock).toHaveBeenCalledTimes(1)
-  })
-
   it('réponse sans data exploitable (défensif) : retourne null et laisse myMissions inchangé', async () => {
     submitMissionValidationMock.mockResolvedValue({ data: null, errors: undefined })
 
@@ -626,6 +664,150 @@ describe('useOwnerMissions.submitDonationValidation', () => {
       submitDonationValidation('mission-1', MissionValidationOutcome.CONFIRMED),
     ).resolves.toBeNull()
     expect(myMissions.value[0].status).toBe('PENDING_ARRIVAL')
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────────────────
+// Écritures secondaires côté OWNER quand SON vote fait passer la Mission en COMPLETED
+// (correctif QA du 2026-08-27). Pendant du bloc "closeMission — upsert ClinicOwnerRelation"
+// de useMissionClosure.test.js, côté propriétaire cette fois.
+//
+// Rappel du bug corrigé : dans le flux nominal (le vétérinaire clôture d'abord depuis
+// RequestsView.vue), c'est l'appel de l'OWNER qui finalise la Mission — et il ne déclenchait
+// AUCUNE écriture secondaire, laissant l'annuaire donneurs vide pour un don pourtant confirmé
+// des deux côtés (verrouillé par mission-dual-validation.integration.test.js).
+// ─────────────────────────────────────────────────────────────────────────────────────────
+describe('useOwnerMissions.submitDonationValidation — écritures secondaires sur COMPLETED', () => {
+  let consoleErrorSpy
+
+  beforeEach(() => {
+    resetAllMocks()
+    mockOwnerSideEffectsOk()
+    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    consoleErrorSpy.mockRestore()
+  })
+
+  const mockValidationResult = (status) => {
+    submitMissionValidationMock.mockImplementation(async (input) => ({
+      data: { id: input.missionId, status },
+      errors: undefined,
+    }))
+  }
+
+  it('COMPLETED : upserte la ClinicOwnerRelation (Owner courant + clinique résolue depuis Mission.request.clinicID), isPrimaryClinic=true pour sa toute première relation', async () => {
+    mockValidationResult(MissionStatus.COMPLETED)
+
+    const { submitDonationValidation } = useOwnerMissions()
+    await submitDonationValidation('mission-1', MissionValidationOutcome.CONFIRMED)
+
+    // `selectionSet` minimal : un seul champ, à travers la relation (convention CLAUDE.md).
+    expect(missionGetMock).toHaveBeenCalledWith(
+      { id: 'mission-1' },
+      { selectionSet: ['request.clinicID'] },
+    )
+    expect(relationListMock).toHaveBeenCalledWith({ filter: { ownerID: { eq: 'owner-1' } } })
+    expect(relationCreateMock).toHaveBeenCalledWith({
+      clinicID: 'clinic-1',
+      ownerID: 'owner-1',
+      isPrimaryClinic: true,
+    })
+  })
+
+  it('COMPLETED : n’écrit JAMAIS Animal.lastDonationDate ni les compteurs Clinic — un Owner n’en a pas le droit @auth (résidu ouvert, à fermer côté serveur)', async () => {
+    // Ce n'est PAS un oubli : `Animal.lastDonationDate` est en `{allow: owner, operations:
+    // [read]}` (ADR-0003) et `Clinic` en `{allow: private, operations: [read]}` pour tout ce
+    // qui n'est pas Veterinarian — ces deux mutations seraient refusées côté serveur. Les
+    // émettre quand même ne ferait que du bruit de log. Conséquence assumée et signalée : la
+    // Frequency Rule n'est pas réarmée quand l'Owner vote en second ; seul un chemin serveur
+    // peut la porter (cf. la Lambda mission-validation-auto-finalizer, ADR-0016 §4).
+    mockValidationResult(MissionStatus.COMPLETED)
+
+    const { submitDonationValidation } = useOwnerMissions()
+    await submitDonationValidation('mission-1', MissionValidationOutcome.CONFIRMED)
+
+    expect(animalUpdateMock).not.toHaveBeenCalled()
+    expect(clinicGetMock).not.toHaveBeenCalled()
+    expect(clinicUpdateMock).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    MissionStatus.PENDING_VALIDATION,
+    MissionStatus.DISPUTED,
+    MissionStatus.NO_SHOW,
+    MissionStatus.COMPLETED_AUTO,
+  ])(
+    'statut retourné %s : AUCUNE écriture secondaire, ni même la résolution de contexte (même garde-fou STRICT que closeMission)',
+    async (status) => {
+      mockValidationResult(status)
+
+      const { submitDonationValidation } = useOwnerMissions()
+      await submitDonationValidation('mission-1', MissionValidationOutcome.CONFIRMED)
+
+      expect(missionGetMock).not.toHaveBeenCalled()
+      expect(relationListMock).not.toHaveBeenCalled()
+      expect(relationCreateMock).not.toHaveBeenCalled()
+    },
+  )
+
+  it('COMPLETED avec une relation déjà existante pour cette clinique : aucune création (pas de doublon d’annuaire)', async () => {
+    mockValidationResult(MissionStatus.COMPLETED)
+    relationListMock.mockResolvedValue({
+      data: [{ clinicID: 'clinic-1', isPrimaryClinic: true }],
+      errors: undefined,
+    })
+
+    const { submitDonationValidation } = useOwnerMissions()
+    await submitDonationValidation('mission-1', MissionValidationOutcome.CONFIRMED)
+
+    expect(relationListMock).toHaveBeenCalledTimes(1)
+    expect(relationCreateMock).not.toHaveBeenCalled()
+  })
+
+  it('best-effort : un échec de résolution du clinicID n’empêche pas la soumission de réussir (le vote est déjà enregistré, write-once)', async () => {
+    mockValidationResult(MissionStatus.COMPLETED)
+    missionGetMock.mockRejectedValue(new Error('Network error'))
+
+    const { submitDonationValidation } = useOwnerMissions()
+
+    await expect(
+      submitDonationValidation('mission-1', MissionValidationOutcome.CONFIRMED),
+    ).resolves.toBe('COMPLETED')
+    expect(relationCreateMock).not.toHaveBeenCalled()
+    expect(consoleErrorSpy).toHaveBeenCalled()
+  })
+
+  it('best-effort : un échec @auth/réseau de la création de ClinicOwnerRelation est logué et avalé, jamais remonté à l’utilisateur', async () => {
+    mockValidationResult(MissionStatus.COMPLETED)
+    relationCreateMock.mockResolvedValue({
+      data: null,
+      errors: [{ errorType: 'Unauthorized', message: 'Not Authorized to access createClinicOwnerRelation' }],
+    })
+
+    const { submitDonationValidation } = useOwnerMissions()
+
+    await expect(
+      submitDonationValidation('mission-1', MissionValidationOutcome.CONFIRMED),
+    ).resolves.toBe('COMPLETED')
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('ClinicOwnerRelation'),
+      expect.any(Error),
+    )
+  })
+
+  it('best-effort : une session Cognito indisponible (getCurrentUser rejette) n’empêche pas la soumission de réussir', async () => {
+    mockValidationResult(MissionStatus.COMPLETED)
+    vi.mocked(getCurrentUser).mockRejectedValueOnce(new Error('No current user'))
+
+    const { submitDonationValidation } = useOwnerMissions()
+
+    await expect(
+      submitDonationValidation('mission-1', MissionValidationOutcome.CONFIRMED),
+    ).resolves.toBe('COMPLETED')
+    expect(relationListMock).not.toHaveBeenCalled()
+    expect(relationCreateMock).not.toHaveBeenCalled()
   })
 })
 

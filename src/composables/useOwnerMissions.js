@@ -7,6 +7,7 @@ import {
   satisfiesFrequencyRule,
 } from '@/services/eligibility-service'
 import { throwIfGraphqlError } from '@/services/graphql-error-service'
+import { applyOwnerCompletionSideEffects } from '@/composables/mission-completion-side-effects'
 import {
   RequestStatus,
   RequestType,
@@ -14,6 +15,17 @@ import {
   MissionValidationOutcome,
 } from '@/constants/enums'
 
+// Correctif QA (2026-08-27) : `submitDonationValidation` déclenche désormais les écritures
+// secondaires de fin de Mission quand c'est SON vote qui fait passer la Mission en COMPLETED
+// (module partagé `mission-completion-side-effects.js`, importé aussi par
+// `useMissionClosure.js` — aucun des deux composables n'importe l'autre). Avant ce correctif,
+// aucune ne partait sur ce chemin, alors que le flux nominal (le vétérinaire clôture d'abord
+// depuis RequestsView.vue) fait précisément de l'Owner le SECOND votant : l'annuaire donneurs
+// restait vide et la Frequency Rule non réarmée pour un don pourtant confirmé des deux côtés.
+// ⚠️ Le correctif est PARTIEL par construction et c'est documenté, pas oublié : `@auth`
+// interdit à un Owner d'écrire `Animal.lastDonationDate` et les compteurs `Clinic` — voir
+// l'en-tête du module partagé et le JSDoc de `submitDonationValidation`.
+//
 // Double validation de Mission (2026-08-26, étape 4/5) : ce composable gagne
 // `submitDonationValidation` (`client.mutations.submitMissionValidation`, seconde mutation
 // custom de ce schéma après `linkRequestToMission`) — le pendant Owner de `closeMission`
@@ -425,6 +437,74 @@ export function useOwnerMissions() {
     }
   }
   /**
+   * Résout le `clinicID` de la clinique concernée par une Mission (`Mission.request.clinicID`),
+   * nécessaire à l'upsert `ClinicOwnerRelation` déclenché quand le vote de l'Owner fait passer
+   * la Mission en `COMPLETED`.
+   *
+   * CHOIX (à scruter en revue) : résolu ICI par une lecture dédiée, plutôt que reçu en
+   * paramètre comme `closeMission(..., clinicID, ownerID)` le fait côté vétérinaire. Les deux
+   * côtés ne sont pas dans la même situation : `RequestsView.vue` a déjà la Request complète en
+   * main (`listRequestsByClinic`) et passer son `clinicID` ne lui coûte rien, alors que côté
+   * Owner la seule source possible serait la liste que CE composable a lui-même produite —
+   * la faire transiter par la vue pour la lui repasser ensuite serait un détour, et rendrait
+   * `submitDonationValidation` silencieusement inopérante pour tout appelant qui n'aurait pas
+   * appelé `fetchMyMissions()` au préalable (état local vide). C'est aussi la situation exacte
+   * de la Lambda `mission-validation-auto-finalizer`, qui résout de la même façon
+   * `Request.clinicID` faute de `clinicID` sur `Mission` (ADR-0016 §5).
+   *
+   * `selectionSet` réduit au strict nécessaire (un seul champ, à travers une relation) — la
+   * convention CLAUDE.md vise précisément ce cas.
+   *
+   * Best-effort, contrairement aux helpers de résolution de contexte du reste du repo
+   * (`fetchClinicId()`/`fetchClinicContext()`, qui laissent délibérément remonter leurs
+   * erreurs) : ceux-là conditionnent un flux de LECTURE dont l'échec doit devenir visible via
+   * `loadError`. Ici, le vote de l'Owner est déjà enregistré côté serveur et irréversible
+   * (write-once) au moment de l'appel — laisser remonter une erreur de cette lecture
+   * transformerait une soumission RÉUSSIE en échec affiché, sans aucun retry possible.
+   *
+   * @param {string} missionId
+   * @returns {Promise<string|null>} le `clinicID`, ou `null` (introuvable ou erreur)
+   */
+  const resolveMissionClinicId = async (missionId) => {
+    try {
+      const { data, errors } = await client.models.Mission.get(
+        { id: missionId },
+        { selectionSet: ['request.clinicID'] },
+      )
+      throwIfGraphqlError(errors, 'getMission')
+      return data?.request?.clinicID ?? null
+    } catch (e) {
+      console.error(
+        'Erreur résolution de la clinique de la mission (écritures secondaires de fin de Mission) :',
+        e,
+      )
+      return null
+    }
+  }
+
+  /**
+   * Identité de l'Owner authentifié courant, pour l'upsert `ClinicOwnerRelation`
+   * (`ClinicOwnerRelation.ownerID`). Même source que `fetchMyMissions` (`getCurrentUser()`),
+   * jamais un paramètre : c'est l'identité de l'appelant lui-même, la faire fournir par la vue
+   * n'apporterait qu'un risque de divergence. Best-effort pour la même raison que
+   * `resolveMissionClinicId` ci-dessus.
+   *
+   * @returns {Promise<string|null>}
+   */
+  const resolveCurrentOwnerId = async () => {
+    try {
+      const { userId } = await getCurrentUser()
+      return userId ?? null
+    } catch (e) {
+      console.error(
+        "Erreur résolution de l'identité du propriétaire (écritures secondaires de fin de Mission) :",
+        e,
+      )
+      return null
+    }
+  }
+
+  /**
    * Soumet la validation CÔTÉ OWNER pour une Mission — pendant exact de `closeMission`
    * (useMissionClosure.js) côté vétérinaire. Le rôle de l'appelant n'est JAMAIS envoyé : il
    * est déterminé côté serveur via `ctx.identity.groups` (resolver
@@ -436,18 +516,32 @@ export function useOwnerMissions() {
    * (`MissionValidationOutcome.CONFIRMED`/`DENIED`), sans table de traduction à maintenir ni
    * risque d'inversion.
    *
-   * AUCUNE écriture secondaire ici, et c'est délibéré (à ne pas « corriger ») : les 3
-   * écritures déclenchées sur COMPLETED (`Animal.lastDonationDate`, upsert
-   * `ClinicOwnerRelation`, incrément `Clinic.transfusionsDone`/`donorOwnersCount`) sont
-   * réservées au côté vétérinaire. Un Owner n'a de toute façon aucun droit d'écriture sur ces
-   * champs — `Animal.lastDonationDate` est en `ownerReadOnlyVetReadUpdate`, `Clinic` n'est
-   * pas écrivable par un Owner, et `ClinicOwnerRelation` est un objet d'annuaire clinique.
-   * Les répliquer ici échouerait donc au niveau `@auth`. Cas de figure à connaître : si
-   * l'Owner valide EN SECOND (la Mission atteint COMPLETED sur SON appel), ces 3 écritures ne
-   * se produisent tout simplement pas à cet instant — c'est la Lambda planifiée de
-   * finalisation/agrégation (ADR-0016 §4) ou la prochaine action côté clinique qui les
-   * portera. Trou connu et assumé pour ce pilote, signalé plutôt que masqué par des écritures
-   * qui ne passeraient pas.
+   * ÉCRITURES SECONDAIRES quand c'est CE vote qui fait passer la Mission en `COMPLETED`
+   * (correctif QA du 2026-08-27 — remplace un commentaire précédent qui affirmait à tort
+   * qu'AUCUNE écriture n'était nécessaire ici, et que « la Lambda planifiée ou la prochaine
+   * action côté clinique » s'en chargerait : les deux affirmations étaient fausses. La Lambda
+   * `mission-validation-auto-finalizer` ne traite QUE les Missions restées en
+   * `PENDING_VALIDATION` — celle-ci est déjà `COMPLETED` ; et le côté clinique a déjà voté,
+   * write-once, il ne peut plus rien déclencher. Le flux nominal — le vétérinaire clôture
+   * d'abord depuis RequestsView.vue — fait précisément de l'Owner le SECOND votant, donc ce
+   * chemin est le cas COURANT, pas un cas limite).
+   *
+   * Ce qui est fait ici, et ce qui ne peut PAS l'être (asymétrie `@auth`, vérifiée sur le SDL
+   * compilé — détail dans l'en-tête de `mission-completion-side-effects.js`) :
+   * - ✅ upsert `ClinicOwnerRelation` : la ligne appartient à l'Owner
+   *   (`{allow: owner, ownerField: "ownerID"}`, ADR-0009), il peut la créer. C'est ce qui
+   *   peuple l'annuaire donneurs de la clinique (`DonorsView.vue`).
+   * - ❌ `Animal.lastDonationDate` (Owner en `[read]` seul, ADR-0003) et compteurs `Clinic`
+   *   (Owner en `[read]` seul) : structurellement impossibles depuis un client Owner. Ils ne
+   *   sont donc PAS tentés (une mutation qu'on sait refusée ne ferait que du bruit de log).
+   *   RÉSIDU OUVERT, à fermer côté SERVEUR (sous-tâche backend de suivi, hors périmètre de ce
+   *   correctif front-only) : quand l'Owner vote en second, la Frequency Rule n'est pas
+   *   réarmée. Le chemin serveur existe déjà pour `COMPLETED_AUTO` (la Lambda fait ces
+   *   3 écritures en SDK direct, ADR-0016 §4) — il n'est simplement pas branché sur le
+   *   `COMPLETED` produit par le resolver.
+   *
+   * Ces écritures ne peuvent jamais faire échouer la soumission (best-effort strict) : le vote
+   * est déjà enregistré côté serveur et non rejouable quand elles partent.
    *
    * Met à jour l'entrée correspondante de `myMissions` avec le statut retourné, pour que les
    * computed (`activeMissions`/`awaitingValidationMissions`/`historyMissions`) reflètent
@@ -501,6 +595,19 @@ export function useOwnerMissions() {
         myMissions.value = myMissions.value.map((m) =>
           m.id === missionId ? { ...m, status: finalStatus } : m,
         )
+      }
+
+      // STRICTEMENT `COMPLETED`, exactement le même garde-fou que côté vétérinaire
+      // (`useMissionClosure.closeMission`) : jamais sur `PENDING_VALIDATION` (la clinique n'a
+      // pas encore répondu), jamais sur `DISPUTED`/`NO_SHOW` (pas de don réalisé), jamais sur
+      // `COMPLETED_AUTO` (produit par la seule Lambda planifiée, qui fait déjà ces écritures
+      // de son côté — ADR-0016 §4 ; les refaire ici compterait le don deux fois).
+      if (finalStatus === MissionStatus.COMPLETED) {
+        const [clinicID, ownerID] = await Promise.all([
+          resolveMissionClinicId(missionId),
+          resolveCurrentOwnerId(),
+        ])
+        await applyOwnerCompletionSideEffects(client, { clinicID, ownerID })
       }
 
       return finalStatus
