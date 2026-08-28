@@ -589,6 +589,35 @@ describe('useOwnerMissions.submitDonationValidation', () => {
     consoleErrorSpy.mockRestore()
   })
 
+  // docs/adr/0020 — la Mission portait déjà un statut terminal (typiquement `COMPLETED_AUTO`
+  // posé par la Lambda planifiée faute de réponse dans le délai) : l'Owner n'a JAMAIS pu voter,
+  // lui répondre « vous avez déjà répondu » serait faux. D'où un code distinct, normalisé ici
+  // comme `ALREADY_VALIDATED` l'est.
+  it('MISSION_ALREADY_FINALIZED : normalisé en Error("MISSION_ALREADY_FINALIZED"), jamais confondu avec ALREADY_VALIDATED', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    submitMissionValidationMock.mockResolvedValue({
+      data: null,
+      errors: [
+        {
+          errorType: 'MISSION_ALREADY_FINALIZED',
+          message: 'Cette Mission est déjà clôturée : son issue ne peut plus être modifiée.',
+        },
+      ],
+    })
+
+    const { submitDonationValidation, isSubmittingValidation } = useOwnerMissions()
+
+    const error = await submitDonationValidation(
+      'mission-1',
+      MissionValidationOutcome.CONFIRMED,
+    ).catch((e) => e)
+
+    expect(error.message).toBe('MISSION_ALREADY_FINALIZED')
+    expect(error.message).not.toBe('ALREADY_VALIDATED')
+    expect(isSubmittingValidation.value).toBe(false)
+    consoleErrorSpy.mockRestore()
+  })
+
   it("ne travestit PAS une autre erreur GraphQL (Unauthorized) en ALREADY_VALIDATED : elle est propagée telle quelle", async () => {
     const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     const unauthorizedErrors = [{ errorType: 'Unauthorized', message: 'Unauthorized' }]
@@ -815,6 +844,17 @@ describe('mapSubmitDonationValidationError', () => {
   it('traduit ALREADY_VALIDATED et INVALID_OUTCOME en messages utilisateur dédiés', () => {
     expect(mapSubmitDonationValidationError('ALREADY_VALIDATED')).toContain('déjà répondu')
     expect(mapSubmitDonationValidationError('INVALID_OUTCOME')).toContain('invalide')
+  })
+
+  // docs/adr/0020 : le message doit être DIFFÉRENT de celui d'`ALREADY_VALIDATED` — c'est la
+  // seule raison d'être du code d'erreur serveur distinct. Les confondre redonnerait « vous avez
+  // déjà répondu » à quelqu'un qui n'a jamais pu répondre.
+  it('traduit MISSION_ALREADY_FINALIZED par un message DISTINCT de celui d’ALREADY_VALIDATED', () => {
+    const finalized = mapSubmitDonationValidationError('MISSION_ALREADY_FINALIZED')
+
+    expect(finalized).toContain('clôturée')
+    expect(finalized).not.toBe(mapSubmitDonationValidationError('ALREADY_VALIDATED'))
+    expect(finalized).not.toBe('Impossible d’enregistrer votre réponse pour cette mission.')
   })
 
   it('retombe sur le fallback pour un code inconnu (erreur réseau, @auth...)', () => {

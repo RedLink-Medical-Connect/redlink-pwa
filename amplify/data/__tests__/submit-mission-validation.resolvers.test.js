@@ -291,11 +291,23 @@ beforeEach(() => {
 // Fonction 1/3 — écriture du côté appelant
 // ─────────────────────────────────────────────────────────────────────────────────────────
 describe('submit-mission-validation-write-side (5/7, ex-1/3) — rôle, valeurs, conditions', () => {
+  // `stash.missionStatus` : rangé par la fonction 1/8 en production (docs/adr/0020), donc TOUJOURS
+  // présent quand cette fonction s'exécute. Les appels directs ci-dessous le fournissent avec un
+  // statut NON terminal — sans quoi la garde "Mission déjà finalisée" refuserait le vote
+  // (fail-closed), ce que le describe dédié plus bas vérifie explicitement.
+  const writeCtx = ({ args, identity, missionStatus = 'PENDING_ARRIVAL' }) => ({
+    args,
+    identity,
+    stash: { missionStatus },
+  })
+
   it('Veterinarians : écrit clinicValidationOutcome/clinicValidatedAt, jamais les champs Owner', () => {
-    const payload = writeSide.request({
-      args: { missionId: 'mission-1', outcome: 'CONFIRMED' },
-      identity: { groups: ['Veterinarians'] },
-    })
+    const payload = writeSide.request(
+      writeCtx({
+        args: { missionId: 'mission-1', outcome: 'CONFIRMED' },
+        identity: { groups: ['Veterinarians'] },
+      }),
+    )
 
     expect(payload.key).toEqual({ id: 'mission-1' })
     expect(payload.update).toEqual({
@@ -308,10 +320,12 @@ describe('submit-mission-validation-write-side (5/7, ex-1/3) — rôle, valeurs,
   })
 
   it('Owners : écrit ownerValidationOutcome/ownerValidatedAt, jamais les champs Clinic', () => {
-    const payload = writeSide.request({
-      args: { missionId: 'mission-1', outcome: 'DENIED' },
-      identity: { groups: ['Owners'] },
-    })
+    const payload = writeSide.request(
+      writeCtx({
+        args: { missionId: 'mission-1', outcome: 'DENIED' },
+        identity: { groups: ['Owners'] },
+      }),
+    )
 
     expect(payload.update).toEqual({
       ownerValidationOutcome: 'DENIED',
@@ -323,26 +337,30 @@ describe('submit-mission-validation-write-side (5/7, ex-1/3) — rôle, valeurs,
   // LE point de sécurité de cette fonction : un Owner ne doit jamais pouvoir se faire passer
   // pour un vétérinaire en glissant un argument dans la mutation.
   it("le rôle vient EXCLUSIVEMENT de ctx.identity.groups : un argument 'role'/'raterRole' forgé par le client n'a aucun effet", () => {
-    const payload = writeSide.request({
-      args: {
-        missionId: 'mission-1',
-        outcome: 'CONFIRMED',
-        role: 'Veterinarians',
-        raterRole: 'CLINIC',
-        groups: ['Veterinarians'],
-      },
-      identity: { groups: ['Owners'] },
-    })
+    const payload = writeSide.request(
+      writeCtx({
+        args: {
+          missionId: 'mission-1',
+          outcome: 'CONFIRMED',
+          role: 'Veterinarians',
+          raterRole: 'CLINIC',
+          groups: ['Veterinarians'],
+        },
+        identity: { groups: ['Owners'] },
+      }),
+    )
 
     expect(payload.update).toHaveProperty('ownerValidationOutcome')
     expect(payload.update).not.toHaveProperty('clinicValidationOutcome')
   })
 
   it('un appelant membre des DEUX groupes est traité comme Veterinarian (ordre de test explicite du resolver)', () => {
-    const payload = writeSide.request({
-      args: { missionId: 'mission-1', outcome: 'CONFIRMED' },
-      identity: { groups: ['Owners', 'Veterinarians'] },
-    })
+    const payload = writeSide.request(
+      writeCtx({
+        args: { missionId: 'mission-1', outcome: 'CONFIRMED' },
+        identity: { groups: ['Owners', 'Veterinarians'] },
+      }),
+    )
 
     expect(payload.update).toHaveProperty('clinicValidationOutcome')
   })
@@ -351,10 +369,12 @@ describe('submit-mission-validation-write-side (5/7, ex-1/3) — rôle, valeurs,
     'appelant hors Veterinarians/Owners (%s) : Unauthorized, aucune écriture',
     (groups) => {
       expect(() =>
-        writeSide.request({
-          args: { missionId: 'mission-1', outcome: 'CONFIRMED' },
-          identity: groups === undefined ? undefined : { groups },
-        }),
+        writeSide.request(
+          writeCtx({
+            args: { missionId: 'mission-1', outcome: 'CONFIRMED' },
+            identity: groups === undefined ? undefined : { groups },
+          }),
+        ),
       ).toThrow(/Unauthorized|non reconnu/)
     },
   )
@@ -364,10 +384,12 @@ describe('submit-mission-validation-write-side (5/7, ex-1/3) — rôle, valeurs,
     (outcome) => {
       let thrown
       try {
-        writeSide.request({
-          args: { missionId: 'mission-1', outcome },
-          identity: { groups: ['Owners'] },
-        })
+        writeSide.request(
+          writeCtx({
+            args: { missionId: 'mission-1', outcome },
+            identity: { groups: ['Owners'] },
+          }),
+        )
       } catch (error) {
         thrown = error
       }
@@ -377,14 +399,18 @@ describe('submit-mission-validation-write-side (5/7, ex-1/3) — rôle, valeurs,
   )
 
   it('write-once PAR CÔTÉ : la condition porte sur l’ABSENCE du champ outcome de CE côté, et sur l’existence de la Mission (anti-upsert)', () => {
-    const vetPayload = writeSide.request({
-      args: { missionId: 'mission-1', outcome: 'CONFIRMED' },
-      identity: { groups: ['Veterinarians'] },
-    })
-    const ownerPayload = writeSide.request({
-      args: { missionId: 'mission-1', outcome: 'CONFIRMED' },
-      identity: { groups: ['Owners'] },
-    })
+    const vetPayload = writeSide.request(
+      writeCtx({
+        args: { missionId: 'mission-1', outcome: 'CONFIRMED' },
+        identity: { groups: ['Veterinarians'] },
+      }),
+    )
+    const ownerPayload = writeSide.request(
+      writeCtx({
+        args: { missionId: 'mission-1', outcome: 'CONFIRMED' },
+        identity: { groups: ['Owners'] },
+      }),
+    )
 
     expect(vetPayload.condition).toEqual({
       id: { attributeExists: true },
@@ -397,14 +423,18 @@ describe('submit-mission-validation-write-side (5/7, ex-1/3) — rôle, valeurs,
   })
 
   it('disputeReason : transmis seulement s’il est fourni et non vide, jamais fabriqué', () => {
-    const withReason = writeSide.request({
-      args: { missionId: 'mission-1', outcome: 'DENIED', disputeReason: 'Animal non présenté' },
-      identity: { groups: ['Owners'] },
-    })
-    const withoutReason = writeSide.request({
-      args: { missionId: 'mission-1', outcome: 'DENIED', disputeReason: '' },
-      identity: { groups: ['Owners'] },
-    })
+    const withReason = writeSide.request(
+      writeCtx({
+        args: { missionId: 'mission-1', outcome: 'DENIED', disputeReason: 'Animal non présenté' },
+        identity: { groups: ['Owners'] },
+      }),
+    )
+    const withoutReason = writeSide.request(
+      writeCtx({
+        args: { missionId: 'mission-1', outcome: 'DENIED', disputeReason: '' },
+        identity: { groups: ['Owners'] },
+      }),
+    )
 
     expect(withReason.update.ownerDisputeReason).toBe('Animal non présenté')
     expect(withoutReason.update).not.toHaveProperty('ownerDisputeReason')
@@ -433,6 +463,134 @@ describe('submit-mission-validation-write-side (5/7, ex-1/3) — rôle, valeurs,
     }
 
     expect(thrown?.errorType).toBe('DynamoDB:ThrottlingException')
+  })
+
+  // ───────────────────────────────────────────────────────────────────────────────────────
+  // GARDE "MISSION DÉJÀ FINALISÉE" (2026-08-28, docs/adr/0020 — finding ÉLEVÉ de revue Lead Dev)
+  //
+  // Le write-once par côté ne protégeait QUE le champ d'outcome de l'appelant. La Lambda
+  // planifiée écrivant `COMPLETED_AUTO`/`DISPUTED` SANS renseigner l'outcome du côté silencieux
+  // (ADR-0016 §2), ce côté restait éternellement libre d'écrire — un vote tardif écrasait alors
+  // la finalisation automatique, redatait `Animal.lastDonationDate` et pouvait faire
+  // double-compter `Clinic.transfusionsDone` côté vétérinaire.
+  // ───────────────────────────────────────────────────────────────────────────────────────
+  describe('garde sur le statut COURANT de la Mission (docs/adr/0020)', () => {
+    // Contexte construit ICI plutôt que via `writeCtx` : ce describe doit pouvoir passer un
+    // `missionStatus` littéralement `undefined`/`null`/`''` (cas fail-closed), qu'une valeur par
+    // défaut de paramètre masquerait silencieusement.
+    const submitWith = (missionStatus, groups = ['Owners']) => {
+      let thrown
+      let payload
+      try {
+        payload = writeSide.request({
+          args: { missionId: 'mission-1', outcome: 'CONFIRMED' },
+          identity: { groups },
+          stash: { missionStatus },
+        })
+      } catch (error) {
+        thrown = error
+      }
+      return { thrown, payload }
+    }
+
+    it.each(['COMPLETED', 'COMPLETED_AUTO', 'NO_SHOW', 'DISPUTED', 'CANCELLED'])(
+      'statut terminal %s : MISSION_ALREADY_FINALIZED, et AUCUN payload d’écriture produit',
+      (missionStatus) => {
+        const { thrown, payload } = submitWith(missionStatus)
+
+        expect(thrown?.errorType).toBe('MISSION_ALREADY_FINALIZED')
+        expect(payload).toBeUndefined()
+      },
+    )
+
+    it('le rejet vaut pour les DEUX côtés (le vétérinaire qui vote tard n’a pas plus de droits que l’Owner)', () => {
+      expect(submitWith('COMPLETED_AUTO', ['Veterinarians']).thrown?.errorType).toBe(
+        'MISSION_ALREADY_FINALIZED',
+      )
+      expect(submitWith('COMPLETED_AUTO', ['Owners']).thrown?.errorType).toBe(
+        'MISSION_ALREADY_FINALIZED',
+      )
+    })
+
+    // Le code doit rester DISTINCT d'`ALREADY_VALIDATED` : c'est ce qui permettra à l'UI de dire
+    // « cette mission a déjà été clôturée » plutôt que « vous avez déjà répondu » (message faux
+    // pour un côté qui n'a JAMAIS pu répondre). Verrouillé aussi côté front
+    // (`useOwnerMissions.js`, `mapSubmitDonationValidationError`).
+    it('le code d’erreur n’est PAS ALREADY_VALIDATED (les deux cas ne se racontent pas pareil côté utilisateur)', () => {
+      const { thrown } = submitWith('COMPLETED_AUTO')
+
+      expect(thrown?.errorType).not.toBe('ALREADY_VALIDATED')
+      expect(thrown?.message).toContain('déjà clôturée')
+    })
+
+    it.each(['ACCEPTED', 'PENDING_ARRIVAL', 'EN_ROUTE', 'ARRIVED', 'PENDING_VALIDATION'])(
+      'statut NON terminal %s : le vote passe normalement (aucune régression du chemin nominal)',
+      (missionStatus) => {
+        const { thrown, payload } = submitWith(missionStatus)
+
+        expect(thrown).toBeUndefined()
+        expect(payload.update).toHaveProperty('ownerValidationOutcome', 'CONFIRMED')
+      },
+    )
+
+    // Exhaustivité : les 10 valeurs de `MissionStatus` (`amplify/data/resource.ts`, enum pin-testé
+    // dans `resource.transform.test.ts`) sont couvertes par l'un des deux `it.each` ci-dessus.
+    // Une 11e valeur ajoutée au schéma sans décision explicite ici casserait le pin d'enum, qui
+    // renvoie vers ce test.
+    it('les 10 valeurs de MissionStatus sont classées explicitement (aucun statut non tranché)', () => {
+      const terminal = ['COMPLETED', 'COMPLETED_AUTO', 'NO_SHOW', 'DISPUTED', 'CANCELLED']
+      const nonTerminal = ['ACCEPTED', 'PENDING_ARRIVAL', 'EN_ROUTE', 'ARRIVED', 'PENDING_VALIDATION']
+
+      expect(new Set([...terminal, ...nonTerminal]).size).toBe(10)
+      terminal.forEach((status) =>
+        expect(submitWith(status).thrown?.errorType).toBe('MISSION_ALREADY_FINALIZED'),
+      )
+      nonTerminal.forEach((status) => expect(submitWith(status).thrown).toBeUndefined())
+    })
+
+    // FAIL-CLOSED : le statut ne peut pas être relu ici (une fonction de pipeline n'émet qu'un
+    // seul appel vers sa source, et c'est l'écriture). Si la fonction 1/8 ne l'a pas rangé
+    // (pipeline réordonné, Mission corrompue sans `status`), refuser bruyamment vaut mieux que
+    // rouvrir la garde en silence.
+    it.each([undefined, null, ''])(
+      'statut absent du stash (%s) : refus fail-closed, jamais un laissez-passer',
+      (missionStatus) => {
+        expect(submitWith(missionStatus).thrown?.errorType).toBe('MISSION_ALREADY_FINALIZED')
+      },
+    )
+
+    it('stash entièrement absent (contexte dégradé) : refus, et surtout aucune exception de lecture sur undefined', () => {
+      let thrown
+      try {
+        writeSide.request({
+          args: { missionId: 'mission-1', outcome: 'CONFIRMED' },
+          identity: { groups: ['Owners'] },
+        })
+      } catch (error) {
+        thrown = error
+      }
+
+      expect(thrown?.errorType).toBe('MISSION_ALREADY_FINALIZED')
+    })
+
+    // Précédence : une soumission malformée reste `InvalidOutcome` même sur une Mission finalisée
+    // (l'ordre des gardes de `request()` est un contrat observable, pin-testé ici).
+    it('un outcome invalide sur une Mission finalisée reste InvalidOutcome (précédence inchangée)', () => {
+      let thrown
+      try {
+        writeSide.request(
+          writeCtx({
+            args: { missionId: 'mission-1', outcome: 'PENDING' },
+            identity: { groups: ['Owners'] },
+            missionStatus: 'COMPLETED_AUTO',
+          }),
+        )
+      } catch (error) {
+        thrown = error
+      }
+
+      expect(thrown?.errorType).toBe('InvalidOutcome')
+    })
   })
 })
 
@@ -704,6 +862,7 @@ describe('submit-mission-validation-resolve-parties (1/7) — rôle de l’appel
       writeSide.request({
         args: { missionId: 'mission-1', outcome: 'CONFIRMED' },
         identity: { groups: ['Owners', 'Veterinarians'] },
+        stash: { missionStatus: 'PENDING_ARRIVAL' },
       }).update,
     ).toHaveProperty('clinicValidationOutcome')
   })
@@ -739,6 +898,22 @@ describe('submit-mission-validation-resolve-parties (1/7) — rôle de l’appel
     expect(ctx.stash.missionAnimalID).toBe('animal-1')
     expect(ctx.stash.missionRequestID).toBe('request-1')
   })
+
+  // docs/adr/0020 : le statut COURANT est rangé ICI (lecture `consistentRead` déjà faite) et
+  // consommé par la fonction 5/8. Cette fonction ne rejette JAMAIS sur ce critère — le faire
+  // avant les vérifications d'identité (2/8 à 4/8) transformerait la mutation en oracle d'état
+  // de Mission pour n'importe quel authentifié, exactement ce qu'ADR-0018 refuse pour
+  // l'existence.
+  it.each(['PENDING_ARRIVAL', 'COMPLETED_AUTO', 'DISPUTED'])(
+    'response() : range le statut courant (%s) dans le stash SANS jamais rejeter lui-même',
+    (status) => {
+      const ctx = baseCtx()
+      ctx.result = buildMission({ status })
+
+      expect(() => resolveParties.response(ctx)).not.toThrow()
+      expect(ctx.stash.missionStatus).toBe(status)
+    },
+  )
 
   it.each([
     ['Mission introuvable', null],
@@ -1314,6 +1489,8 @@ describe('submitMissionValidation — Frequency Rule réarmée, pipeline COMPLET
 
   // Cohérence des deux fonctions qui parlent du statut final : la 8/8 ne redérive PAS la matrice,
   // elle lit le stash posé par la 7/8 — ce test échouerait si l'une des deux était modifiée seule.
+  // (Voir aussi le dernier describe du fichier : un vote TARDIF ne doit plus atteindre la 8/8 du
+  // tout, docs/adr/0020.)
   it('le stash finalMissionStatus reflète exactement le statut écrit dans la table Mission', () => {
     const ctx = {
       args: { missionId: 'mission-1' },
@@ -1332,5 +1509,165 @@ describe('submitMissionValidation — Frequency Rule réarmée, pipeline COMPLET
 
     expect(payload.update.status).toBe('COMPLETED')
     expect(ctx.stash.finalMissionStatus).toBe('COMPLETED')
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────────────────
+// VOTE TARDIF SUR UNE MISSION DÉJÀ FINALISÉE — pipeline COMPLET (2026-08-28, docs/adr/0020)
+//
+// Scénario réel, pas théorique : la Lambda planifiée `mission-validation-auto-finalizer`
+// finalise en `COMPLETED_AUTO`/`DISPUTED` une Mission dont un seul côté a répondu, SANS jamais
+// renseigner l'outcome du côté silencieux (délibéré, ADR-0016 §2 — ne pas falsifier une réponse
+// qui n'a pas eu lieu). La condition write-once de la fonction 5/8 portant UNIQUEMENT sur ce
+// champ d'outcome, ce côté restait libre d'écrire indéfiniment : son vote, arrivé des semaines
+// plus tard, écrasait la trace de la finalisation automatique.
+// ─────────────────────────────────────────────────────────────────────────────────────────
+describe('submitMissionValidation — vote TARDIF sur une Mission déjà finalisée', () => {
+  const lastDonationDateOf = (animalId) => world.animals.get(animalId)?.lastDonationDate
+
+  /** État exact laissé par la Lambda planifiée : statut terminal + UN SEUL outcome renseigné. */
+  const autoFinalizedByLambda = (status, respondedSide) => {
+    store.set(
+      'mission-1',
+      buildMission({
+        status,
+        ...(respondedSide === 'CLINIC'
+          ? { clinicValidationOutcome: 'CONFIRMED', clinicValidatedAt: NOW }
+          : { ownerValidationOutcome: 'CONFIRMED', ownerValidatedAt: NOW }),
+      }),
+    )
+  }
+
+  it('COMPLETED_AUTO : le vote tardif de l’OWNER est refusé (MISSION_ALREADY_FINALIZED), la Mission est INTACTE', () => {
+    autoFinalizedByLambda('COMPLETED_AUTO', 'CLINIC')
+    const before = { ...store.get('mission-1') }
+
+    const late = runSubmitMissionValidation(store, {
+      args: { missionId: 'mission-1', outcome: 'CONFIRMED' },
+      groups: ['Owners'],
+      sub: OWNER_SUB,
+    })
+
+    expect(late.errors[0].errorType).toBe('MISSION_ALREADY_FINALIZED')
+    // La trace de la finalisation automatique survit : statut, et côté silencieux toujours vide.
+    expect(store.get('mission-1')).toEqual(before)
+    expect(store.get('mission-1').status).toBe('COMPLETED_AUTO')
+    expect(store.get('mission-1').ownerValidationOutcome).toBeUndefined()
+  })
+
+  it('COMPLETED_AUTO : le vote tardif du VÉTÉRINAIRE est refusé aussi — c’est LUI qui provoquait le double incrément de Clinic.transfusionsDone', () => {
+    // Côté vétérinaire, un `COMPLETED` renvoyé par la mutation redéclenche
+    // `applyVeterinarianCompletionSideEffects` (useMissionClosure.js) alors que la Lambda a déjà
+    // fait ces écritures de son côté (ADR-0016 §4). Le refus est ce qui ferme ce double comptage.
+    autoFinalizedByLambda('COMPLETED_AUTO', 'OWNER')
+
+    const late = runSubmitMissionValidation(store, {
+      args: { missionId: 'mission-1', outcome: 'CONFIRMED' },
+      groups: ['Veterinarians'],
+      sub: VET_SUB,
+    })
+
+    expect(late.errors[0].errorType).toBe('MISSION_ALREADY_FINALIZED')
+    // `data` nul : aucun statut `COMPLETED` ne peut revenir au composable, donc aucune écriture
+    // secondaire côté client.
+    expect(late.data).toBeNull()
+    expect(store.get('mission-1').clinicValidationOutcome).toBeUndefined()
+  })
+
+  it('DISPUTED (produit par la même Lambda) : refusé, la trace du litige n’est jamais réécrite', () => {
+    autoFinalizedByLambda('DISPUTED', 'CLINIC')
+
+    const late = runSubmitMissionValidation(store, {
+      args: { missionId: 'mission-1', outcome: 'DENIED', disputeReason: 'trop tard' },
+      groups: ['Owners'],
+      sub: OWNER_SUB,
+    })
+
+    expect(late.errors[0].errorType).toBe('MISSION_ALREADY_FINALIZED')
+    expect(store.get('mission-1').status).toBe('DISPUTED')
+    expect(store.get('mission-1').ownerDisputeReason).toBeUndefined()
+  })
+
+  it('la Frequency Rule n’est PAS redatée par un vote tardif (la fonction 8/8 n’est jamais atteinte)', () => {
+    // C'était la conséquence la plus grave : `Animal.lastDonationDate` réécrit à la date du vote
+    // TARDIF, décalant d'autant la prochaine éligibilité d'un animal prélevé bien avant.
+    autoFinalizedByLambda('COMPLETED_AUTO', 'CLINIC')
+    world.animals.set('animal-1', {
+      id: 'animal-1',
+      ownerID: OWNER_SUB,
+      lastDonationDate: '2026-08-01',
+    })
+
+    runSubmitMissionValidation(store, {
+      args: { missionId: 'mission-1', outcome: 'CONFIRMED' },
+      groups: ['Owners'],
+      sub: OWNER_SUB,
+    })
+
+    expect(lastDonationDateOf('animal-1')).toBe('2026-08-01')
+    expect(nowFormattedCalls).toEqual([])
+  })
+
+  it.each(['COMPLETED', 'NO_SHOW', 'CANCELLED'])(
+    'statut terminal %s (hors Lambda) : refusé de la même façon, aucun cas particulier',
+    (status) => {
+      store.set('mission-1', buildMission({ status }))
+
+      const late = runSubmitMissionValidation(store, {
+        args: { missionId: 'mission-1', outcome: 'CONFIRMED' },
+        groups: ['Owners'],
+        sub: OWNER_SUB,
+      })
+
+      expect(late.errors[0].errorType).toBe('MISSION_ALREADY_FINALIZED')
+      expect(store.get('mission-1').status).toBe(status)
+    },
+  )
+
+  // Non-régression : la garde ne doit PAS gêner le second vote légitime, qui arrive précisément
+  // sur une Mission en `PENDING_VALIDATION` (statut non terminal).
+  it('le SECOND vote légitime (PENDING_VALIDATION) passe toujours — la garde ne bloque que le terminal', () => {
+    runSubmitMissionValidation(store, {
+      args: { missionId: 'mission-1', outcome: 'CONFIRMED' },
+      groups: ['Veterinarians'],
+      sub: VET_SUB,
+    })
+    expect(store.get('mission-1').status).toBe('PENDING_VALIDATION')
+
+    const second = runSubmitMissionValidation(store, {
+      args: { missionId: 'mission-1', outcome: 'CONFIRMED' },
+      groups: ['Owners'],
+      sub: OWNER_SUB,
+    })
+
+    expect(second.errors).toBeUndefined()
+    expect(second.data.status).toBe('COMPLETED')
+  })
+
+  // Écart de comportement observable ASSUMÉ (docs/adr/0020 §4) : un troisième appel du MÊME côté
+  // sur une Mission désormais terminale renvoie `MISSION_ALREADY_FINALIZED` et non plus
+  // `ALREADY_VALIDATED` — la garde de statut précède la condition write-once. Les deux disent
+  // « c'est fini », le nouveau est plus précis.
+  it('re-vote du même côté APRÈS finalisation : MISSION_ALREADY_FINALIZED (et non plus ALREADY_VALIDATED)', () => {
+    runSubmitMissionValidation(store, {
+      args: { missionId: 'mission-1', outcome: 'CONFIRMED' },
+      groups: ['Veterinarians'],
+      sub: VET_SUB,
+    })
+    runSubmitMissionValidation(store, {
+      args: { missionId: 'mission-1', outcome: 'CONFIRMED' },
+      groups: ['Owners'],
+      sub: OWNER_SUB,
+    })
+
+    const third = runSubmitMissionValidation(store, {
+      args: { missionId: 'mission-1', outcome: 'DENIED' },
+      groups: ['Veterinarians'],
+      sub: VET_SUB,
+    })
+
+    expect(third.errors[0].errorType).toBe('MISSION_ALREADY_FINALIZED')
+    // Tant que la Mission n'est PAS terminale, c'est bien `ALREADY_VALIDATED` qui répond (le
+    // write-once par côté reste la garde de ce cas-là) — cf. le describe bout-en-bout plus haut.
   })
 })

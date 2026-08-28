@@ -39,6 +39,16 @@
 //    @aws-appsync/utils/lib/index.d.ts` : "made available inside each resolver and function
 //    mapping template... across functions in a pipeline resolver") : aucun argument client ne
 //    peut l'alimenter, contrairement à `ctx.args`.
+// 3. AJOUT 2026-08-28 (docs/adr/0020) : range AUSSI le STATUT COURANT de la Mission
+//    (`ctx.stash.missionStatus`), consommé par la fonction 5/8 pour refuser un vote sur une
+//    Mission DÉJÀ finalisée (`COMPLETED`/`COMPLETED_AUTO`/`NO_SHOW`/`DISPUTED`/`CANCELLED`).
+//    Cette fonction se contente de le RANGER, elle ne rejette pas elle-même : rejeter ici
+//    ferait de la mutation un oracle d'état de Mission pour n'importe quel authentifié (le
+//    rejet précéderait les vérifications d'identité des fonctions 2/8 à 4/8), exactement ce que
+//    la section précédente de cet en-tête refuse pour l'EXISTENCE d'une Mission. Le rejet vit
+//    donc en 5/8, APRÈS que l'appelant a été prouvé partie -- voir l'en-tête de
+//    `submit-mission-validation-write-side.js` pour le raisonnement complet et pour les deux
+//    alternatives atomiques (condition DynamoDB) évaluées puis écartées.
 //
 // Ce n'est PAS un doublon de la fonction 6/7 (`submit-mission-validation-read-mission.js`,
 // ex-2/3) : celle-là relit la Mission APRÈS l'écriture du côté appelant pour que la fonction
@@ -113,6 +123,11 @@ export function response(ctx) {
 
   ctx.stash.missionAnimalID = mission.animalID
   ctx.stash.missionRequestID = mission.requestID
+  // Statut COURANT, lu en `consistentRead` juste au-dessus (docs/adr/0020). `status` est
+  // `required` au schéma : une Mission qui n'en porterait pas est corrompue, et la fonction 5/8
+  // traite ce cas en fail-closed (elle refuse le vote plutôt que de le laisser passer sans
+  // garde). Volontairement PAS de rejet ici -- voir le point 3 de l'en-tête.
+  ctx.stash.missionStatus = mission.status
 
   return mission
 }

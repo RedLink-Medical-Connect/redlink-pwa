@@ -94,6 +94,14 @@ const SUBMIT_DONATION_VALIDATION_ERROR_MESSAGES = {
   ALREADY_VALIDATED:
     'Vous avez déjà répondu pour cette mission — votre réponse ne peut plus être modifiée.',
   INVALID_OUTCOME: 'Réponse invalide : indiquez si le don a eu lieu ou non.',
+  // 2026-08-28 (docs/adr/0020) : message VOLONTAIREMENT distinct d'`ALREADY_VALIDATED`, c'est
+  // toute la raison d'être du code d'erreur serveur séparé. Les deux cas sont irrécupérables de
+  // la même façon (aucun retry possible) mais n'ont pas la même cause côté utilisateur : ici
+  // l'Owner n'a rien fait de mal — c'est le délai de réponse qui a expiré et la finalisation
+  // automatique (`COMPLETED_AUTO`/`DISPUTED`, Lambda planifiée, ADR-0016) qui a tranché à sa
+  // place. Lui répondre "vous avez déjà répondu" serait faux et incompréhensible.
+  MISSION_ALREADY_FINALIZED:
+    'Cette mission a déjà été clôturée (délai de réponse dépassé) — votre réponse ne peut plus être enregistrée.',
 }
 
 /**
@@ -173,6 +181,31 @@ const isAlreadyValidatedError = (error) => {
     const errorType = e?.errorType || ''
     const message = (e?.message || '').toLowerCase()
     return errorType === 'ALREADY_VALIDATED' || message.includes('déjà soumis sa validation')
+  })
+}
+
+/**
+ * Détecte l'erreur `MISSION_ALREADY_FINALIZED` levée par le resolver (fonction 5/8,
+ * `submit-mission-validation-write-side.js`, correctif du 2026-08-28 — docs/adr/0020) quand la
+ * Mission porte DÉJÀ un statut terminal au moment du vote : typiquement une finalisation
+ * automatique (`COMPLETED_AUTO`/`DISPUTED`) prononcée par la Lambda planifiée après expiration du
+ * délai de réponse. Ce cas est MUTUELLEMENT EXCLUSIF d'`ALREADY_VALIDATED` côté serveur (la garde
+ * de statut précède la condition write-once, et le resolver n'émet qu'une seule erreur), mais les
+ * deux sont testés séparément ici : les confondre redonnerait à l'Owner le message "vous avez déjà
+ * répondu" alors qu'il n'a précisément jamais pu répondre.
+ *
+ * Même forme et mêmes garanties que `isAlreadyValidatedError` ci-dessus : le code lu est celui que
+ * NOTRE resolver pose explicitement (`util.error(message, 'MISSION_ALREADY_FINALIZED')` -> champ
+ * `errorType`), avec le `message` en repli par symétrie.
+ */
+const isMissionAlreadyFinalizedError = (error) => {
+  const graphQLErrors = error?.errors
+  if (!Array.isArray(graphQLErrors)) return false
+
+  return graphQLErrors.some((e) => {
+    const errorType = e?.errorType || ''
+    const message = (e?.message || '').toLowerCase()
+    return errorType === 'MISSION_ALREADY_FINALIZED' || message.includes('déjà clôturée')
   })
 }
 
@@ -565,8 +598,10 @@ export function useOwnerMissions() {
    *   `DISPUTED`), `null` si le serveur n'a renvoyé aucune donnée exploitable sans erreur.
    *   Même contrat de retour que `closeMission` — permet à une future vue d'afficher « en
    *   attente de la confirmation de la clinique » sans re-changer cette signature.
-   * @throws {Error} `INVALID_OUTCOME` (avant tout appel réseau) ou `ALREADY_VALIDATED` (ce
-   *   côté a déjà voté, write-once serveur) — deux codes à passer à
+   * @throws {Error} `INVALID_OUTCOME` (avant tout appel réseau), `ALREADY_VALIDATED` (ce
+   *   côté a déjà voté, write-once serveur) ou `MISSION_ALREADY_FINALIZED` (la Mission portait
+   *   déjà un statut terminal — typiquement finalisée automatiquement par la Lambda planifiée
+   *   faute de réponse dans le délai, docs/adr/0020) — trois codes à passer à
    *   `mapSubmitDonationValidationError`. Toute autre erreur est propagée telle quelle.
    */
   const submitDonationValidation = async (missionId, outcome, disputeReason) => {
@@ -615,6 +650,13 @@ export function useOwnerMissions() {
       console.error('Erreur validation du don (côté propriétaire):', e)
       if (isAlreadyValidatedError(e)) {
         throw new Error('ALREADY_VALIDATED')
+      }
+      // docs/adr/0020 — normalisé comme `ALREADY_VALIDATED` juste au-dessus, et pour la même
+      // raison : sans ça, `mapSubmitDonationValidationError` (qui lit le `.message`) recevrait le
+      // message serveur brut et retomberait sur son libellé générique, rendant le code d'erreur
+      // dédié inutile côté UI.
+      if (isMissionAlreadyFinalizedError(e)) {
+        throw new Error('MISSION_ALREADY_FINALIZED')
       }
       throw e
     } finally {

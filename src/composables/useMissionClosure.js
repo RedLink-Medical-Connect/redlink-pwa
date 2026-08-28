@@ -170,9 +170,16 @@ export function useMissionClosure() {
    *   actuel (RequestsView.vue) ignore la valeur de retour — aucune régression.
    * @throws {Error} `INVALID_OUTCOME` si `outcome` n'est ni COMPLETED ni NO_SHOW — levée
    *   avant tout appel GraphQL. Toute autre erreur (réseau, `@auth`, `ALREADY_VALIDATED`
-   *   renvoyé par le resolver si ce côté a déjà voté) est relayée telle quelle, sans mapping
+   *   renvoyé par le resolver si ce côté a déjà voté, `MISSION_ALREADY_FINALIZED` si la Mission
+   *   portait déjà un statut terminal — docs/adr/0020) est relayée telle quelle, sans mapping
    *   de code dédié — contrat d'erreur inchangé par rapport à la Phase 2.1, voir le
    *   commentaire correspondant dans RequestsView.vue.
+   *   ÉCART ASSUMÉ avec `useOwnerMissions.submitDonationValidation`, qui NORMALISE ces deux
+   *   codes et expose `mapSubmitDonationValidationError` : ce composable-ci n'a jamais eu de
+   *   table de messages (contrat historique Phase 2.1, RequestsView.vue affiche un message
+   *   générique). En ajouter une ici pour le seul `MISSION_ALREADY_FINALIZED` reviendrait à
+   *   inventer un vocabulaire d'erreur côté vétérinaire sans écran pour le consommer —
+   *   laissé à la PR d'UI qui câblera l'affichage des deux côtés (docs/adr/0020 §5).
    */
   const closeMission = async (missionId, animalId, outcome, clinicID, ownerID) => {
     if (!VALID_OUTCOMES.includes(outcome)) {

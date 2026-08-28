@@ -140,7 +140,19 @@ const fakeSubmitMissionValidation = async (args) => {
   // pipeline (`submit-mission-validation-record-donation-date.js`, docs/adr/0019) — laquelle
   // n'est délibérément PAS rejouée par ce harnais front, qui ne modélise pas la table `Animal`
   // (voir le commentaire du test « Clinic CONFIRME puis Owner CONFIRME » plus bas).
-  const ctx = { args, identity: { groups: currentGroups }, prev: {}, stash: {} }
+  //
+  // `missionStatus` : rangé par la fonction 1/8 en production (`resolve-parties`, non rejouée ici
+  // — elle ne sert qu'à la vérification d'identité, hors sujet pour ce harnais). La fonction
+  // d'écriture le LIT depuis le 2026-08-28 pour refuser un vote sur une Mission déjà finalisée
+  // (docs/adr/0020) : le reproduire ici est indispensable, sinon la garde fail-closed refuserait
+  // tous les votes de ce fichier. Le statut vient du magasin, comme la vraie 1/8 le lit en base.
+  const missionInStore = store.get(args.missionId)
+  const ctx = {
+    args,
+    identity: { groups: currentGroups },
+    prev: {},
+    stash: { missionStatus: missionInStore ? missionInStore.status : undefined },
+  }
 
   try {
     for (const fn of [writeSide, readMission, finalizeStatus]) {
@@ -581,11 +593,17 @@ describe('accord de vocabulaire front (enums) / resolver AppSync / Lambda planif
   it('les deux valeurs de MissionValidationOutcome acceptées par le resolver sont exactement celles de l’enum front', () => {
     const accepted = [MissionValidationOutcome.CONFIRMED, MissionValidationOutcome.DENIED]
 
+    // `stash.missionStatus` : rangé par la fonction 1/8 en production ; requis depuis le
+    // 2026-08-28 (docs/adr/0020), la fonction d'écriture refusant tout vote qu'elle ne peut pas
+    // rattacher à une Mission encore en cours.
+    const stash = { missionStatus: MissionStatus.PENDING_VALIDATION }
+
     for (const outcome of accepted) {
       expect(() =>
         writeSide.request({
           args: { missionId: 'mission-1', outcome },
           identity: { groups: ['Owners'] },
+          stash,
         }),
       ).not.toThrow()
     }
@@ -594,6 +612,7 @@ describe('accord de vocabulaire front (enums) / resolver AppSync / Lambda planif
       writeSide.request({
         args: { missionId: 'mission-1', outcome: MissionValidationOutcome.PENDING },
         identity: { groups: ['Owners'] },
+        stash,
       }),
     ).toThrow()
   })

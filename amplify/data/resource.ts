@@ -1081,7 +1081,8 @@ export const schema = a.schema({
   // DERNIER qui portent une source de données AUTRE que `Mission` -- une fonction AppSync ne peut
   // interroger qu'UNE source, d'où le découpage) :
   // 1. `submit-mission-validation-resolve-parties.js` (`Mission`) -- rôle de l'appelant +
-  //    `animalID`/`requestID` de la Mission, rangés dans `ctx.stash` (espace serveur).
+  //    `animalID`/`requestID` de la Mission (et, depuis le 2026-08-28, son `status` COURANT),
+  //    rangés dans `ctx.stash` (espace serveur).
   // 2. `submit-mission-validation-verify-owner-party.js` (`Animal`) -- côté Owner :
   //    `Animal.ownerID === ctx.identity.sub`, sinon `Forbidden`. No-op si l'appelant est une
   //    clinique (`runtime.earlyReturn`).
@@ -1091,7 +1092,11 @@ export const schema = a.schema({
   //    `Request.clinicID === clinicID du vétérinaire appelant`, sinon `Forbidden`. No-op côté
   //    Owner.
   // 5. `submit-mission-validation-write-side.js` -- détermine le rôle via `ctx.identity.groups`
-  //    (jamais un argument client), écrit le côté de l'appelant (write-once, conditionnel).
+  //    (jamais un argument client), REFUSE le vote si le statut stashé par la fonction 1 est déjà
+  //    TERMINAL (`MISSION_ALREADY_FINALIZED`, correctif du 2026-08-28 -- docs/adr/0020 : sans
+  //    cette garde, un vote tardif écrasait le `COMPLETED_AUTO`/`DISPUTED` écrit par la Lambda
+  //    planifiée, qui ne renseigne délibérément PAS l'outcome du côté silencieux), puis écrit le
+  //    côté de l'appelant (write-once, conditionnel).
   // 6. `submit-mission-validation-read-mission.js` -- relit la Mission à jour (les deux côtés).
   // 7. `submit-mission-validation-finalize-status.js` -- calcule et écrit `Mission.status`
   //    (matrice PENDING_VALIDATION/COMPLETED/NO_SHOW/DISPUTED), condition optimiste anti-course,

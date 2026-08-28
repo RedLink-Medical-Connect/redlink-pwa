@@ -481,6 +481,12 @@ describe('amplify/data/resource.ts — double validation de Mission + notation (
     expect(compiledSdl).toContain('enum ClinicAccountStatus {\n  ACTIVE\n  UNDER_REVIEW\n}')
   })
 
+  // ⚠️ Si ce pin casse parce qu'une 11e valeur a été ajoutée à `MissionStatus` : décider
+  // explicitement si elle est TERMINALE, et si oui l'ajouter à `TERMINAL_MISSION_STATUSES`
+  // (`amplify/data/resolvers/submit-mission-validation-write-side.js`, docs/adr/0020) — sans
+  // quoi un vote resterait acceptable sur une Mission pourtant close. Le classement des 10
+  // valeurs actuelles est verrouillé par
+  // `amplify/data/__tests__/submit-mission-validation.resolvers.test.js`.
   it('MissionStatus conserve les 7 valeurs existantes et gagne PENDING_VALIDATION/COMPLETED_AUTO/DISPUTED', () => {
     expect(compiledSdl).toContain(
       'enum MissionStatus {\n  ACCEPTED\n  PENDING_ARRIVAL\n  EN_ROUTE\n  ARRIVED\n  COMPLETED\n  NO_SHOW\n  CANCELLED\n  PENDING_VALIDATION\n  COMPLETED_AUTO\n  DISPUTED\n}',
