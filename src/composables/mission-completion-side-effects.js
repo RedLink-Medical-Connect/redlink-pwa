@@ -7,9 +7,11 @@ import { resolveClinicOwnerRelationUpsert } from '@/services/clinic-owner-relati
 //
 // POURQUOI CE FICHIER EXISTE
 // --------------------------
-// Ces trois écritures (`Animal.lastDonationDate`, upsert `ClinicOwnerRelation`, incrément
+// Trois écritures (`Animal.lastDonationDate`, upsert `ClinicOwnerRelation`, incrément
 // `Clinic.transfusionsDone`/`donorOwnersCount`) vivaient UNIQUEMENT dans `useMissionClosure.js`
-// (côté vétérinaire). Depuis la double validation, le statut `COMPLETED` n'est plus atteint au
+// (côté vétérinaire) — la première a depuis quitté le front pour de bon (2026-08-28, ADR-0019 §4
+// corrigé : elle est écrite par le pipeline serveur, ce module n'en porte plus que DEUX).
+// Depuis la double validation, le statut `COMPLETED` n'est plus atteint au
 // clic du vétérinaire mais au SECOND vote, quel que soit le côté qui le soumet — et dans le flux
 // nominal (le vétérinaire clôture d'abord depuis RequestsView.vue), c'est l'appel de l'OWNER qui
 // finalise. `useOwnerMissions.submitDonationValidation` ne déclenchait alors AUCUNE de ces
@@ -50,17 +52,25 @@ import { resolveClinicOwnerRelationUpsert } from '@/services/clinic-owner-relati
 //   — un Owner ne peut PAS incrémenter les compteurs.
 // - `ClinicOwnerRelation` : `{allow: owner, ownerField: "ownerID"}` (ADR-0009, sans restriction
 //   d'opérations) + Veterinarians — l'Owner de la ligne peut la lire ET la créer.
-// Conséquence : le côté Owner ne peut honnêtement porter QU'UNE des trois écritures. D'où deux
-// points d'entrée distincts ci-dessous plutôt qu'un paramètre "mode" : chaque appelant lit
-// exactement ce qu'il fait, et on n'émet jamais une mutation dont on sait qu'elle sera refusée
-// (elle ne ferait que polluer les logs sans jamais aboutir).
-// Résidu ASSUMÉ, à router vers une sous-tâche backend (hors périmètre de ce correctif, qui est
-// front-only) : quand l'Owner vote en second, `Animal.lastDonationDate` et les compteurs
-// `Clinic` restent non écrits. Seul un chemin serveur peut les porter (le resolver
-// `submitMissionValidation` au moment où il finalise en `COMPLETED`, ou une Lambda sur flux
-// DynamoDB — la Lambda `mission-validation-auto-finalizer` fait DÉJÀ exactement ces trois
-// écritures en SDK direct pour `COMPLETED_AUTO`, ADR-0016 §4 : le chemin existe, il n'est
-// simplement pas branché sur `COMPLETED`). Verrouillé par un test dédié plutôt que masqué.
+// Conséquence : le côté Owner ne peut honnêtement porter QUE l'upsert `ClinicOwnerRelation`.
+// D'où deux points d'entrée distincts ci-dessous plutôt qu'un paramètre "mode" : chaque appelant
+// lit exactement ce qu'il fait, et on n'émet jamais une mutation dont on sait qu'elle sera
+// refusée (elle ne ferait que polluer les logs sans jamais aboutir).
+//
+// ÉTAT RÉEL DEPUIS LE 2026-08-28 (le résidu écrit ici a été fermé, ne pas le relire au passé) :
+// - `Animal.lastDonationDate` : FERMÉ côté SERVEUR (commit `8c14e7d`, ADR-0019) — la 8e fonction
+//   du pipeline `submitMissionValidation` l'écrit dès que la Mission atteint réellement
+//   `COMPLETED`, quel que soit le côté qui vote en second. La Frequency Rule est donc réarmée
+//   sur TOUS les chemins. Ce module ne l'écrit plus NULLE PART, y compris côté vétérinaire
+//   (docs/adr/0019 §4 corrigé : l'écriture client, partant après celle du serveur, l'écrasait
+//   avec la date du fuseau du navigateur).
+// - Compteurs `Clinic` (`transfusionsDone`/`donorOwnersCount`) : SEUL résidu encore ouvert quand
+//   l'Owner vote en second — ils restent non incrémentés sur ce chemin. Non fermé délibérément
+//   (ADR-0019 §4) : ce sont des indicateurs de tableau de bord, dont la dérive est déjà
+//   documentée, et les porter côté serveur coûterait DEUX fonctions de pipeline supplémentaires
+//   (9/10 puis 10/10, le `clinicID` n'étant pas dans le stash sur le chemin Owner) pour un
+//   `donorOwnersCount` qui resterait de toute façon faux (sa valeur dépend de la création ou non
+//   d'une `ClinicOwnerRelation`, décidée côté client).
 // ─────────────────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -209,10 +219,13 @@ export async function applyVeterinarianCompletionSideEffects(client, { clinicID,
  * `Animal.lastDonationDate` et les compteurs `Clinic` ne sont PAS tentés ici : le SDL compilé
  * les réserve aux `Veterinarians` (voir l'en-tête de ce fichier). Les émettre quand même
  * produirait une erreur `@auth` systématique, avalée par le traitement best-effort — donc du
- * bruit de log permanent, aucune donnée écrite, et l'illusion d'un bug corrigé. Le trou réel
- * (Frequency Rule non réarmée quand l'Owner vote en second) reste ouvert et doit être fermé
- * côté SERVEUR, seul endroit qui a les droits ; il est signalé en rapport et verrouillé par un
- * test dédié.
+ * bruit de log permanent, aucune donnée écrite, et l'illusion d'un bug corrigé.
+ *
+ * Le trou qui en découlait — Frequency Rule jamais réarmée quand l'Owner vote en second — est
+ * FERMÉ depuis le 2026-08-28, côté SERVEUR (commit `8c14e7d`, ADR-0019 : 8e fonction du pipeline
+ * `submitMissionValidation`, seul endroit du système qui a le droit d'écrire ce champ quel que
+ * soit l'appelant). Ne subsiste sur ce chemin que la non-incrémentation des compteurs `Clinic`,
+ * résidu assumé et sans enjeu médical (voir l'en-tête).
  *
  * Ne lève JAMAIS : au moment de l'appel, le vote de l'Owner est déjà enregistré côté serveur
  * (write-once, irréversible) — lui remonter une erreur d'annuaire lui ferait croire que sa

@@ -32,10 +32,15 @@ export const RequestStatus = Object.freeze({
 // amplify/data/resource.ts) ajoutés en miroir du schéma -- EN_ROUTE/ARRIVED existent côté
 // schéma (amplify/data/resource.ts, MissionStatus) mais n'avaient déjà pas d'équivalent ici
 // avant ce lot (gap préexistant, hors périmètre de cette sous-tâche, non ajouté ici pour ne
-// pas élargir le diff au-delà de ce qui est demandé). COMPLETED_AUTO n'est écrit par aucun
-// code applicatif à ce jour (réservé à une future Lambda planifiée, non implémentée) ;
-// exposé ici pour que le front puisse déjà le reconnaître en lecture (ex. libellé d'état)
-// sans attendre cette Lambda.
+// pas élargir le diff au-delà de ce qui est demandé). COMPLETED_AUTO est écrit par la Lambda
+// planifiée `mission-validation-auto-finalizer` depuis le commit `4cf287a` (ADR-0016) -- elle
+// existe, ce commentaire la disait "future, non implémentée" jusqu'au 2026-08-28. AUCUN code
+// front ne l'écrit ni ne peut l'écrire (Mission.status n'est écrivable que par la mutation
+// custom `submitMissionValidation`, qui ne produit jamais cette valeur) : il n'est présent ici
+// que pour la LECTURE (libellé d'état, filtrage d'historique -- voir `historyMissions` dans
+// useOwnerMissions.js) et pour les garde-fous "COMPLETED STRICT" des deux composables de
+// validation, qui doivent pouvoir le distinguer d'un COMPLETED réel (sans quoi les écritures
+// secondaires de fin de Mission seraient comptées deux fois, ADR-0016 §4).
 export const MissionStatus = Object.freeze({
   ACCEPTED: 'ACCEPTED',
   PENDING_ARRIVAL: 'PENDING_ARRIVAL',

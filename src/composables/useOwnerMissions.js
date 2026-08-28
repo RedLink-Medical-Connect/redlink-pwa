@@ -22,9 +22,14 @@ import {
 // aucune ne partait sur ce chemin, alors que le flux nominal (le vétérinaire clôture d'abord
 // depuis RequestsView.vue) fait précisément de l'Owner le SECOND votant : l'annuaire donneurs
 // restait vide et la Frequency Rule non réarmée pour un don pourtant confirmé des deux côtés.
-// ⚠️ Le correctif est PARTIEL par construction et c'est documenté, pas oublié : `@auth`
-// interdit à un Owner d'écrire `Animal.lastDonationDate` et les compteurs `Clinic` — voir
-// l'en-tête du module partagé et le JSDoc de `submitDonationValidation`.
+// ⚠️ Ce correctif front est PARTIEL par construction et c'est documenté, pas oublié : `@auth`
+// interdit à un Owner d'écrire `Animal.lastDonationDate` et les compteurs `Clinic`. La moitié
+// qui comptait vraiment a été fermée CÔTÉ SERVEUR depuis (commit `8c14e7d`, ADR-0019) : la 8e
+// fonction du pipeline `submitMissionValidation` écrit `Animal.lastDonationDate` dès que la
+// Mission atteint `COMPLETED`, quel que soit le côté qui vote en second — la Frequency Rule est
+// donc réarmée sur tous les chemins. Seuls les compteurs `Clinic` restent non incrémentés quand
+// l'Owner vote en second (résidu assumé, indicateurs de tableau de bord — voir l'en-tête du
+// module partagé et le JSDoc de `submitDonationValidation`).
 //
 // Double validation de Mission (2026-08-26, étape 4/5) : ce composable gagne
 // `submitDonationValidation` (`client.mutations.submitMissionValidation`, seconde mutation
@@ -567,11 +572,11 @@ export function useOwnerMissions() {
    * - ❌ `Animal.lastDonationDate` (Owner en `[read]` seul, ADR-0003) et compteurs `Clinic`
    *   (Owner en `[read]` seul) : structurellement impossibles depuis un client Owner. Ils ne
    *   sont donc PAS tentés (une mutation qu'on sait refusée ne ferait que du bruit de log).
-   *   RÉSIDU OUVERT, à fermer côté SERVEUR (sous-tâche backend de suivi, hors périmètre de ce
-   *   correctif front-only) : quand l'Owner vote en second, la Frequency Rule n'est pas
-   *   réarmée. Le chemin serveur existe déjà pour `COMPLETED_AUTO` (la Lambda fait ces
-   *   3 écritures en SDK direct, ADR-0016 §4) — il n'est simplement pas branché sur le
-   *   `COMPLETED` produit par le resolver.
+   *   `Animal.lastDonationDate` n'est PLUS un résidu : il est écrit CÔTÉ SERVEUR depuis le
+   *   commit `8c14e7d` (ADR-0019, 8e fonction du pipeline `submitMissionValidation`), sur tous
+   *   les chemins et dans un fuseau explicite — la Frequency Rule est donc bien réarmée quand
+   *   l'Owner vote en second. Reste ouvert, et assumé : les compteurs `Clinic` sur ce chemin
+   *   (indicateurs de tableau de bord, coût de fermeture disproportionné — ADR-0019 §4).
    *
    * Ces écritures ne peuvent jamais faire échouer la soumission (best-effort strict) : le vote
    * est déjà enregistré côté serveur et non rejouable quand elles partent.
