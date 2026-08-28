@@ -164,10 +164,50 @@ ferait glisser la date et rendrait le champ inutilisable ("depuis quand cette cl
 revue ?"). Bénéfice IAM au passage : la Lambda n'a **pas** `dynamodb:GetItem`.
 
 **Aucun chemin ne remet ces champs à `false`/`ACTIVE`.** Une clinique dont la moyenne remonte reste
-signalée jusqu'à décision **admin** (interface non construite, comme pour les Missions `DISPUTED`) :
-effacer automatiquement la trace supprimerait l'information même que la modération doit examiner.
-Et `UNDER_REVIEW` ne coupe **aucun** accès aujourd'hui — pas d'exclusion automatique, décision
-produit explicite ; aucune règle `@auth`, aucun garde-fou de routeur ne lit ce champ.
+signalée jusqu'à décision **admin** : effacer automatiquement la trace supprimerait l'information
+même que la modération doit examiner. Et `UNDER_REVIEW` ne coupe **aucun** accès aujourd'hui — pas
+d'exclusion automatique, décision produit explicite ; aucune règle `@auth`, aucun garde-fou de
+routeur ne lit ce champ.
+
+> **Précision du 2026-08-28** (revue `lead-dev-reviewer`, finding MOYEN — wording corrigé, code
+> inchangé). La formulation d'origine (« jusqu'à décision admin, interface non construite »)
+> laissait croire qu'il suffirait de **construire l'interface** pour lever le flag. C'est faux, et
+> c'est l'ordre des travaux qui compte : **aucun rôle Cognito ne peut écrire ces 5 champs, `Admins`
+> compris** (§5 : le helper `clinicRatingAndModerationFieldsReadOnly` n'accorde que `read`, à
+> `Veterinarians` et `Admins`). La seule voie d'écriture est la Lambda `rating-aggregation`, qui ne
+> fait que **poser** le flag (condition : flag absent ou `false`) et ne le lève jamais.
+>
+> Une levée manuelle exigera donc **d'abord un changement `@auth`** — et pas la ligne unique qu'on
+> imagine. Deux verrous, pas un :
+>
+> 1. **Au niveau CHAMP** : ajouter `update` pour `Admins` dans le helper. Mais le helper couvre les
+>    5 champs d'un bloc : ça donnerait aussi le droit de réécrire `averageRatingAsClinic`/
+>    `ratingCountAsClinic`, c'est-à-dire de falsifier une moyenne — exactement ce que §0 ferme en
+>    n'accordant l'écriture à **personne**. Il faudrait donc d'abord **scinder** le helper (3 champs
+>    de modération / 2 champs d'agrégat).
+> 2. **Au niveau MODÈLE** : la règle de type de `Clinic` (`allow.owner()`,
+>    `Veterinarians [create, read, update]`, `authenticated [read]` — pin-testée dans
+>    `resource.transform.test.ts`) ne mentionne **pas** `Admins`. Or une `@auth` de champ ne fait
+>    que restreindre l'écriture d'un champ **au sein d'une opération déjà autorisée** : un
+>    administrateur qui n'est pas par ailleurs vétérinaire ne peut même pas appeler `updateClinic`.
+>    Une règle de champ seule serait donc **inerte**.
+>
+> **Décision : ne rien changer maintenant** (option (a) du finding, contre (b) « ajouter
+> `allow.group('Admins').to(['update'])` dès maintenant »). Trois raisons : (i) l'option (b) telle
+> que formulée ne marcherait pas — verrou 2 — et donnerait la fausse impression que le chemin est
+> ouvert ; (ii) la faire marcher réellement demande d'élargir la règle de **niveau modèle** de
+> `Clinic` à un groupe qui n'y a aujourd'hui aucun accès, pour un écran qui n'existe pas : ce dépôt
+> a déjà tranché deux fois contre l'ajout d'un droit sans appelant (`queryField(null)`, §2 et
+> ADR-0016 §1) ; (iii) l'alternative propre le moment venu n'est peut-être pas `@auth` du tout mais
+> une **mutation custom** `clearClinicModerationFlag` (resolver JS sur la table managée, idiome
+> ADR-0011/ADR-0018 déjà utilisé quatre fois ici), qui laisserait les 5 champs fermés à toute
+> mutation générée et écrirait exactement les 3 champs de modération, sous condition — décision qui
+> appartient à la PR qui construira l'interface admin, avec le contexte qu'elle aura.
+>
+> Le repo owner demande à être informé de **tout** changement `@auth` : il n'y en a aucun ici, et
+> celui qu'exigera la levée du flag est décrit ci-dessus pour qu'il soit décidé en connaissance de
+> cause plutôt que découvert. Un commentaire pointant vers ce paragraphe est posé sur le helper
+> lui-même (`amplify/data/resource.ts`).
 
 Hors périmètre, délibérément : la modération **côté Owner** (le plan ne la demande pas — pas de
 symétrie décorative que rien ne consommerait) et l'**alerte tableau de bord clinique** (sous 3,5
@@ -247,6 +287,11 @@ robustesse de cette Lambda.
   n'existe dans le système d'autorisation pour `Clinic`. Même arbitrage qu'ADR-0015 §2 : un scope
   large mais **honnête** plutôt qu'un filtre simulant une garantie que le modèle ne porte pas.
 - **Agrégat en retard d'un avis** en cas de traitement concurrent (§3) — auto-réparateur.
+- **Flag de modération irréversible en l'état** : aucun rôle, `Admins` compris, ne peut écrire
+  `needsAdminReview: false`/`accountStatus: ACTIVE` — la levée manuelle exigera d'abord un
+  changement `@auth` (ou une mutation custom dédiée), décrit en détail dans la précision du
+  2026-08-28 en §4. Résidu **connu et accepté** tant qu'aucune interface admin n'existe : dans un
+  pilote, une clinique signalée à tort se règle hors application.
 - **Aucune notification** quand une clinique passe `UNDER_REVIEW` : ni email (Phase 4.2 en
   stand-by), ni écran admin (non construit). Un `console.warn` est le seul signal, et ce dépôt n'a
   aucun outil de suivi d'erreurs (trou d'observabilité connu, roadmap Phase 5). Le flag est donc

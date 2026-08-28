@@ -150,6 +150,27 @@ MCP `context7` toujours indisponible dans cette session (même méthode qu'ADR-0
   recalculé, sans chemin de reprise (voir l'en-tête de `submit-mission-validation-write-side.js`).
 - **Le résidu ADR-0004 est inchangé** : un Owner peut toujours fabriquer un
   `createMission(status: COMPLETED)` à la création.
+- **Un Owner peut SUPPRIMER sa Mission à n'importe quel statut** — résidu identifié le 2026-08-28
+  (revue `lead-dev-reviewer`, finding MOYEN), **documenté et non fermé**. La règle de niveau
+  modèle de `Mission` (`allow.owner().to(['create', 'read', 'delete'])`, antérieure à toute cette
+  feature) existe pour le nettoyage de la Mission orpheline d'`acceptMission` (écriture
+  best-effort après échec de la condition d'ADR-0001/ADR-0011). Elle ne distingue aucun statut :
+  un Owner peut donc appeler `client.models.Mission.delete()` sur une Mission
+  `PENDING_VALIDATION` — avant d'avoir voté, ou après un vote de la clinique qui ne lui convient
+  pas — voire `DISPUTED`/`NO_SHOW`, faisant disparaître la trace d'un no-show ou d'un litige.
+  C'est le **pendant destructif** du trou que cet ADR ferme : le write-once garantit qu'un vote
+  ne peut être ni écrasé ni volé, pas que la ligne qui le porte survive. Un `Admins` (lecture
+  seule) ou la Lambda planifiée ne verront jamais ce qui a été supprimé.
+  **Pourquoi ce n'est pas fermé ici** : la fermeture propre demanderait de retirer `delete` à
+  l'Owner **et** de faire passer le nettoyage d'orpheline par un chemin serveur (mutation custom
+  supprimant la Mission sous condition `status ∈ {ACCEPTED, PENDING_ARRIVAL}` et
+  `Request.activeMissionID ≠ cette Mission`, ou nettoyage différé côté Lambda) — une 3e mutation
+  custom et un changement `@auth` de niveau modèle sur `Mission`, disproportionnés pour un pilote
+  à utilisateurs de confiance (école vétérinaire partenaire) où l'incitation est faible et le
+  volume connu. Même arbitrage que la famille ADR-0004/0005/0015. **À rouvrir en priorité** si
+  les Missions `DISPUTED` gagnent un jour une interface admin ou une valeur contractuelle : la
+  garantie que cet ADR obtient sur le vote n'aura pas de valeur probante tant qu'une partie peut
+  supprimer la ligne entière.
 - **Plafond AppSync** : un resolver de pipeline accepte au plus 10 fonctions ; ce pipeline en
   consomme 7. Pin-testé pour qu'une future sous-tâche ne s'en approche pas sans le voir.
 

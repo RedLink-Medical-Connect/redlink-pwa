@@ -188,6 +188,21 @@ const missionStatusFieldAuth = (allow: any) => [
 // une clinique à un OWNER, pas un vétérinaire à sa clinique). Le choix est le même que celui déjà
 // tranché deux fois sur ce repo : un scope large mais HONNÊTE plutôt qu'un filtre qui simulerait
 // une garantie de sécurité que le modèle de données ne porte pas.
+//
+// ⚠️ CE HELPER REND LE FLAG DE MODÉRATION IRRÉVERSIBLE — PRÉCISION DU 2026-08-28 (revue Lead Dev,
+// docs/adr/0017 §4). Aucun rôle Cognito n'a `update` ici, `Admins` COMPRIS : personne ne peut
+// donc écrire `needsAdminReview: false`/`accountStatus: ACTIVE`. La Lambda `rating-aggregation`
+// (seule écrivaine, SDK direct) ne fait que POSER le flag, jamais le lever. Construire une
+// interface admin ne suffira PAS à rendre la levée possible : il faudra d'abord (1) SCINDER ce
+// helper (les 3 champs de modération d'un côté, les 2 champs d'agrégat de l'autre -- sinon on
+// accorderait au passage le droit de falsifier une moyenne, ce que ce helper existe pour
+// interdire) et (2) élargir la règle de NIVEAU MODÈLE de `Clinic` ci-dessous, qui ne mentionne pas
+// `Admins` du tout -- une `@auth` de champ ne fait que restreindre l'écriture au sein d'une
+// opération déjà autorisée, donc une règle de champ seule serait INERTE (un admin non vétérinaire
+// ne peut même pas appeler `updateClinic`). L'alternative sans changement `@auth` serait une
+// mutation custom dédiée (idiome ADR-0011/0018). Décision : rien n'est changé ici tant qu'aucun
+// écran ne consomme ce droit -- voir docs/adr/0017 §4 pour l'arbitrage complet, à relire AVANT
+// d'ajouter quoi que ce soit à ce helper.
 const clinicRatingAndModerationFieldsReadOnly = (allow: any) => [
   allow.group('Veterinarians').to(['read']),
   allow.group('Admins').to(['read']),
@@ -776,6 +791,17 @@ export const schema = a.schema({
       // ("l'Owner ne peut pas s'auto-valider sa Mission comme terminée"). L'Owner voit toujours le
       // statut (read) mais ne peut plus l'écrire ; seuls create/delete (jamais update) sont
       // appelés côté Owner (useOwnerMissions.js -- createMissionSimple/deleteMissionSimple).
+      //
+      // ⚠️ RÉSIDU ASSUMÉ, identifié le 2026-08-28 (revue Lead Dev) et documenté dans
+      // docs/adr/0018 §4 : `delete` n'est conditionné à AUCUN statut. Il n'existe que pour le
+      // nettoyage de la Mission orpheline d'`acceptMission` (ADR-0001/ADR-0011), mais rien
+      // n'empêche un Owner de supprimer une Mission `PENDING_VALIDATION` (avant son propre vote,
+      // ou après un vote de la clinique qui ne lui plaît pas) ou `DISPUTED` -- faisant
+      // disparaître la trace d'un no-show ou d'un litige que le write-once de
+      // `submitMissionValidation` protège pourtant de toute réécriture. NON fermé ici
+      // délibérément : il faudrait retirer `delete` à l'Owner ET router le nettoyage d'orpheline
+      // par une 3e mutation custom conditionnelle -- disproportionné pour ce pilote. Lire
+      // ADR-0018 §4 avant de toucher à cette ligne (dans un sens comme dans l'autre).
       allow.owner().to(['create', 'read', 'delete']),
       allow.group('Veterinarians').to(['read', 'update']),
       // Double validation de Mission (2026-08-26) -- visibilité admin en LECTURE SEULE sur les
