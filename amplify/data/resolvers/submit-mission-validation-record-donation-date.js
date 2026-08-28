@@ -48,9 +48,10 @@
 //
 // FUSEAU EXPLICITE `Europe/Paris`, comme la Lambda planifiée et POUR LA MÊME RAISON : un resolver
 // AppSync s'exécute côté SERVEUR (horloge UTC), pas dans le navigateur d'un vétérinaire -- la
-// logique `getFullYear()/getMonth()/getDate()` de `todayAsAWSDate()`
-// (`src/composables/mission-completion-side-effects.js`, fuseau LOCAL du navigateur) n'est pas
-// transposable telle quelle. Sans fuseau explicite, toute validation soumise entre 00h00 et 02h00
+// logique `getFullYear()/getMonth()/getDate()` que portait `todayAsAWSDate()` côté client
+// (`src/composables/mission-completion-side-effects.js`, fuseau LOCAL du NAVIGATEUR, supprimée le
+// 2026-08-28 -- voir plus bas) n'est pas transposable telle quelle. Sans fuseau explicite, toute
+// validation soumise entre 00h00 et 02h00
 // heure de Paris (22h-00h UTC en été) daterait le don de la VEILLE et raccourcirait la Frequency
 // Rule d'un jour. Même bug de frontière que celui trouvé en QA sur la Phase 2.1, transposé au bon
 // runtime.
@@ -84,6 +85,15 @@
 //   - `util.appendError()` (qui laisse `data` non nul) aboutit au même résultat observable dans
 //     CE dépôt : les deux composables passent leurs `errors` à `throwIfGraphqlError`
 //     (`src/services/graphql-error-service.js`), qui lève dès que le tableau est non vide.
+// SOURCE UNIQUE DEPUIS LE 2026-08-28 (revue Lead Dev, docs/adr/0020 -- ADR-0019 §4 corrigé) :
+// `applyVeterinarianCompletionSideEffects` (`src/composables/mission-completion-side-effects.js`)
+// n'écrit PLUS `Animal.lastDonationDate`. ADR-0019 §4 tenait cette double écriture pour
+// inoffensive ("même champ, même jour") ; elle ne l'était pas -- `closeMission()` appelle la
+// mutation PUIS ses écritures secondaires, donc l'écriture CLIENT partait APRÈS celle-ci et
+// l'écrasait avec la date du fuseau du NAVIGATEUR du vétérinaire, neutralisant sur ce chemin le
+// correctif de fuseau ci-dessus. Le "filet" que devait constituer l'écriture client (elle, qui
+// échouait bruyamment) ne compensait donc rien : il masquait cette fonction.
+//
 // Même raisonnement que « écriture secondaire best-effort » (`CLAUDE.md`), que la fonction 7/8
 // (qui traite déjà un `ConditionalCheckFailedException` comme non bloquant après une écriture
 // critique réussie) et que la Lambda planifiée (dont les 3 écritures secondaires n'échouent

@@ -4,15 +4,18 @@ import { MissionStatus, MissionValidationOutcome } from '@/constants/enums'
 import { throwIfGraphqlError } from '@/services/graphql-error-service'
 import { applyVeterinarianCompletionSideEffects } from '@/composables/mission-completion-side-effects'
 
-// Correctif QA (2026-08-27) : les 3 écritures secondaires de fin de Mission
-// (`Animal.lastDonationDate`, upsert `ClinicOwnerRelation`, incrément
-// `Clinic.transfusionsDone`/`donorOwnersCount`) ne vivent plus en ligne dans ce fichier mais
-// dans `mission-completion-side-effects.js`, partagé avec `useOwnerMissions.js` — depuis la
-// double validation, le second vote (donc le passage réel en COMPLETED) peut venir de l'un
-// OU l'autre côté, et ces écritures ne peuvent plus appartenir au seul composable
-// vétérinaire. Comportement de CE composable strictement inchangé (mêmes appels, même ordre,
-// même asymétrie de traitement d'erreur) — voir l'en-tête du module partagé pour le détail,
-// dont l'asymétrie `@auth` entre les deux côtés.
+// Correctif QA (2026-08-27) : les écritures secondaires de fin de Mission ne vivent plus en
+// ligne dans ce fichier mais dans `mission-completion-side-effects.js`, partagé avec
+// `useOwnerMissions.js` — depuis la double validation, le second vote (donc le passage réel en
+// COMPLETED) peut venir de l'un OU l'autre côté, et ces écritures ne peuvent plus appartenir au
+// seul composable vétérinaire. Voir l'en-tête du module partagé pour le détail, dont
+// l'asymétrie `@auth` entre les deux côtés.
+//
+// 2026-08-28 (revue Lead Dev, docs/adr/0020 ; ADR-0019 §4 corrigé) : elles sont DEUX, plus
+// trois. `Animal.lastDonationDate` est retiré du côté client — l'appel partait APRÈS
+// `submitMissionValidation` et écrasait donc l'écriture SERVEUR (fonction 8/8 du pipeline,
+// ADR-0019) avec la date du fuseau du NAVIGATEUR, réintroduisant sur ce chemin le bug de fuseau
+// que cette fonction serveur existe pour éviter. Le serveur est la source unique de ce champ.
 //
 // Double validation de Mission (2026-08-26, étape 4/5) : l'écriture du statut passe désormais
 // par `client.mutations.submitMissionValidation` (mutation custom, ADR-0015/ADR-0016) et NON
@@ -29,7 +32,7 @@ import { applyVeterinarianCompletionSideEffects } from '@/composables/mission-co
 // d'être ici -- voir CLAUDE.md / roadmap Phase 8 pour la méthodologie de migration.
 //
 // Sur le changement de comportement d'erreur Gen1 -> Gen2 et `throwIfGraphqlError` : voir le
-// JSDoc de `src/services/graphql-error-service.js`. Les cinq appels de ce flux (ici et dans le
+// JSDoc de `src/services/graphql-error-service.js`. Les appels de ce flux (ici et dans le
 // module partagé) reprennent tous `throwIfGraphqlError` : le Gen1 d'origine faisait un simple
 // `await client.graphql(...)` sans jamais destructurer/inspecter la réponse, donc aucun
 // n'avait de notion de succès partiel à préserver.
@@ -85,24 +88,26 @@ const VALID_OUTCOMES = Object.keys(OUTCOME_TO_VALIDATION_OUTCOME)
  * (les deux côtés ont confirmé), pas « quand le vétérinaire a cliqué Terminé » — voir le
  * JSDoc de `closeMission` pour le détail de ce changement.
  *
- * Sur COMPLETED, les 3 écritures secondaires sont émises par
+ * Sur COMPLETED, les écritures secondaires encore portées par ce composable sont émises par
  * `applyVeterinarianCompletionSideEffects` (`mission-completion-side-effects.js`, partagé avec
- * `useOwnerMissions.js` depuis le correctif QA du 2026-08-27) :
- * - `Animal.lastDonationDate` est mis à la date du jour (format `AWSDate`, `YYYY-MM-DD`) —
- *   c'est l'écriture qui permet à la Frequency Rule (CONTEXT.md, `satisfiesFrequencyRule`
- *   dans eligibility-service.js) de s'activer en conditions réelles : sans elle, un Animal
- *   reste éligible indéfiniment après un don réel (voir docs/adr/0003).
+ * `useOwnerMissions.js` depuis le correctif QA du 2026-08-27). Elles sont DEUX depuis le
+ * 2026-08-28, plus trois :
+ * - `Animal.lastDonationDate` (Frequency Rule, CONTEXT.md/docs/adr/0003) N'EST PLUS ÉCRIT ICI :
+ *   il l'est côté SERVEUR par la 8e fonction du pipeline `submitMissionValidation` (ADR-0019),
+ *   sur TOUS les chemins et dans un fuseau explicite. L'écriture client partait après celle du
+ *   serveur et l'écrasait avec la date du navigateur — voir le JSDoc du module partagé et
+ *   ADR-0019 §4.
  * - Une `ClinicOwnerRelation` entre le Clinic de la Request et l'Owner de l'Animal est
  *   upsertée (Phase 3.1, roadmap) — c'est l'écriture qui permet à `DonorsView.vue` (Phase
  *   3.2) de retrouver les Owners rattachés à une clinique : sans elle,
  *   `ClinicOwnerRelation` n'est jamais peuplée en conditions réelles bien que ses mutations
  *   CRUD soient générées depuis le début.
  * - `Clinic.transfusionsDone`/`donorOwnersCount` sont incrémentés (Phase 6.7, CdC §2.4).
- * Les deux dernières sont best-effort (erreur loguée, jamais relancée), la première non —
- * voir le module partagé pour le raisonnement complet de cette asymétrie.
+ * Les deux sont best-effort (erreur loguée, jamais relancée) : depuis le retrait de l'écriture
+ * `Animal`, ce composable n'émet plus AUCUNE écriture secondaire critique, et l'asymétrie de
+ * traitement d'erreur qu'il portait a disparu.
  *
- * Sur NO_SHOW, aucun don n'a eu lieu — ni `Animal` ni `ClinicOwnerRelation` ne sont jamais
- * touchés.
+ * Sur NO_SHOW, aucun don n'a eu lieu — aucune `ClinicOwnerRelation` n'est jamais créée.
  *
  * Écritures conditionnelles : ce composable n'en pose plus AUCUNE lui-même (il n'en posait
  * déjà aucune avant la double validation, contrairement à `acceptMission`/ADR-0001) — elles
@@ -130,7 +135,7 @@ export function useMissionClosure() {
    *   les 3 écritures secondaires dès que `outcome === COMPLETED`, sur la seule décision du
    *   vétérinaire.
    * - MAINTENANT : elle soumet un VOTE. Le statut final est calculé côté serveur à partir des
-   *   DEUX votes (Owner + Clinic). Les 3 écritures secondaires ne se déclenchent QUE si le
+   *   DEUX votes (Owner + Clinic). Les écritures secondaires ne se déclenchent QUE si le
    *   statut RÉELLEMENT retourné par la mutation est `COMPLETED` — c'est-à-dire une fois les
    *   deux parties d'accord sur le fait que le don a eu lieu. Jamais sur `PENDING_VALIDATION`
    *   (l'Owner n'a pas encore répondu), jamais sur `DISPUTED` (désaccord), jamais sur
@@ -150,9 +155,11 @@ export function useMissionClosure() {
    * litige en texte libre). Le passer depuis ce composable n'aurait aucun effet.
    *
    * @param {string} missionId
-   * @param {string} animalId - requis même pour NO_SHOW (contrat stable de la fonction),
-   *   mais n'est utilisé (et donc n'a besoin d'être valide) que si la double validation
-   *   aboutit à COMPLETED.
+   * @param {string} animalId - PLUS AUCUN consommateur depuis le 2026-08-28 (docs/adr/0019 §4
+   *   corrigé) : `Animal.lastDonationDate` est écrit par le serveur, jamais plus par ce
+   *   composable. Conservé dans la signature parce que c'est un contrat public stable depuis la
+   *   Phase 2.1 (RequestsView.vue le passe) et que le retirer élargirait ce correctif à la vue et
+   *   à ses tests, sans bénéfice — candidat à la suppression dans la PR d'UI.
    * @param {string} outcome - `MissionStatus.COMPLETED` ou `MissionStatus.NO_SHOW`
    * @param {string} [clinicID] - `Request.clinicID` de la Mission clôturée. Requis pour
    *   l'upsert `ClinicOwnerRelation`, mais uniquement utilisé (et donc n'a besoin d'être
@@ -205,7 +212,12 @@ export function useMissionClosure() {
       // exactement la régression que cette sous-tâche corrige : déclencher les effets d'un don
       // réalisé sur la seule parole du vétérinaire.
       if (finalStatus === MissionStatus.COMPLETED) {
-        await applyVeterinarianCompletionSideEffects(client, { animalId, clinicID, ownerID })
+        // `animalId` n'est plus transmis depuis le 2026-08-28 : `Animal.lastDonationDate` est
+        // écrit par le SERVEUR (fonction 8/8 du pipeline, ADR-0019) et plus du tout ici — voir le
+        // JSDoc du module partagé. Le paramètre reste dans la signature publique de
+        // `closeMission` (contrat stable, RequestsView.vue le passe déjà), il n'a simplement plus
+        // de consommateur.
+        await applyVeterinarianCompletionSideEffects(client, { clinicID, ownerID })
       }
 
       return finalStatus

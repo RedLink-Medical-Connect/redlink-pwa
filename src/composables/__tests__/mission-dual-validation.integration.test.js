@@ -224,7 +224,7 @@ beforeEach(() => {
 // SCÉNARIO 1 — double confirmation « live », les deux ordres
 // ─────────────────────────────────────────────────────────────────────────────────────────
 describe('double validation bout-en-bout : composable Owner + composable Clinic sur le VRAI resolver', () => {
-  it('Owner CONFIRME puis Clinic CONFIRME : PENDING_VALIDATION puis COMPLETED, et les 3 écritures secondaires partent une seule fois (au 2e appel)', async () => {
+  it('Owner CONFIRME puis Clinic CONFIRME : PENDING_VALIDATION puis COMPLETED, et les écritures secondaires CLIENT partent une seule fois (au 2e appel)', async () => {
     const { submitDonationValidation } = useOwnerMissions()
     const { closeMission } = useMissionClosure()
 
@@ -252,7 +252,14 @@ describe('double validation bout-en-bout : composable Owner + composable Clinic 
       clinicValidationOutcome: 'CONFIRMED',
     })
     expect(secondaryWriteCalls()).toEqual({
-      animal: 1,
+      // `animal: 0` depuis le 2026-08-28 (docs/adr/0019 §4 corrigé, revue Lead Dev) : le côté
+      // vétérinaire n'écrit PLUS `Animal.lastDonationDate`. Son appel partait après
+      // `submitMissionValidation` et écrasait donc l'écriture serveur (8e fonction du pipeline,
+      // fuseau `Europe/Paris` explicite) avec la date du fuseau du NAVIGATEUR. Le réarmement de
+      // la Frequency Rule est verrouillé côté resolver
+      // (`amplify/data/__tests__/submit-mission-validation.resolvers.test.js`) ; ce harnais front
+      // ne rejoue pas la 8e fonction et ne modélise pas la table `Animal`.
+      animal: 0,
       relationList: 1,
       relationCreate: 1,
       clinicGet: 1,
@@ -370,7 +377,9 @@ describe('double validation bout-en-bout : composable Owner + composable Clinic 
 
     expect(relationCreateMock).toHaveBeenCalledTimes(1)
     expect(clinicUpdateMock).toHaveBeenCalledTimes(1)
-    expect(animalUpdateMock).toHaveBeenCalledTimes(1)
+    // Plus AUCUNE écriture `Animal` côté client, quel que soit l'ordre des votes : la date du don
+    // est écrite une seule fois, par le serveur (docs/adr/0019 §4 corrigé le 2026-08-28).
+    expect(animalUpdateMock).not.toHaveBeenCalled()
   })
 })
 

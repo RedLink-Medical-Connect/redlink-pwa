@@ -145,7 +145,7 @@ describe('useMissionClosure.closeMission', () => {
     vi.useRealTimers()
   })
 
-  it('COMPLETED : soumet la validation vétérinaire ET met à jour Animal.lastDonationDate, dans cet ordre, avec la date du jour au format AWSDate exact (YYYY-MM-DD), puis upserte la ClinicOwnerRelation', async () => {
+  it('COMPLETED : soumet la validation vétérinaire, puis upserte la ClinicOwnerRelation — SANS jamais écrire Animal.lastDonationDate (source unique : le serveur)', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-08-14T21:47:33.123Z'))
 
@@ -171,11 +171,10 @@ describe('useMissionClosure.closeMission', () => {
     })
     expect(finalStatus).toBe('COMPLETED')
 
-    expect(animalUpdateMock).toHaveBeenCalledTimes(1)
-    const animalInput = animalUpdateMock.mock.calls[0][0]
-    expect(animalInput).toEqual({ id: 'animal-1', lastDonationDate: '2026-08-14' })
-    // Format AWSDate strict : pas d'heure, pas de suffixe 'Z'/timezone.
-    expect(animalInput.lastDonationDate).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+    // 2026-08-28 (docs/adr/0019 §4 corrigé) : `Animal.lastDonationDate` est écrit par la 8e
+    // fonction du pipeline `submitMissionValidation`, plus jamais par ce composable — l'écriture
+    // client partait APRÈS celle du serveur et l'écrasait avec la date du fuseau du navigateur.
+    expect(animalUpdateMock).not.toHaveBeenCalled()
 
     expect(relationListMock).toHaveBeenCalledTimes(1)
     expect(relationListMock).toHaveBeenCalledWith({ filter: { ownerID: { eq: 'owner-1' } } })
@@ -188,18 +187,20 @@ describe('useMissionClosure.closeMission', () => {
     expect(isClosing.value).toBe(false)
   })
 
-  it("COMPLETED — piège de fuseau horaire : la date envoyée doit être celle du jour civil LOCAL (Europe/Paris) au moment de la clôture, pas celle du jour UTC", async () => {
-    // Ce repo/cette CI tourne en Europe/Paris (confirmé : `timedatectl` sur cette machine), et
-    // le composable s'exécute de toute façon toujours dans le navigateur LOCAL du vétérinaire,
-    // jamais en UTC — donc ce piège est réel en prod, indépendamment du fuseau de la machine qui
-    // fait tourner les tests. On fixe explicitement `process.env.TZ` ici pour que ce test reste
-    // déterministe même si un futur environnement CI tourne en UTC par défaut.
-    //
-    // 2026-08-14T22:30:00Z UTC == 2026-08-15T00:30:00 heure locale Europe/Paris (CEST, UTC+2 en
-    // août) : 00h30 passé minuit LOCAL, mais encore 22h30 la VEILLE en UTC. C'est le piège
-    // classique de `toISOString()` (toujours en UTC) utilisé pour dériver "aujourd'hui" — un
-    // vétérinaire qui clôture une Mission juste après minuit chez lui doit voir
-    // `lastDonationDate` refléter CE jour-là (2026-08-15), pas la veille.
+  it("COMPLETED — piège de fuseau horaire : ce composable ne date PLUS le don (le serveur le fait en Europe/Paris explicite), donc le fuseau du navigateur n'a plus aucune influence", async () => {
+    // HISTORIQUE DE CE TEST, à lire avant de le modifier :
+    // 1. Phase 2.1 (QA) : `useMissionClosure.js` dérivait "aujourd'hui" de
+    //    `new Date().toISOString().slice(0, 10)` — la date UTC. Un vétérinaire clôturant à 00h30
+    //    heure de Paris datait le don de la VEILLE, raccourcissant la Frequency Rule d'un jour.
+    //    Corrigé par `todayAsAWSDate()` (accesseurs de date LOCAUX), verrouillé ici.
+    // 2. 2026-08-28 (revue Lead Dev, docs/adr/0019 §4 corrigé) : le correctif ci-dessus n'était
+    //    lui-même qu'un demi-correctif — "local" veut dire le fuseau du NAVIGATEUR, pas celui de
+    //    la clinique. Un poste mal réglé ou un vétérinaire en déplacement redonnait le même bug.
+    //    L'écriture client est donc RETIRÉE : la 8e fonction du pipeline serveur date le don en
+    //    `Europe/Paris` EXPLICITE, sur tous les chemins (ADR-0019).
+    // Ce test garde le même scénario de frontière (00h30 à Paris, encore la veille en UTC) mais
+    // vérifie désormais la seule chose qui compte côté client : il n'écrit RIEN. Une
+    // réintroduction de l'écriture locale le ferait échouer, quel que soit le fuseau de la CI.
     const originalTZ = process.env.TZ
     process.env.TZ = 'Europe/Paris'
     vi.useFakeTimers()
@@ -218,13 +219,13 @@ describe('useMissionClosure.closeMission', () => {
       const { closeMission } = useMissionClosure()
       await closeMission('mission-1', 'animal-1', MissionStatus.COMPLETED)
 
-      // Test de non-régression pour le bug de fuseau trouvé en QA sur cette sous-tâche :
-      // useMissionClosure.js calculait `today` via `new Date().toISOString().slice(0, 10)`
-      // (jour UTC, '2026-08-14' ici) au lieu du jour civil local du vétérinaire ('2026-08-15').
-      // Corrigé par `todayAsAWSDate()` (accesseurs de date locaux) — ce test verrouille le
-      // comportement local désormais correct.
-      const animalInput = animalUpdateMock.mock.calls[0][0]
-      expect(animalInput.lastDonationDate).toBe('2026-08-15')
+      expect(animalUpdateMock).not.toHaveBeenCalled()
+      // La date reste bien la préoccupation du serveur : la mutation de validation est le seul
+      // appel parti d'ici, et elle ne transporte aucune date.
+      expect(Object.keys(submitMissionValidationMock.mock.calls[0][0]).sort()).toEqual([
+        'missionId',
+        'outcome',
+      ])
     } finally {
       process.env.TZ = originalTZ
     }
@@ -299,21 +300,29 @@ describe('useMissionClosure.closeMission', () => {
     expect(isClosing.value).toBe(false)
   })
 
-  it("propage l'erreur et repasse isClosing à false si submitMissionValidation réussit mais la mutation Animal échoue (COMPLETED)", async () => {
-    const animalError = new Error('Animal update failed')
+  // REMPLACE (2026-08-28, docs/adr/0019 §4 corrigé) le test « propage l'erreur ... si la mutation
+  // Animal échoue » : ce contrat n'existe plus, `client.models.Animal.update()` n'étant plus
+  // appelé du tout par ce composable. Le test devient sa non-régression exacte — un mock Animal
+  // qui EXPLOSERAIT s'il était appelé prouve mieux que `not.toHaveBeenCalled()` seul que la
+  // séquence ne dépend plus de lui : `closeMission` doit réussir jusqu'au bout.
+  it("n'appelle plus JAMAIS client.models.Animal.update (source unique côté serveur) : même un mock Animal en échec ne fait pas échouer closeMission", async () => {
     mockBothSidesAgree()
-    animalUpdateMock.mockRejectedValue(animalError)
+    mockSecondaryWritesOk()
+    // Posé APRÈS `mockSecondaryWritesOk()`, qui réinstalle un mock Animal en succès.
+    animalUpdateMock.mockRejectedValue(new Error('Animal update failed'))
 
     const { closeMission, isClosing } = useMissionClosure()
 
-    await expect(closeMission('mission-1', 'animal-1', MissionStatus.COMPLETED)).rejects.toThrow(
-      'Animal update failed',
-    )
+    await expect(
+      closeMission('mission-1', 'animal-1', MissionStatus.COMPLETED, 'clinic-1', 'owner-1'),
+    ).resolves.toBe(MissionStatus.COMPLETED)
 
     expect(submitMissionValidationMock).toHaveBeenCalledTimes(1)
-    expect(animalUpdateMock).toHaveBeenCalledTimes(1)
-    // L'échec de la mutation Animal interrompt le flux avant tout appel ClinicOwnerRelation.
-    expect(relationListMock).not.toHaveBeenCalled()
+    expect(animalUpdateMock).not.toHaveBeenCalled()
+    // Et les deux écritures secondaires restantes partent bien, elles (elles ne sont plus
+    // précédées d'une écriture critique susceptible de les court-circuiter).
+    expect(relationListMock).toHaveBeenCalledTimes(1)
+    expect(clinicGetMock).toHaveBeenCalledTimes(1)
     expect(isClosing.value).toBe(false)
   })
 
@@ -545,7 +554,12 @@ describe('useMissionClosure — écritures secondaires conditionnées au statut 
     await closeMission('mission-1', 'animal-1', MissionStatus.NO_SHOW, 'clinic-1', 'owner-1')
 
     expect(submitMissionValidationMock.mock.calls[0][0].outcome).toBe('DENIED')
-    expect(animalUpdateMock).toHaveBeenCalledTimes(1)
+    // Les écritures secondaires suivent le statut RETOURNÉ (COMPLETED), pas l'outcome demandé
+    // (NO_SHOW). Assertion portée depuis le 2026-08-28 par les deux écritures restantes —
+    // `Animal.lastDonationDate` étant désormais écrit par le serveur (docs/adr/0019 §4 corrigé).
+    expect(animalUpdateMock).not.toHaveBeenCalled()
+    expect(relationListMock).toHaveBeenCalledTimes(1)
+    expect(clinicUpdateMock).toHaveBeenCalledTimes(1)
   })
 
   it('réponse sans data exploitable (défensif) : retourne null et ne déclenche aucune écriture secondaire', async () => {

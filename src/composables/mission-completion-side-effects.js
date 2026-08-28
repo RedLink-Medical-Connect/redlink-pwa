@@ -64,21 +64,6 @@ import { resolveClinicOwnerRelationUpsert } from '@/services/clinic-owner-relati
 // ─────────────────────────────────────────────────────────────────────────────────────────
 
 /**
- * Date du jour au format `AWSDate` (`YYYY-MM-DD`), dans le fuseau LOCAL — pas
- * `toISOString().slice(0, 10)`, qui donne la date UTC. Un vétérinaire qui clôture une
- * Mission entre ~22h et minuit UTC (0h-2h heure de Paris en été) verrait sinon
- * `Animal.lastDonationDate` daté de la veille, faussant silencieusement la Frequency Rule
- * d'un jour — trouvé par un test de frontière de fuseau horaire en QA sur la Phase 2.1.
- * (Déplacé tel quel depuis `useMissionClosure.js`, comportement inchangé.)
- */
-export function todayAsAWSDate(now = new Date()) {
-  const year = now.getFullYear()
-  const month = String(now.getMonth() + 1).padStart(2, '0')
-  const day = String(now.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
-
-/**
  * Upsert best-effort d'une `ClinicOwnerRelation` (clinicID, ownerID) — voir
  * `resolveClinicOwnerRelationUpsert` (`src/services/clinic-owner-relation-service.js`) pour la
  * logique de décision, réutilisée telle quelle et jamais dupliquée.
@@ -180,33 +165,37 @@ export async function incrementClinicStats(client, clinicID, isNewDonorOwner) {
 }
 
 /**
- * Les TROIS écritures secondaires, telles que le CÔTÉ VÉTÉRINAIRE les émet quand une Mission
- * atteint réellement `COMPLETED` (`useMissionClosure.closeMission`). Comportement identique à
- * celui qui vivait en ligne dans ce composable avant l'extraction — y compris son asymétrie de
- * traitement d'erreur, délibérément préservée :
+ * Les écritures secondaires que le CÔTÉ VÉTÉRINAIRE émet quand une Mission atteint réellement
+ * `COMPLETED` (`useMissionClosure.closeMission`).
  *
- * - `Animal.lastDonationDate` est CRITIQUE, pas best-effort : son échec interrompt la séquence
- *   (les deux écritures suivantes ne partent pas) et REMONTE à l'appelant. C'est l'écriture qui
- *   réarme la Frequency Rule (CONTEXT.md, ADR-0003) — un animal réellement prélevé qui resterait
- *   éligible est un risque médical, pas une imprécision d'annuaire ; le vétérinaire doit le
- *   savoir. Contrat verrouillé par `useMissionClosure.test.js` ("propage l'erreur ... si la
- *   mutation Animal échoue").
- * - Les deux suivantes sont best-effort (voir leurs fonctions respectives).
+ * ⚠️ CHANGEMENT DU 2026-08-28 (revue Lead Dev, docs/adr/0020 — ADR-0019 §4 mis à jour) : elles
+ * sont désormais DEUX, plus trois. `Animal.lastDonationDate` n'est PLUS écrit ici : la 8e
+ * fonction du pipeline `submitMissionValidation`
+ * (`amplify/data/resolvers/submit-mission-validation-record-donation-date.js`, ADR-0019) le fait
+ * côté SERVEUR sur TOUS les chemins — que ce soit l'Owner ou le vétérinaire qui vote en second.
+ * La garder ici n'était pas une redondance inoffensive, contrairement à ce qu'affirmait
+ * ADR-0019 §4 : `closeMission()` appelle la mutation PUIS cette fonction, donc l'écriture CLIENT
+ * partait APRÈS et ÉCRASAIT systématiquement celle du serveur. Elle utilisait la date du jour
+ * dans le fuseau du NAVIGATEUR ; le serveur, lui, la calcule en `Europe/Paris` explicite. Un
+ * vétérinaire en déplacement (ou au poste mal configuré) datait donc le don d'un jour d'écart —
+ * exactement le bug de fuseau que la fonction 8/8 existe pour éviter, entièrement neutralisé sur
+ * ce chemin. Le serveur est désormais la source UNIQUE de ce champ (c'est de toute façon le seul
+ * endroit qui a le droit de l'écrire quel que soit l'appelant, ADR-0003/ADR-0019).
+ *
+ * CONSÉQUENCE À CONNAÎTRE : cette fonction n'a plus AUCUNE écriture critique. Les deux qui
+ * restent (upsert `ClinicOwnerRelation`, compteurs `Clinic`) sont best-effort — elles loguent et
+ * avalent leurs erreurs. Elle ne lève donc plus jamais, et son ancien contrat `@throws` (verrouillé
+ * jusqu'ici par `useMissionClosure.test.js`) n'a plus d'objet ; le test correspondant a été
+ * remplacé par une non-régression qui vérifie qu'aucune écriture `Animal` n'est plus émise ici.
+ * `applyOwnerCompletionSideEffects` ci-dessous ne levait déjà jamais : les deux points d'entrée
+ * ont enfin le même contrat d'erreur, pour la même raison (le vote est déjà enregistré côté
+ * serveur, irréversible, quand ces écritures partent).
  *
  * @param {object} client - client Gen2 (`generateClient()`, `aws-amplify/data`)
- * @param {{animalId: string, clinicID?: string, ownerID?: string}} params
- * @throws {Error} si l'écriture `Animal.lastDonationDate` échoue (et elle seule)
+ * @param {{clinicID?: string, ownerID?: string}} params
+ * @returns {Promise<void>} ne lève jamais (les deux écritures sont best-effort)
  */
-export async function applyVeterinarianCompletionSideEffects(client, { animalId, clinicID, ownerID }) {
-  // AWSDate attend `YYYY-MM-DD` (pas d'heure) — contrairement à `appointmentDatetime`/
-  // `validationExpiresAt` ailleurs dans ce repo, qui sont des AWSDateTime en ISO 8601 complet.
-  // Date LOCALE (todayAsAWSDate), pas UTC — voir son commentaire.
-  const { errors: animalErrors } = await client.models.Animal.update({
-    id: animalId,
-    lastDonationDate: todayAsAWSDate(),
-  })
-  throwIfGraphqlError(animalErrors, 'updateAnimal')
-
+export async function applyVeterinarianCompletionSideEffects(client, { clinicID, ownerID }) {
   const isNewDonorOwner = await upsertClinicOwnerRelation(client, clinicID, ownerID)
   await incrementClinicStats(client, clinicID, isNewDonorOwner)
 }

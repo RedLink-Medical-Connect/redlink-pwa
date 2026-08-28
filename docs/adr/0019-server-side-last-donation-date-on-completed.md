@@ -2,6 +2,8 @@
 status: accepted
 supersedes: none (ferme le résidu signalé par ADR-0018 §4 côté écriture secondaire, et le
   « résidu à router vers une sous-tâche backend » de `src/composables/mission-completion-side-effects.js`)
+amended: 2026-08-28 — §3 et §4 (la « double écriture sans danger » n'en était pas une :
+  l'écriture client écrasait celle du serveur ; elle est retirée, voir §4)
 ---
 
 # `Animal.lastDonationDate` écrit par le pipeline `submitMissionValidation` (8e fonction)
@@ -148,25 +150,43 @@ dépôt n'a de toute façon aucun outil de suivi d'erreurs (trou d'observabilit�
 Phase 5). Écart avec la Lambda, où la même écriture compte comme un échec dans son résumé de
 log : la Lambda a un `console.error` et personne à qui remonter une erreur ; ici c'est l'inverse.
 
-Asymétrie **délibérée** avec `applyVeterinarianCompletionSideEffects`
-(`mission-completion-side-effects.js`), où la même écriture est CRITIQUE (elle rethrow) : là-bas
+Asymétrie **délibérée**, au moment de la rédaction, avec `applyVeterinarianCompletionSideEffects`
+(`mission-completion-side-effects.js`), où la même écriture était CRITIQUE (elle rethrow) : là-bas
 l'appelant est le vétérinaire, il est devant son écran, il a le droit d'écrire ce champ et peut
 agir. Ici l'écriture est un effet de bord serveur d'une mutation dont le contrat observable est
 « ton vote est enregistré, voici le statut ».
 
+> **Amendement du 2026-08-28** (voir §4) : cette asymétrie n'existe plus, l'écriture client ayant
+> été **retirée**. Le raisonnement ci-dessus reste celui qui justifie le best-effort **ici** ; ce
+> qui a changé, c'est qu'il n'y a plus d'écriture concurrente en face.
+
 ## 4. Ce que ce correctif ne fait PAS (résidus assumés, signalés)
 
-- **Double écriture acceptée** quand c'est le VÉTÉRINAIRE qui vote en second : le pipeline écrit
-  `lastDonationDate`, puis `useMissionClosure.closeMission()` — qui voit `COMPLETED` revenir —
-  appelle `applyVeterinarianCompletionSideEffects`, qui l'écrit **une seconde fois** via
-  `client.models.Animal.update()`. Sans danger (même champ, même jour, idempotent) et
-  volontairement non « optimisé » ici : retirer l'écriture client demanderait de toucher
-  `useMissionClosure.js`/`mission-completion-side-effects.js`, hors du périmètre de cette
-  sous-tâche, et cette écriture client sert aujourd'hui de **filet** (elle, échoue bruyamment).
-  Seul écart observable possible : si le navigateur du vétérinaire est dans un autre fuseau que
-  `Europe/Paris`, la valeur client (écrite en dernier) l'emporte et peut différer d'un jour de
-  celle du serveur. À trancher par le Lead Dev : garder le filet, ou faire du serveur la source
-  unique.
+- ~~**Double écriture acceptée** quand c'est le VÉTÉRINAIRE qui vote en second~~ — **CORRIGÉ le
+  2026-08-28** (revue `lead-dev-reviewer`, finding MOYEN-ÉLEVÉ ; correctif livré avec ADR-0020).
+  Le texte d'origine de ce point la disait « sans danger (même champ, même jour, idempotent) » et
+  laissait le choix ouvert au Lead Dev. **C'était faux**, et voici pourquoi :
+  `useMissionClosure.closeMission()` appelle `submitMissionValidation` **PUIS**
+  `applyVeterinarianCompletionSideEffects` — l'écriture CLIENT part donc systématiquement APRÈS
+  celle du serveur et l'**écrase**, toujours, pas seulement en cas de course. Or elle datait le
+  don dans le fuseau du **navigateur** du vétérinaire (`todayAsAWSDate()`, accesseurs de date
+  locaux) là où la fonction 8/8 le date en `Europe/Paris` explicite : sur un poste mal configuré
+  ou un vétérinaire en déplacement, la date finale était fausse d'un jour — c'est-à-dire
+  exactement le bug de fuseau que cette 8e fonction existe pour éviter, intégralement neutralisé
+  sur le chemin où c'est le vétérinaire qui vote en second (le seul où les deux écritures
+  coexistaient). Le « filet » invoqué n'en était pas un : il masquait le correctif.
+  **Décision** : l'écriture client est **retirée** (`mission-completion-side-effects.js`), le
+  serveur devient la source **unique** de `Animal.lastDonationDate` — il couvre déjà les deux
+  chemins (Owner ou vétérinaire en second) et reste le seul endroit du système autorisé à écrire
+  ce champ quel que soit l'appelant (ADR-0003). Conséquences assumées, toutes documentées dans le
+  JSDoc de la fonction : `applyVeterinarianCompletionSideEffects` perd sa seule écriture
+  **critique** et ne lève donc plus jamais (les deux restantes, `ClinicOwnerRelation` et compteurs
+  `Clinic`, étaient déjà best-effort) ; le helper `todayAsAWSDate()`, devenu sans appelant, est
+  supprimé ; le test `useMissionClosure.test.js` qui verrouillait le contrat « lève si
+  `Animal.update` échoue » est remplacé par une non-régression qui vérifie qu'aucune écriture
+  `Animal` n'est plus émise côté client. Contrepartie acceptée : un échec de l'écriture serveur
+  est désormais **silencieux** sans rattrapage client (§3, résidu d'observabilité déjà connu) —
+  préféré à une écriture bruyante mais **fausse**.
 - **Compteurs `Clinic`** (`transfusionsDone`/`donorOwnersCount`) quand l'Owner vote en second :
   **non ajoutés**, résidu assumé (dérive déjà documentée pour ces compteurs). Coût réel :
   DEUX fonctions de pipeline supplémentaires (9/10 puis 10/10 — le `clinicID` n'est dans le stash
