@@ -237,4 +237,23 @@ describe('hasProactiveRatingAlert', () => {
     expect(hasProactiveRatingAlert(null, null)).toBe(false)
     expect(hasProactiveRatingAlert(undefined, undefined)).toBe(false)
   })
+
+  // Cas non couverts par les 4 tests ci-dessus (QA, valeurs "impossibles" en usage normal --
+  // `Clinic.ratingCountAsClinic`/`averageRatingAsClinic` sont écrits côté serveur, jamais
+  // négatifs en pratique -- mais `hasProactiveRatingAlert` est appelée avec des données lues
+  // depuis GraphQL sans validation de forme : un défaut de robustesse ici resterait invisible
+  // jusqu'à un vrai résidu serveur).
+  it('reste fail-safe (false) pour un ratingCount négatif, quelle que soit la moyenne', () => {
+    expect(hasProactiveRatingAlert(1, -1)).toBe(false)
+    expect(hasProactiveRatingAlert(3.4, -5)).toBe(false)
+  })
+
+  it('traite un ratingCount non numérique comme 0 (Number(x) || 0), donc false', () => {
+    expect(hasProactiveRatingAlert(1, 'abc')).toBe(false)
+    expect(hasProactiveRatingAlert(1, NaN)).toBe(false)
+  })
+
+  it('est true pour une moyenne négative avec au moins 3 avis (négatif < 3.5 reste vrai)', () => {
+    expect(hasProactiveRatingAlert(-1, 3)).toBe(true)
+  })
 })
