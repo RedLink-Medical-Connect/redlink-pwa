@@ -25,7 +25,14 @@
     "km": "km",
     "ml": "ml",
     "kg": "kg",
-    "locale": "en-US"
+    "locale": "en-US",
+    "star_rating": {
+      "star_1": "1 star",
+      "star_2": "2 stars",
+      "star_3": "3 stars",
+      "star_4": "4 stars",
+      "star_5": "5 stars"
+    }
   },
   "errors": {
     "fill_all_fields": "Please fill in all fields.",
@@ -564,6 +571,7 @@
           "prompt": "Rate this clinic",
           "stars_aria": "Clinic rating",
           "comment_placeholder": "Comment (optional)",
+          "comment_aria": "Comment about the clinic (optional)",
           "submit_btn": "Send",
           "toasts": {
             "success": "Thank you for your feedback!"
@@ -718,6 +726,7 @@
         "prompt": "Rate this owner",
         "stars_aria": "Owner rating",
         "comment_placeholder": "Comment (optional)",
+        "comment_aria": "Comment about the owner (optional)",
         "submit_btn": "Send",
         "already_rated": "You have already rated this owner.",
         "toasts": {

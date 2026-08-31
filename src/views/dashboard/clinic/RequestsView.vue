@@ -569,6 +569,7 @@ const handleCloseMission = async (outcome) => {
                   v-model="ownerRatingForm.comment"
                   rows="2"
                   :placeholder="$t('dashboard.requests.rating.comment_placeholder')"
+                  :aria-label="$t('dashboard.requests.rating.comment_aria')"
                   class="!bg-white dark:!bg-zinc-950 !border-zinc-300 dark:!border-zinc-800 !text-xs !p-2"
                 />
                 <Button

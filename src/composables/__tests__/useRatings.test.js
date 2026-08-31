@@ -15,13 +15,17 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 // vérifient qu'ils ne ressortent nulle part dans ce qui est réellement écrit.
 
 const ratingCreateMock = vi.fn()
+const ratingGetMock = vi.fn()
 const veterinarianGetMock = vi.fn()
 const getCurrentUserMock = vi.fn()
 
 vi.mock('aws-amplify/data', () => ({
   generateClient: () => ({
     models: {
-      Rating: { create: (...args) => ratingCreateMock(...args) },
+      Rating: {
+        create: (...args) => ratingCreateMock(...args),
+        get: (...args) => ratingGetMock(...args),
+      },
       Veterinarian: { get: (...args) => veterinarianGetMock(...args) },
     },
   }),
@@ -418,6 +422,58 @@ describe('useRatings.submitRating — doublon, erreurs, état de chargement', ()
       expect.any(Error),
     )
     consoleErrorSpy.mockRestore()
+  })
+})
+
+describe('useRatings.checkRatingExists — pré-check "déjà noté" (extrait de MissionsView.vue, revue a11y/lead-dev du 2026-08-31)', () => {
+  beforeEach(() => {
+    resetAllMocks()
+    ratingGetMock.mockReset()
+  })
+
+  it("renvoie true quand une Rating existe déjà pour (missionID, raterRole), avec un selectionSet réduit à missionID", async () => {
+    ratingGetMock.mockResolvedValue({ data: { missionID: 'mission-1' }, errors: undefined })
+    const { checkRatingExists } = useRatings()
+
+    const exists = await checkRatingExists('mission-1', RatingParticipantRole.OWNER)
+
+    expect(exists).toBe(true)
+    expect(ratingGetMock).toHaveBeenCalledWith(
+      { missionID: 'mission-1', raterRole: RatingParticipantRole.OWNER },
+      { selectionSet: ['missionID'] },
+    )
+  })
+
+  it("renvoie false quand aucune Rating n'existe pour cette clé (cas légitime, pas une erreur)", async () => {
+    ratingGetMock.mockResolvedValue({ data: null, errors: undefined })
+    const { checkRatingExists } = useRatings()
+
+    await expect(checkRatingExists('mission-1', RatingParticipantRole.OWNER)).resolves.toBe(false)
+  })
+
+  it("une vraie erreur GraphQL n'est PAS avalée ici : elle remonte à l'appelant (convention 'résolution de contexte', CLAUDE.md)", async () => {
+    ratingGetMock.mockResolvedValue({
+      data: null,
+      errors: [{ message: 'Unauthorized', errorType: 'Unauthorized' }],
+    })
+    const { checkRatingExists } = useRatings()
+
+    await expect(checkRatingExists('mission-1', RatingParticipantRole.OWNER)).rejects.toThrow(
+      'Erreur GraphQL getRating',
+    )
+  })
+
+  it('fonctionne symétriquement pour raterRole=CLINIC (signature générique, pas de OWNER codé en dur)', async () => {
+    ratingGetMock.mockResolvedValue({ data: { missionID: 'mission-2' }, errors: undefined })
+    const { checkRatingExists } = useRatings()
+
+    const exists = await checkRatingExists('mission-2', RatingParticipantRole.CLINIC)
+
+    expect(exists).toBe(true)
+    expect(ratingGetMock).toHaveBeenCalledWith(
+      { missionID: 'mission-2', raterRole: RatingParticipantRole.CLINIC },
+      { selectionSet: ['missionID'] },
+    )
   })
 })
 

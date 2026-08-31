@@ -25,7 +25,14 @@
     "km": "km",
     "ml": "ml",
     "kg": "kg",
-    "locale": "fr-FR"
+    "locale": "fr-FR",
+    "star_rating": {
+      "star_1": "1 étoile",
+      "star_2": "2 étoiles",
+      "star_3": "3 étoiles",
+      "star_4": "4 étoiles",
+      "star_5": "5 étoiles"
+    }
   },
   "errors": {
     "fill_all_fields": "Veuillez remplir tous les champs.",
@@ -564,6 +571,7 @@
           "prompt": "Notez cette clinique",
           "stars_aria": "Note de la clinique",
           "comment_placeholder": "Commentaire (facultatif)",
+          "comment_aria": "Commentaire sur la clinique (facultatif)",
           "submit_btn": "Envoyer",
           "toasts": {
             "success": "Merci pour votre avis !"
@@ -718,6 +726,7 @@
         "prompt": "Notez ce propriétaire",
         "stars_aria": "Note du propriétaire",
         "comment_placeholder": "Commentaire (facultatif)",
+        "comment_aria": "Commentaire sur le propriétaire (facultatif)",
         "submit_btn": "Envoyer",
         "already_rated": "Vous avez déjà noté ce propriétaire.",
         "toasts": {

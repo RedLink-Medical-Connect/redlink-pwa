@@ -335,6 +335,8 @@ const onDelete = async () => {
                  alarmiste : un examen humain est en cours, ce n'est pas une sanction. -->
             <div
               v-if="needsAdminReview"
+              role="status"
+              aria-live="polite"
               class="p-4 rounded-lg border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 flex items-start gap-3"
             >
               <i class="pi pi-info-circle text-amber-600 dark:text-amber-400 text-xl mt-0.5"></i>
@@ -356,6 +358,8 @@ const onDelete = async () => {
                  ailleurs dans ce repo). -->
             <div
               v-else-if="showProactiveRatingAlert"
+              role="status"
+              aria-live="polite"
               class="p-4 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950/50 flex items-start gap-3"
             >
               <i class="pi pi-chart-line text-zinc-500 text-xl mt-0.5"></i>

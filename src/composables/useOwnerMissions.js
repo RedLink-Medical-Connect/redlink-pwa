@@ -281,10 +281,12 @@ export function useOwnerMissions() {
       // comme le faisait Gen1 -- voir useClinicDonors.js pour ce même comportement déjà
       // rencontré en lot 2.
       //
-      // Câblage UI double validation/notation (sous-tâche suivante, PR de suivi) : 4 champs
+      // Câblage UI double validation/notation (sous-tâche suivante, PR de suivi) : champs
       // ajoutés à ce selectionSet préexistant, chacun consommé par MissionsView.vue --
-      // `missions.clinicValidationOutcome`/`missions.ownerValidationOutcome` pilotent
-      // l'affichage "en attente de validation"/CTA de `submitDonationValidation` ;
+      // `missions.ownerValidationOutcome` pilote l'affichage "en attente de validation"/CTA
+      // de `submitDonationValidation` (`missions.clinicValidationOutcome` retiré le
+      // 2026-08-31 -- revue a11y/lead-dev : aucun endroit de `src/` ne le consommait,
+      // convention stricte de ce repo contre la sur-sélection, voir CLAUDE.md) ;
       // `missions.ownerDisputeReason` est affiché en lecture seule sur une Mission DISPUTED ;
       // `missions.request.clinicID` sert de `targetID` à `submitRating` (noter la clinique)
       // sans aller-retour réseau dédié -- même raisonnement que
@@ -299,7 +301,6 @@ export function useOwnerMissions() {
           'missions.id',
           'missions.status',
           'missions.appointmentDatetime',
-          'missions.clinicValidationOutcome',
           'missions.ownerValidationOutcome',
           'missions.ownerDisputeReason',
           'missions.request.id',

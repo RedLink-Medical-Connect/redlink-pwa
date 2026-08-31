@@ -245,8 +245,45 @@ export function useRatings() {
     }
   }
 
+  /**
+   * Vérifie si une `Rating` existe déjà pour la clé composite `(missionID, raterRole)` donnée
+   * -- « cette Mission a-t-elle déjà été notée DE CE CÔTÉ ? ». Pré-check "déjà noté" avant
+   * d'afficher le widget de notation (voir `ensureRatingStatusChecked`, MissionsView.vue) :
+   * possible UNIQUEMENT côté Owner, parce que `Rating` accorde
+   * `allow.ownerDefinedIn('raterID').to(['read'])` (ADR-0015 §2) -- chaque partie peut relire
+   * SA PROPRE `Rating`, jamais celle de l'autre. Asymétrie documentée aussi côté
+   * RequestsView.vue, qui ne peut PAS faire ce pré-check pour une clinique (voir son
+   * commentaire sur `ratedMissionIds`) -- cette fonction n'est donc appelée que par le flux
+   * Owner à ce jour, mais sa signature ne présuppose rien de ce côté-là (elle prend
+   * `raterRole` en paramètre plutôt que de coder `OWNER` en dur).
+   *
+   * `selectionSet` réduit à `missionID` : seule l'EXISTENCE de la ligne compte ici, aucun
+   * autre champ n'est consommé par l'appelant.
+   *
+   * Ne catch PAS ses propres erreurs -- même convention que `fetchRaterClinicId` ci-dessus
+   * (CLAUDE.md, "résolution de contexte qui ne catch pas ses propres erreurs") : `false` est
+   * renvoyé UNIQUEMENT pour le cas légitime "pas encore de Rating à cette clé" ; une vraie
+   * erreur réseau/`@auth` remonte à l'appelant, seul à même de décider du repli (lecture
+   * secondaire non-exclusive côté MissionsView.vue -- repli sur 'unrated', jamais 'rated',
+   * voir son propre commentaire).
+   *
+   * @param {string} missionId
+   * @param {string} raterRole - `RatingParticipantRole.OWNER` ou `RatingParticipantRole.CLINIC`,
+   *   le côté dont on vérifie s'il a déjà soumis une notation.
+   * @returns {Promise<boolean>}
+   */
+  const checkRatingExists = async (missionId, raterRole) => {
+    const { data, errors } = await client.models.Rating.get(
+      { missionID: missionId, raterRole },
+      { selectionSet: ['missionID'] },
+    )
+    throwIfGraphqlError(errors, 'getRating')
+    return Boolean(data)
+  }
+
   return {
     isSubmitting,
     submitRating,
+    checkRatingExists,
   }
 }

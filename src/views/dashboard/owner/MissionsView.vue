@@ -2,7 +2,6 @@
 import { onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useToast } from 'primevue/usetoast'
-import { generateClient } from 'aws-amplify/data'
 import DashboardSidebar from '@/components/dashboard/DashboardSidebar.vue'
 import StarRating from '@/components/common/StarRating.vue'
 import {
@@ -10,7 +9,6 @@ import {
   mapSubmitDonationValidationError,
 } from '@/composables/useOwnerMissions'
 import { useRatings, mapSubmitRatingError } from '@/composables/useRatings'
-import { throwIfGraphqlError } from '@/services/graphql-error-service'
 import {
   MissionStatus,
   MissionValidationOutcome,
@@ -28,7 +26,7 @@ const {
   isSubmittingValidation,
   submitDonationValidation,
 } = useOwnerMissions()
-const { isSubmitting: isSubmittingRating, submitRating } = useRatings()
+const { submitRating, checkRatingExists } = useRatings()
 
 const { t } = useI18n()
 const toast = useToast()
@@ -89,11 +87,18 @@ const handleSubmitValidation = async (outcome) => {
 // côté clinique, RequestsView.vue) -- fait en LAZY (au moment où la carte Historique
 // s'affiche réellement, via le watch sur `activeTab`/`historyMissions` ci-dessous), pas en
 // eager sur toute la liste au chargement de `fetchMyMissions()`.
-const ratingClient = generateClient()
 // missionId -> 'checking' | 'rated' | 'unrated'
 const ratingCheckStatus = reactive({})
 // missionId -> { stars, comment } -- formulaire de notation, un par mission de l'historique.
 const ratingForms = reactive({})
+// missionId -> bool -- état de soumission INDÉPENDANT par mission (lead-dev-reviewer,
+// 2026-08-31) : `submitRating`/`isSubmitting` (useRatings.js) restent scalaires, corrects
+// pour LEUR propre usage ailleurs (RequestsView.vue n'affiche qu'une Mission par dialog à la
+// fois) -- mais réutiliser ce ref scalaire unique ici désactiverait TOUS les boutons "Envoyer"
+// de la liste (`v-for` sur `historyMissions`) dès qu'UN SEUL est en cours de soumission, alors
+// que chaque notation cible une clé composite indépendante (`missionID`/`raterRole`). D'où
+// cette map tenue par la VUE plutôt qu'un changement du composable.
+const submittingRatingFor = reactive({})
 
 const getRatingForm = (missionId) => {
   if (!ratingForms[missionId]) ratingForms[missionId] = { stars: 0, comment: '' }
@@ -105,12 +110,8 @@ const ensureRatingStatusChecked = async (mission) => {
   if (ratingCheckStatus[id]) return
   ratingCheckStatus[id] = 'checking'
   try {
-    const { data, errors } = await ratingClient.models.Rating.get(
-      { missionID: id, raterRole: RatingParticipantRole.OWNER },
-      { selectionSet: ['missionID'] },
-    )
-    throwIfGraphqlError(errors, 'getRating')
-    ratingCheckStatus[id] = data ? 'rated' : 'unrated'
+    const exists = await checkRatingExists(id, RatingParticipantRole.OWNER)
+    ratingCheckStatus[id] = exists ? 'rated' : 'unrated'
   } catch (e) {
     // Lecture secondaire non-exclusive (CLAUDE.md) : un échec de CETTE vérification ne doit
     // jamais bloquer l'Owner -- repli neutre sur "unrated" (affiche le widget, au pire une
@@ -134,6 +135,7 @@ watch(
 
 const handleSubmitRating = async (mission) => {
   const form = getRatingForm(mission.id)
+  submittingRatingFor[mission.id] = true
   try {
     await submitRating({
       missionId: mission.id,
@@ -156,6 +158,8 @@ const handleSubmitRating = async (mission) => {
       detail: mapSubmitRatingError(e.message),
       life: 5000,
     })
+  } finally {
+    submittingRatingFor[mission.id] = false
   }
 }
 
@@ -493,13 +497,14 @@ const getAnimalEmoji = (species) => (species === Species.DOG ? '🐶' : '🐱')
                     v-model="getRatingForm(mission.id).comment"
                     rows="2"
                     :placeholder="$t('dashboard.owner.missions_list.rating.comment_placeholder')"
+                    :aria-label="$t('dashboard.owner.missions_list.rating.comment_aria')"
                     class="!bg-white dark:!bg-zinc-950 !border-zinc-300 dark:!border-zinc-800 !text-xs !p-2"
                   />
                   <Button
                     size="small"
                     :label="$t('dashboard.owner.missions_list.rating.submit_btn')"
                     class="!bg-[#ff3b4e] !border-[#ff3b4e] self-end"
-                    :loading="isSubmittingRating"
+                    :loading="!!submittingRatingFor[mission.id]"
                     :disabled="!getRatingForm(mission.id).stars"
                     @click="handleSubmitRating(mission)"
                   />
@@ -596,10 +601,11 @@ const getAnimalEmoji = (species) => (species === Species.DOG ? '🐶' : '🐱')
           </div>
 
           <div v-else class="flex flex-col gap-3">
-            <label class="text-xs font-bold text-zinc-500 uppercase">
+            <label for="mission-dispute-reason" class="text-xs font-bold text-zinc-500 uppercase">
               {{ $t('dashboard.owner.missions_list.validation.dispute_reason_label') }}
             </label>
             <Textarea
+              id="mission-dispute-reason"
               v-model="disputeReason"
               rows="3"
               :placeholder="$t('dashboard.owner.missions_list.validation.dispute_reason_placeholder')"
