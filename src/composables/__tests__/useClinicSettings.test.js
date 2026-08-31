@@ -67,7 +67,7 @@ vi.mock('@/router', () => ({
   default: { push: vi.fn() },
 }))
 
-import { useClinicSettings } from '@/composables/useClinicSettings'
+import { useClinicSettings, hasProactiveRatingAlert } from '@/composables/useClinicSettings'
 
 /**
  * Charge un Vet+Clinic (nécessaire pour que `vetId.value`/`clinicId.value` soient définis)
@@ -210,5 +210,31 @@ describe('useClinicSettings.deleteAccount', () => {
     expect(vetDeleteMock).toHaveBeenCalledWith({ id: 'vet-1' })
     expect(clinicDeleteMock).not.toHaveBeenCalled()
     expect(deleteUserMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+// Sous-tâche suivante (PR de suivi, ADR-0017 §4) : `hasProactiveRatingAlert` est le seuil
+// D'ALERTE PROACTIF calculé en LECTURE côté client (moyenne < 3.5 ET au moins 3 avis),
+// distinct du flag SERVEUR `Clinic.needsAdminReview` (sous 3 étoiles, >= 5 avis). Fonction
+// pure, testée ici indépendamment du reste du composable (aucun mock GraphQL requis).
+describe('hasProactiveRatingAlert', () => {
+  it('est false tant que moins de 3 avis, quelle que soit la moyenne', () => {
+    expect(hasProactiveRatingAlert(1, 0)).toBe(false)
+    expect(hasProactiveRatingAlert(1, 2)).toBe(false)
+  })
+
+  it('est false si la moyenne est >= 3.5, même avec des avis', () => {
+    expect(hasProactiveRatingAlert(3.5, 10)).toBe(false)
+    expect(hasProactiveRatingAlert(5, 3)).toBe(false)
+  })
+
+  it('est true si la moyenne est < 3.5 ET au moins 3 avis', () => {
+    expect(hasProactiveRatingAlert(3.4, 3)).toBe(true)
+    expect(hasProactiveRatingAlert(1, 20)).toBe(true)
+  })
+
+  it('est false pour une moyenne/un compte absents (repli neutre, clinique jamais notée)', () => {
+    expect(hasProactiveRatingAlert(null, null)).toBe(false)
+    expect(hasProactiveRatingAlert(undefined, undefined)).toBe(false)
   })
 })

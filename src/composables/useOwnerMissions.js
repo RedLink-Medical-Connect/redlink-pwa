@@ -280,6 +280,16 @@ export function useOwnerMissions() {
       // directs (relation `selectionSet` Gen2), jamais enveloppés dans `{ items: [...] }`
       // comme le faisait Gen1 -- voir useClinicDonors.js pour ce même comportement déjà
       // rencontré en lot 2.
+      //
+      // Câblage UI double validation/notation (sous-tâche suivante, PR de suivi) : 4 champs
+      // ajoutés à ce selectionSet préexistant, chacun consommé par MissionsView.vue --
+      // `missions.clinicValidationOutcome`/`missions.ownerValidationOutcome` pilotent
+      // l'affichage "en attente de validation"/CTA de `submitDonationValidation` ;
+      // `missions.ownerDisputeReason` est affiché en lecture seule sur une Mission DISPUTED ;
+      // `missions.request.clinicID` sert de `targetID` à `submitRating` (noter la clinique)
+      // sans aller-retour réseau dédié -- même raisonnement que
+      // `resolveMissionClinicId()` ci-dessous, qui ne peut pas être réutilisée ici (elle lit
+      // une SEULE Mission par id, hors de toute liste chargée).
       const { data, errors } = await client.models.Animal.list({
         filter: { ownerID: { eq: userId } },
         selectionSet: [
@@ -289,8 +299,12 @@ export function useOwnerMissions() {
           'missions.id',
           'missions.status',
           'missions.appointmentDatetime',
+          'missions.clinicValidationOutcome',
+          'missions.ownerValidationOutcome',
+          'missions.ownerDisputeReason',
           'missions.request.id',
           'missions.request.requestType',
+          'missions.request.clinicID',
           'missions.request.clinic.name',
           'missions.request.clinic.address',
           'missions.request.clinic.phone',

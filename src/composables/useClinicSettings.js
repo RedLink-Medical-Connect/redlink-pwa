@@ -1,9 +1,28 @@
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { generateClient } from 'aws-amplify/data'
 import { deleteUser, getCurrentUser } from 'aws-amplify/auth'
 import { useAuthStore } from '@/stores/auth'
 import { useRouter } from 'vue-router'
 import { throwIfGraphqlError } from '@/services/graphql-error-service'
+
+// Modération/réputation clinique (sous-tâche suivante, PR de suivi, ADR-0017) : seuil
+// D'ALERTE PROACTIF calculé EN LECTURE côté client, jamais persisté -- moyenne < 3.5 ET au
+// moins 3 avis. Distinct du flag SERVEUR `Clinic.needsAdminReview` (posé sous 3 étoiles avec
+// >= 5 avis, irréversible une fois posé -- voir amplify/data/resource.ts,
+// `clinicRatingAndModerationFieldsReadOnly`) : ce seuil-ci est plus bas et plus permissif,
+// pensé comme un avertissement précoce et léger avant qu'une clinique n'atteigne le seuil
+// serveur, plus sérieux. Fonction pure exportée à côté du composable (même forme que
+// `mapAcceptMissionError`/`mapSubmitRatingError` ailleurs dans ce repo) pour rester testable
+// sans monter SettingsView.vue.
+//
+// @param {number|null|undefined} averageRating
+// @param {number|null|undefined} ratingCount
+// @returns {boolean}
+export function hasProactiveRatingAlert(averageRating, ratingCount) {
+  const count = Number(ratingCount) || 0
+  if (count < 3) return false
+  return typeof averageRating === 'number' && averageRating < 3.5
+}
 
 // Phase 8, sous-tâche 5 (lot 2/3) : migré sur le client Gen2 (`aws-amplify/data`,
 // `client.models.Veterinarian.*`/`client.models.Clinic.*`). Plus d'import depuis
@@ -55,6 +74,23 @@ export function useClinicSettings() {
     email: '',
   })
 
+  // Réputation/modération clinique (sous-tâche suivante, PR de suivi, ADR-0017) : agrégat +
+  // état de modération, séparés de `clinicForm` pour la même raison que dans
+  // useOwnerProfile.js -- ces 4 champs ne sont JAMAIS écrits par un Veterinarian
+  // (`clinicRatingAndModerationFieldsReadOnly`, amplify/data/resource.ts), les mélanger à
+  // `clinicForm` risquerait de les faire un jour partir dans `updateClinicDetails()`.
+  const averageRatingAsClinic = ref(null)
+  const ratingCountAsClinic = ref(0)
+  const needsAdminReview = ref(false)
+  const accountStatus = ref(null)
+
+  // Seuil proactif calculé en LECTURE (voir `hasProactiveRatingAlert` en tête de fichier),
+  // exposé comme `computed` plutôt que recalculé dans SettingsView.vue -- convention du repo
+  // ("Deep modules" + composable qui possède ses données, CLAUDE.md).
+  const showProactiveRatingAlert = computed(() =>
+    hasProactiveRatingAlert(averageRatingAsClinic.value, ratingCountAsClinic.value),
+  )
+
   const fetchSettings = async () => {
     isLoading.value = true
     try {
@@ -80,6 +116,12 @@ export function useClinicSettings() {
             'clinic.latitude',
             'clinic.longitude',
             'clinic.hasEmergencyService',
+            // Réputation/modération (sous-tâche suivante, PR de suivi) -- consommés par la
+            // section "Réputation" de SettingsView.vue, voir les refs dédiées ci-dessous.
+            'clinic.averageRatingAsClinic',
+            'clinic.ratingCountAsClinic',
+            'clinic.needsAdminReview',
+            'clinic.accountStatus',
           ],
         },
       )
@@ -109,6 +151,10 @@ export function useClinicSettings() {
             longitude: vet.clinic.longitude,
             hasEmergencyService: vet.clinic.hasEmergencyService,
           }
+          averageRatingAsClinic.value = vet.clinic.averageRatingAsClinic ?? null
+          ratingCountAsClinic.value = vet.clinic.ratingCountAsClinic ?? 0
+          needsAdminReview.value = !!vet.clinic.needsAdminReview
+          accountStatus.value = vet.clinic.accountStatus ?? null
         }
       }
     } finally {
@@ -262,6 +308,11 @@ export function useClinicSettings() {
     vetForm,
     isLoading,
     isSaving,
+    averageRatingAsClinic,
+    ratingCountAsClinic,
+    needsAdminReview,
+    accountStatus,
+    showProactiveRatingAlert,
     fetchSettings,
     updateClinicDetails,
     updateVetDetails,

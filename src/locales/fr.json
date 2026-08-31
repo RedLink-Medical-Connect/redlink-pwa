@@ -515,11 +515,13 @@
         "title": "Mes missions",
         "tabs": {
           "active": "En cours",
-          "history": "Historique"
+          "history": "Historique",
+          "pending_validation": "En attente de validation"
         },
         "empty": {
           "active": "Aucune mission en cours.",
           "history": "Aucun historique.",
+          "pending_validation": "Aucune mission en attente de validation.",
           "go_to_board": "Voir les demandes disponibles"
         },
         "load_error": "Impossible de charger vos missions — réessayez.",
@@ -528,7 +530,10 @@
           "pending_arrival": "En attente d'arrivée",
           "accepted": "Acceptée",
           "completed": "Terminée",
-          "no_show": "Annulée (absence)"
+          "no_show": "Annulée (absence)",
+          "pending_validation": "En attente de validation",
+          "completed_auto": "Terminée (auto)",
+          "disputed": "Litige"
         },
         "unknown_clinic": "Clinique inconnue",
         "planned_on": "Prévu le :",
@@ -536,6 +541,33 @@
         "actions": {
           "call": "Appeler",
           "go": "Y aller"
+        },
+        "dispute_reason_label": "Motif du litige :",
+        "validation": {
+          "cta": "Le don a-t-il eu lieu ?",
+          "awaiting_clinic": "En attente de la confirmation de la clinique",
+          "dialog_title": "Confirmation du don",
+          "question": "Le don a-t-il bien eu lieu avec {name} ?",
+          "confirm_btn": "Oui, le don a eu lieu",
+          "deny_btn": "Non, le don n'a pas eu lieu",
+          "dispute_reason_label": "Motif (facultatif)",
+          "dispute_reason_placeholder": "Expliquez ce qui s'est passé...",
+          "send_btn": "Envoyer",
+          "back_btn": "Retour",
+          "toasts": {
+            "success": "Votre réponse a été enregistrée."
+          }
+        },
+        "rating": {
+          "checking": "Vérification...",
+          "already_rated": "Vous avez déjà noté cette clinique.",
+          "prompt": "Notez cette clinique",
+          "stars_aria": "Note de la clinique",
+          "comment_placeholder": "Commentaire (facultatif)",
+          "submit_btn": "Envoyer",
+          "toasts": {
+            "success": "Merci pour votre avis !"
+          }
         }
       }
     },
@@ -556,6 +588,12 @@
         "deleted": "Compte supprimé.",
         "delete_failed": "Impossible de supprimer le compte",
         "load_failed": "Impossible de charger le profil"
+      },
+      "reputation": {
+        "title": "Votre réputation",
+        "count_label": "{average} / 5 — {count} avis",
+        "no_reviews": "Aucun avis pour le moment.",
+        "stars_aria": "Votre note moyenne"
       }
     },
     "settings": {
@@ -564,7 +602,8 @@
         "subscription": "ABONNEMENT",
         "vet_ref": "VÉTÉRINAIRE RÉFÉRENT",
         "notifications": "PRÉFÉRENCES DE NOTIFICATION",
-        "activity": "HISTORIQUE D'ACTIVITÉ"
+        "activity": "HISTORIQUE D'ACTIVITÉ",
+        "reputation": "RÉPUTATION"
       },
       "clinic_name": "Nom de la clinique",
       "phone": "Numéro de téléphone",
@@ -589,6 +628,15 @@
         "title": "Attention !",
         "confirm": "Êtes-vous sûr ? Cette action est irréversible. Si vous êtes le seul vétérinaire rattaché à cette clinique, elle sera supprimée avec votre compte ; sinon, seul votre compte sera supprimé.",
         "confirm_action": "Confirmer"
+      },
+      "reputation": {
+        "count_label": "{average} / 5 — {count} avis",
+        "no_reviews": "Aucun avis pour le moment.",
+        "stars_aria": "Note moyenne de la clinique",
+        "under_review_title": "Compte en cours d'examen",
+        "under_review_message": "Votre note moyenne a franchi un seuil qui déclenche une revue humaine de votre compte. Cela n'affecte pas votre activité actuelle — un membre de notre équipe reviendra vers vous si nécessaire.",
+        "proactive_alert_title": "Votre note est en baisse",
+        "proactive_alert_message": "Votre note moyenne récente est en dessous de 3,5 étoiles. Ce n'est qu'une information — continuez à soigner la relation avec les propriétaires donneurs."
       }
     },
     "requests": {
@@ -653,7 +701,28 @@
         "mission_completed_success": "Mission clôturée : don enregistré",
         "mission_no_show_success": "Mission clôturée : donneur absent",
         "mission_closure_failed": "Erreur lors de la clôture de la mission",
-        "mission_closed_request_still_open": "Mission clôturée, mais la demande n'a pas pu être fermée automatiquement — vérifiez son statut."
+        "mission_closed_request_still_open": "Mission clôturée, mais la demande n'a pas pu être fermée automatiquement — vérifiez son statut.",
+        "mission_already_finalized": "Cette mission a déjà été clôturée (délai de réponse dépassé) — votre réponse n'a pas pu être enregistrée."
+      },
+      "validation": {
+        "awaiting_owner": "En attente de la confirmation du propriétaire",
+        "disputed_title": "Litige",
+        "your_answer_confirmed": "Vous avez confirmé que le don a eu lieu",
+        "your_answer_denied": "Vous avez indiqué que le don n'a pas eu lieu",
+        "owner_answer_confirmed": "Le propriétaire a confirmé que le don a eu lieu",
+        "owner_answer_denied": "Le propriétaire a indiqué que le don n'a pas eu lieu",
+        "dispute_reason_label": "Motif indiqué par le propriétaire :",
+        "completed_auto_label": "Terminée automatiquement"
+      },
+      "rating": {
+        "prompt": "Notez ce propriétaire",
+        "stars_aria": "Note du propriétaire",
+        "comment_placeholder": "Commentaire (facultatif)",
+        "submit_btn": "Envoyer",
+        "already_rated": "Vous avez déjà noté ce propriétaire.",
+        "toasts": {
+          "success": "Merci pour votre avis !"
+        }
       }
     },
     "donors": {

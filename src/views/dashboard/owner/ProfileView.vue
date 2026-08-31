@@ -6,13 +6,23 @@ import { useToast } from 'primevue/usetoast'
 import Dialog from 'primevue/dialog'
 import PhoneInput from '@/components/common/PhoneInput.vue'
 import AddressAutocomplete from '@/components/common/AddressAutocomplete.vue'
+import StarRating from '@/components/common/StarRating.vue'
 
 import { useOwnerProfile } from '@/composables/useOwnerProfile'
 
 const { t } = useI18n()
 const toast = useToast()
 
-const { form, isLoading, isSaving, fetchProfile, updateProfile, deleteAccount } = useOwnerProfile()
+const {
+  form,
+  isLoading,
+  isSaving,
+  averageRatingAsOwner,
+  ratingCountAsOwner,
+  fetchProfile,
+  updateProfile,
+  deleteAccount,
+} = useOwnerProfile()
 
 const showDeleteConfirm = ref(false)
 
@@ -201,6 +211,35 @@ onMounted(() => {
               />
             </div>
           </form>
+        </div>
+
+        <!-- Notation par étoiles (sous-tâche suivante, PR de suivi, ADR-0015/0017) : rien
+             n'est affiché si `ratingCountAsOwner` est 0/null (l'Owner n'a simplement pas
+             encore été noté) -- état neutre, pas une erreur. -->
+        <div
+          v-if="!isLoading && ratingCountAsOwner"
+          class="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-6 md:p-8 shadow-sm animate-fade-in"
+        >
+          <h2
+            class="text-lg font-bold text-zinc-900 dark:text-white mb-4 border-l-4 border-[#ff3b4e] pl-3"
+          >
+            {{ $t('dashboard.profile.reputation.title') }}
+          </h2>
+          <div class="flex items-center gap-3">
+            <StarRating
+              readonly
+              :model-value="averageRatingAsOwner || 0"
+              :aria-label="$t('dashboard.profile.reputation.stars_aria')"
+            />
+            <span class="text-sm text-zinc-500 dark:text-zinc-400">
+              {{
+                $t('dashboard.profile.reputation.count_label', {
+                  average: averageRatingAsOwner?.toFixed(1),
+                  count: ratingCountAsOwner,
+                })
+              }}
+            </span>
+          </div>
         </div>
 
         <div
