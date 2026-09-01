@@ -111,6 +111,11 @@ export function useClinicRequests() {
           'createdAt',
           'updatedAt',
           'clinicID',
+          // Correctif UX (2026-09) : consommé par RequestDetailsPanel.vue (dialog de détail,
+          // RequestsView.vue ET HistoryView.vue) pour afficher la date/heure de RDV d'une
+          // Request APPOINTMENT — champ déjà présent sur le modèle (amplify/data/resource.ts)
+          // mais jusqu'ici jamais sélectionné ici.
+          'appointmentDatetime',
           'mission.id',
           'mission.status',
           'mission.animalID',

@@ -4,18 +4,12 @@ import { useI18n } from 'vue-i18n'
 import { useToast } from 'primevue/usetoast'
 import DashboardSidebar from '@/components/dashboard/DashboardSidebar.vue'
 import StarRating from '@/components/common/StarRating.vue'
+import RequestDetailsPanel from '@/components/dashboard/RequestDetailsPanel.vue'
 import { useClinicRequests } from '@/composables/useClinicRequest.js'
 import { useMissionClosure } from '@/composables/useMissionClosure.js'
 import { useClinicStats } from '@/composables/useClinicStats.js'
 import { useRatings, mapSubmitRatingError } from '@/composables/useRatings.js'
-import {
-  MissionStatus,
-  MissionValidationOutcome,
-  RatingParticipantRole,
-  RequestStatus,
-  RequestType,
-  Species,
-} from '@/constants/enums'
+import { MissionStatus, RatingParticipantRole, RequestStatus, RequestType, Species } from '@/constants/enums'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -86,17 +80,6 @@ onMounted(() => {
   fetchRequests()
   fetchClinicStats()
 })
-
-/**
- * Une clinique peut encore voter sur une Mission si elle est dans un état d'ouverture
- * (ACCEPTED/PENDING_ARRIVAL, comme avant la double validation) OU si elle est
- * `PENDING_VALIDATION` mais que la clinique n'a pas encore soumis SON vote
- * (`clinicValidationOutcome` absent -- l'Owner a alors voté en premier).
- */
-const canVoteOnMission = (mission) =>
-  mission.status === MissionStatus.ACCEPTED ||
-  mission.status === MissionStatus.PENDING_ARRIVAL ||
-  (mission.status === MissionStatus.PENDING_VALIDATION && !mission.clinicValidationOutcome)
 
 /**
  * Détecte l'erreur `MISSION_ALREADY_FINALIZED` (docs/adr/0020) directement dans la vue :
@@ -394,205 +377,69 @@ const handleCloseMission = async (outcome) => {
       :header="$t('dashboard.requests.dialog.title')"
       :style="{ width: '500px' }"
     >
-      <div v-if="selectedRequest" class="flex flex-col gap-4">
-        <div class="p-4 bg-zinc-50 dark:bg-zinc-800 rounded-lg">
-          <h3 class="font-bold text-zinc-900 dark:text-white mb-2">
-            {{ $t('dashboard.requests.dialog.request_title') }}
-          </h3>
-          <div class="grid grid-cols-2 gap-2 text-sm">
-            <span class="text-zinc-500">{{ $t('dashboard.requests.dialog.type') }}</span>
-            <span class="font-medium">{{
-              selectedRequest.requestType === RequestType.EMERGENCY
-                ? $t('dashboard.requests.dialog.type_emergency')
-                : $t('dashboard.requests.dialog.type_appointment')
-            }}</span>
-            <span class="text-zinc-500">{{ $t('dashboard.requests.dialog.species') }}</span>
-            <span class="font-medium">{{ selectedRequest.requiredSpecies }}</span>
-            <span class="text-zinc-500">{{ $t('dashboard.requests.dialog.blood') }}</span>
-            <span class="font-medium">{{ selectedRequest.requiredBloodGroup }}</span>
-            <span class="text-zinc-500">{{ $t('dashboard.requests.dialog.quantity') }}</span>
-            <span class="font-medium">{{ selectedRequest.quantity }} ml</span>
+      <RequestDetailsPanel v-if="selectedRequest" :request="selectedRequest">
+        <template #actions>
+          <Button
+            :label="$t('dashboard.requests.dialog.complete_btn')"
+            icon="pi pi-check"
+            size="small"
+            severity="success"
+            :loading="closingOutcome === MissionStatus.COMPLETED"
+            :disabled="closingOutcome !== null && closingOutcome !== MissionStatus.COMPLETED"
+            @click="handleCloseMission(MissionStatus.COMPLETED)"
+          />
+          <Button
+            :label="$t('dashboard.requests.dialog.no_show_btn')"
+            icon="pi pi-times"
+            size="small"
+            severity="danger"
+            outlined
+            :loading="closingOutcome === MissionStatus.NO_SHOW"
+            :disabled="closingOutcome !== null && closingOutcome !== MissionStatus.NO_SHOW"
+            @click="handleCloseMission(MissionStatus.NO_SHOW)"
+          />
+        </template>
+
+        <!-- Notation du propriétaire -- flux totalement indépendant de la double
+             validation (CdC : "la notation ne bloque jamais la validation de mission et
+             inversement"). Pas de pré-check "déjà noté" possible ici (asymétrie `@auth`,
+             voir le commentaire sur `ratedMissionIds` en tête de script) --
+             `RATING_ALREADY_SUBMITTED` bascule silencieusement l'UI plutôt qu'un toast
+             d'erreur. -->
+        <template #rating="{ mission }">
+          <div
+            v-if="ratedMissionIds.has(mission.id)"
+            class="text-xs text-zinc-500 dark:text-zinc-400 flex items-center gap-2"
+          >
+            <i class="pi pi-check-circle text-emerald-500"></i>
+            {{ $t('dashboard.requests.rating.already_rated') }}
           </div>
-        </div>
-
-        <div
-          v-if="selectedRequest.mission"
-          class="p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg"
-        >
-          <div class="flex items-center gap-2 mb-3">
-            <i class="pi pi-check-circle text-green-600 text-xl"></i>
-            <h3 class="font-bold text-green-700 dark:text-green-400">
-              {{ $t('dashboard.requests.dialog.donor_found') }}
-            </h3>
+          <div v-else class="flex flex-col gap-2">
+            <p class="text-xs font-bold text-zinc-500 uppercase">
+              {{ $t('dashboard.requests.rating.prompt') }}
+            </p>
+            <StarRating
+              v-model="ownerRatingForm.stars"
+              :aria-label="$t('dashboard.requests.rating.stars_aria')"
+            />
+            <Textarea
+              v-model="ownerRatingForm.comment"
+              rows="2"
+              :placeholder="$t('dashboard.requests.rating.comment_placeholder')"
+              :aria-label="$t('dashboard.requests.rating.comment_aria')"
+              class="!bg-white dark:!bg-zinc-950 !border-zinc-300 dark:!border-zinc-800 !text-xs !p-2"
+            />
+            <Button
+              size="small"
+              :label="$t('dashboard.requests.rating.submit_btn')"
+              class="!bg-[#ff3b4e] !border-[#ff3b4e] self-end"
+              :loading="isSubmittingOwnerRating"
+              :disabled="!ownerRatingForm.stars"
+              @click="handleSubmitOwnerRating(mission)"
+            />
           </div>
-
-          <div class="space-y-3">
-            <div class="flex items-center gap-3">
-              <div
-                class="w-10 h-10 bg-white rounded-full flex items-center justify-center text-xl shadow-sm"
-              >
-                🐶
-              </div>
-              <div>
-                <p class="font-bold text-zinc-900 dark:text-white">
-                  {{ selectedRequest.mission.animal.name }}
-                </p>
-                <p class="text-xs text-zinc-500">
-                  {{ selectedRequest.mission.animal.breed }} •
-                  {{ selectedRequest.mission.animal.weight }}kg
-                </p>
-              </div>
-            </div>
-
-            <div class="border-t border-green-200 dark:border-green-800 pt-3 mt-2">
-              <p class="text-xs text-green-700 dark:text-green-400 uppercase font-bold mb-1">
-                {{ $t('dashboard.requests.dialog.owner_contact') }}
-              </p>
-              <p class="font-medium text-zinc-900 dark:text-white">
-                {{ selectedRequest.mission.animal.ownerProfile?.firstname }}
-                {{ selectedRequest.mission.animal.ownerProfile?.lastname }}
-              </p>
-              <a
-                :href="`tel:${selectedRequest.mission.animal.ownerProfile?.phone}`"
-                class="inline-flex items-center gap-2 mt-1 text-blue-600 hover:underline font-bold"
-              >
-                <i class="pi pi-phone"></i> {{ selectedRequest.mission.animal.ownerProfile?.phone }}
-              </a>
-            </div>
-
-            <div
-              v-if="canVoteOnMission(selectedRequest.mission)"
-              class="border-t border-green-200 dark:border-green-800 pt-3 mt-2 flex gap-2"
-            >
-              <Button
-                :label="$t('dashboard.requests.dialog.complete_btn')"
-                icon="pi pi-check"
-                size="small"
-                severity="success"
-                :loading="closingOutcome === MissionStatus.COMPLETED"
-                :disabled="closingOutcome !== null && closingOutcome !== MissionStatus.COMPLETED"
-                @click="handleCloseMission(MissionStatus.COMPLETED)"
-              />
-              <Button
-                :label="$t('dashboard.requests.dialog.no_show_btn')"
-                icon="pi pi-times"
-                size="small"
-                severity="danger"
-                outlined
-                :loading="closingOutcome === MissionStatus.NO_SHOW"
-                :disabled="closingOutcome !== null && closingOutcome !== MissionStatus.NO_SHOW"
-                @click="handleCloseMission(MissionStatus.NO_SHOW)"
-              />
-            </div>
-
-            <!-- La clinique a déjà voté, l'Owner pas encore (double validation, ADR-0018). -->
-            <div
-              v-else-if="selectedRequest.mission.status === MissionStatus.PENDING_VALIDATION"
-              class="border-t border-green-200 dark:border-green-800 pt-3 mt-2 flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400"
-            >
-              <i class="pi pi-clock"></i>
-              {{ $t('dashboard.requests.validation.awaiting_owner') }}
-            </div>
-
-            <!-- Litige : les deux ont voté, en désaccord -- aucune UI admin de résolution
-                 n'existe ni n'est construite ici (ADR-0016 §6), juste l'affichage en lecture
-                 seule des deux issues et du motif de l'Owner. -->
-            <div
-              v-else-if="selectedRequest.mission.status === MissionStatus.DISPUTED"
-              class="border-t border-red-200 dark:border-red-800 pt-3 mt-2"
-            >
-              <div class="flex items-center gap-2 mb-2">
-                <i class="pi pi-exclamation-triangle text-red-600"></i>
-                <p class="font-bold text-red-700 dark:text-red-400">
-                  {{ $t('dashboard.requests.validation.disputed_title') }}
-                </p>
-              </div>
-              <p class="text-xs text-zinc-500 dark:text-zinc-400">
-                {{
-                  selectedRequest.mission.clinicValidationOutcome === MissionValidationOutcome.CONFIRMED
-                    ? $t('dashboard.requests.validation.your_answer_confirmed')
-                    : $t('dashboard.requests.validation.your_answer_denied')
-                }}
-              </p>
-              <p class="text-xs text-zinc-500 dark:text-zinc-400">
-                {{
-                  selectedRequest.mission.ownerValidationOutcome === MissionValidationOutcome.CONFIRMED
-                    ? $t('dashboard.requests.validation.owner_answer_confirmed')
-                    : $t('dashboard.requests.validation.owner_answer_denied')
-                }}
-              </p>
-              <p
-                v-if="selectedRequest.mission.ownerDisputeReason"
-                class="text-xs text-zinc-500 dark:text-zinc-400 italic mt-2"
-              >
-                {{ $t('dashboard.requests.validation.dispute_reason_label') }}
-                {{ selectedRequest.mission.ownerDisputeReason }}
-              </p>
-            </div>
-
-            <!-- Finalisation automatique (Lambda planifiée, ADR-0016) : même bloc visuel de
-                 succès que COMPLETED, libellé distinct pour ne pas laisser croire que la
-                 clinique a elle-même clôturé la Mission. -->
-            <div
-              v-else-if="selectedRequest.mission.status === MissionStatus.COMPLETED_AUTO"
-              class="border-t border-green-200 dark:border-green-800 pt-3 mt-2"
-            >
-              <Tag :value="$t('dashboard.requests.validation.completed_auto_label')" severity="success" />
-            </div>
-
-            <!-- Notation du propriétaire -- flux totalement indépendant de la double
-                 validation ci-dessus (CdC : "la notation ne bloque jamais la validation de
-                 mission et inversement"). Pas de pré-check "déjà noté" possible ici (asymétrie
-                 `@auth`, voir le commentaire sur `ratedMissionIds` en tête de script) --
-                 `RATING_ALREADY_SUBMITTED` bascule silencieusement l'UI plutôt qu'un toast
-                 d'erreur. -->
-            <div
-              v-if="[MissionStatus.COMPLETED, MissionStatus.COMPLETED_AUTO].includes(selectedRequest.mission.status)"
-              class="border-t border-green-200 dark:border-green-800 pt-3 mt-2"
-            >
-              <div
-                v-if="ratedMissionIds.has(selectedRequest.mission.id)"
-                class="text-xs text-zinc-500 dark:text-zinc-400 flex items-center gap-2"
-              >
-                <i class="pi pi-check-circle text-emerald-500"></i>
-                {{ $t('dashboard.requests.rating.already_rated') }}
-              </div>
-              <div v-else class="flex flex-col gap-2">
-                <p class="text-xs font-bold text-zinc-500 uppercase">
-                  {{ $t('dashboard.requests.rating.prompt') }}
-                </p>
-                <StarRating
-                  v-model="ownerRatingForm.stars"
-                  :aria-label="$t('dashboard.requests.rating.stars_aria')"
-                />
-                <Textarea
-                  v-model="ownerRatingForm.comment"
-                  rows="2"
-                  :placeholder="$t('dashboard.requests.rating.comment_placeholder')"
-                  :aria-label="$t('dashboard.requests.rating.comment_aria')"
-                  class="!bg-white dark:!bg-zinc-950 !border-zinc-300 dark:!border-zinc-800 !text-xs !p-2"
-                />
-                <Button
-                  size="small"
-                  :label="$t('dashboard.requests.rating.submit_btn')"
-                  class="!bg-[#ff3b4e] !border-[#ff3b4e] self-end"
-                  :loading="isSubmittingOwnerRating"
-                  :disabled="!ownerRatingForm.stars"
-                  @click="handleSubmitOwnerRating(selectedRequest.mission)"
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div
-          v-else
-          class="p-8 text-center text-zinc-400 bg-zinc-50 dark:bg-zinc-800 rounded-lg border border-dashed border-zinc-300"
-        >
-          <i class="pi pi-search text-2xl mb-2"></i>
-          <p>{{ $t('dashboard.requests.dialog.waiting_donor') }}</p>
-        </div>
-      </div>
+        </template>
+      </RequestDetailsPanel>
       <template #footer>
         <Button
           :label="$t('common.close')"
