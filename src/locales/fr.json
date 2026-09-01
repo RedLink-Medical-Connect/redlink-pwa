@@ -581,6 +581,16 @@
           "dialog_title": "Donneur validé !",
           "question": "Le don a bien eu lieu, voulez-vous noter la clinique dès maintenant ?",
           "later_btn": "Plus tard"
+        },
+        "history_details_aria": "Voir le détail : {name}",
+        "history_details": {
+          "dialog_title": "Détail de la mission",
+          "species": "Espèce :",
+          "type": "Type :",
+          "status": "Statut :",
+          "appointment_datetime": "Date/heure :",
+          "clinic_section": "Clinique",
+          "validation_section": "Validation"
         }
       }
     },
@@ -690,6 +700,7 @@
         "species": "Espèce :",
         "blood": "Groupe :",
         "quantity": "Quantité :",
+        "appointment_datetime": "Date/heure du RDV :",
         "donor_found": "Donneur trouvé !",
         "owner_contact": "Contact propriétaire",
         "waiting_donor": "En attente de donneur...",
@@ -756,7 +767,23 @@
       "empty": "Aucun donneur rattaché à votre clinique pour le moment.",
       "no_search_results": "Aucun donneur ne correspond à votre recherche.",
       "load_error": "Impossible de charger l'annuaire des donneurs — réessayez.",
-      "retry": "Réessayer"
+      "retry": "Réessayer",
+      "dialog": {
+        "title": "Détail du donneur",
+        "animal_section": "Animal",
+        "species": "Espèce :",
+        "breed": "Race :",
+        "blood": "Groupe :",
+        "validation_status": "Statut de validation :",
+        "validated_until": "Validé jusqu'au {date}",
+        "not_validated": "Non validé",
+        "owner_section": "Propriétaire",
+        "distance": "Distance :",
+        "other_animals_section": "Autres animaux de ce propriétaire",
+        "other_animals_empty": "Aucun autre animal enregistré.",
+        "validated_badge": "Validé",
+        "not_validated_badge": "Non validé"
+      }
     },
     "validations": {
       "title": "Validations donneurs",
@@ -805,7 +832,8 @@
       },
       "empty": "Aucun événement pour le moment.",
       "load_error": "Impossible de charger l'historique — réessayez.",
-      "retry": "Réessayer"
+      "retry": "Réessayer",
+      "event_details_aria": "Voir le détail : {label}"
     }
   },
   "menu": {
