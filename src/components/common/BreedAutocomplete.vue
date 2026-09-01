@@ -28,6 +28,19 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  // Passthrough PrimeVue forwardé tel quel à l'`AutoComplete` interne -- même patron que
+  // `AppDatePicker.vue` (`:pt="{ root, input, dropdownButton }"`, RegisterOwnerView.vue).
+  // Nécessaire ici car `inheritAttrs: false` + injection manuelle de `$attrs.class` dans
+  // `input-class` (ci-dessous) ne suffisent pas à aligner la hauteur de ce composant sur
+  // celle d'un `Select`/`InputText` voisin : l'`AutoComplete` PrimeVue ajoute son propre
+  // conteneur (`p-autocomplete`), dont le padding par défaut diffère de celui d'un `Select`
+  // -- un correctif purement `class` sur l'`input` ne le rattrape pas. Défaut `{}` : aucun
+  // effet sur les appelants existants (AddAnimalView.vue/ValidationsView.vue) qui ne le
+  // passent pas.
+  pt: {
+    type: Object,
+    default: () => ({}),
+  },
 })
 
 const suggestions = ref([])
@@ -68,6 +81,7 @@ const onInput = (event) => {
       :suggestions="suggestions"
       :placeholder="$t('common.breed_placeholder')"
       :aria-label="ariaLabel || undefined"
+      :pt="pt"
       class="w-full"
       :input-class="[
         'w-full !p-3 rounded-md transition-colors',

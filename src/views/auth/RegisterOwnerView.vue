@@ -339,11 +339,33 @@ const handleRegister = async () => {
             :aria-label="$t('auth.register_owner.fields.animal_species')"
             class="!bg-zinc-200 dark:!bg-zinc-800 !border-none !text-zinc-900 dark:!text-white !p-3 !rounded-md w-full"
           />
+          <!-- Correctif hauteur (bug visuel signalé) : `BreedAutocomplete` a `inheritAttrs:
+               false` et ne pousse `$attrs.class` que dans `input-class` de l'AutoComplete
+               interne -- jamais sur son composant racine, contrairement à `Select`/`InputText`
+               (qui la reçoivent directement). Même patron `pt` que `AppDatePicker` juste
+               au-dessus dans ce même fichier.
+               Vérifié dans le DOM rendu (getComputedStyle, avant/après) : le padding
+               (`!p-3`, 12px haut/bas) ET le `line-height` sont déjà IDENTIQUES entre le
+               `Select` espèce et l'`<input>` de cet AutoComplete -- la différence de hauteur
+               (64px contre 48px) ne vient PAS d'un padding manquant sur l'input, mais du
+               thème Aura : `.p-select` a un `<span class="p-select-label">` interne qui
+               porte SON PROPRE padding vertical (4px), en plus de celui du conteneur racine
+               -- un `<input>` HTML simple n'a pas cet étage supplémentaire. Un second
+               `!p-*` sur l'input ne peut donc pas rattraper l'écart (les deux `!p-3` déjà en
+               présence -- celui d'`input-class` et celui de la classe passée ici -- entrent
+               par ailleurs en concurrence de spécificité imprévisible entre utilitaires
+               Tailwind `!important`). `min-height` en `style` (jamais concurrencé par une
+               classe existante) est le point d'accroche stable : il aligne la hauteur totale
+               sur celle, mesurée, du Select voisin. -->
           <BreedAutocomplete
             v-model="form.animal_breed"
             :species="form.animal_species"
             :aria-label="$t('auth.register_owner.fields.animal_breed')"
             class="!bg-zinc-200 dark:!bg-zinc-800 !border-none !text-zinc-900 dark:!text-white !p-3 !rounded-md"
+            :pt="{
+              root: { class: 'w-full' },
+              pcInputText: { root: { class: '!shadow-none focus:!ring-0', style: { minHeight: '4rem' } } },
+            }"
           />
         </div>
 
