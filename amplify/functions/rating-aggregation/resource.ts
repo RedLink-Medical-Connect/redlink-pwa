@@ -49,10 +49,19 @@ import { defineFunction } from '@aws-amplify/backend'
  * Les autres variables d'environnement (noms des 3 tables DynamoDB managées + nom du GSI) sont
  * injectées depuis `amplify/backend.ts` via `addEnvironment()` : ce sont des tokens CDK résolus
  * seulement à la synthèse, impossibles à écrire ici en statique.
+ *
+ * `resourceGroupName: 'data'` -- même correctif et même raison que
+ * `mission-validation-auto-finalizer/resource.ts` (voir son commentaire dédié) : sans lui, cette
+ * fonction rejoint par défaut la stack imbriquée partagée de `post-confirmation`, dont `auth` a
+ * besoin (trigger Cognito) -- alors que ses propres policies IAM (`amplify/backend.ts`,
+ * `addToRolePolicy`/`addEventSource`, ARNs des tables `data`) dépendent de `data`, qui dépend
+ * déjà de `auth` (mode Cognito de l'API AppSync). Cycle `auth -> function -> data -> auth`,
+ * confirmé par un `ampx sandbox` réel en échec (`CloudformationStackCircularDependencyError`).
  */
 export const ratingAggregation = defineFunction({
   name: 'rating-aggregation',
   entry: './handler.ts',
+  resourceGroupName: 'data',
   timeoutSeconds: 120,
   environment: {
     CLINIC_MODERATION_AVERAGE_THRESHOLD: '3',

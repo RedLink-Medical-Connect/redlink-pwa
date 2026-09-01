@@ -217,6 +217,31 @@ qu'ajouté en silence dans la policy.
   distinctes), donc peu de partitions. Sans conséquence au volume d'un pilote ; à revoir avec un
   sort key temporel si le volume de Missions devient réel.
 
+## 7. Bug réel post-déploiement : cycle de dépendance entre stacks imbriquées
+
+Un vrai `ampx sandbox` (2026-09-01, après le câblage UI de l'étape 4/5) a échoué au déploiement
+CloudFormation avec `CloudformationStackCircularDependencyError` sur les stacks imbriquées
+`[auth, geo-stack, data, function]`.
+
+**Cause** : ni cette fonction ni `rating-aggregation` (ADR-0017) ne déclarait de
+`resourceGroupName` dans son `defineFunction()`. Sans lui, Amplify Gen2 les place par défaut dans
+la même stack imbriquée partagée que `post-confirmation` (trigger Cognito, référencé depuis
+`amplify/auth/resource.ts` — `auth` dépend donc de cette stack "function"). Or les policies IAM de
+§3 (`addToRolePolicy` sur `backend.data.resources.tables[...]`) font l'inverse : cette même stack
+"function" dépend de `data`. Et `data` dépend déjà de `auth` (mode d'authentification Cognito de
+l'API AppSync, comportement Gen2 standard, sans lien avec cette sous-tâche). D'où le cycle
+`auth -> function -> data -> auth`, rejeté par CloudFormation avant même de toucher une seule
+ressource (aucun rollback à gérer).
+
+**Correctif** : `resourceGroupName: 'data'` ajouté au `defineFunction()` de cette fonction et de
+`rating-aggregation` (`amplify/functions/*/resource.ts`) — résolution suggérée par le message
+d'erreur d'Amplify lui-même. Les deux fonctions rejoignent directement la stack `data` ; leurs
+références aux tables deviennent intra-stack, ce qui casse le cycle sans toucher au reste du
+graphe de dépendances (`post-confirmation` reste seule dans la stack "function", qui n'a alors
+plus aucune dépendance sortante vers `data`). Non testable en CI (le type-check `tsc --noEmit` ne
+valide pas l'ordonnancement des stacks CloudFormation) — seule la confirmation d'un `ampx sandbox`
+réussi le referme.
+
 ## Relation avec le reste des ADR
 
 Complète ADR-0011 (mutation custom conditionnelle) en transposant le même raisonnement à un

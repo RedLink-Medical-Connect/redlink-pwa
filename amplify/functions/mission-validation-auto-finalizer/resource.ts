@@ -56,10 +56,25 @@ import { defineFunction } from '@aws-amplify/backend'
  * `timeoutSeconds` : 300 (défaut `defineFunction` = 3s, très insuffisant -- ce handler pagine un
  * Query DynamoDB puis fait jusqu'à 5 écritures par Mission en retard). Reste largement sous la
  * limite Lambda (900s) ; le planificateur ne se superpose pas (une exécution par jour).
+ *
+ * `resourceGroupName: 'data'` -- correctif post-déploiement réel (2026-09-01) : sans lui, cette
+ * fonction (et `rating-aggregation`) atterrit par défaut dans la même stack imbriquée partagée
+ * que `post-confirmation` (trigger Cognito, dont `auth` a besoin de l'ARN -- `auth` dépend donc
+ * de cette stack "function"). Les policies IAM ajoutées dans `amplify/backend.ts`
+ * (`addToRolePolicy`, ARNs des tables `data`) font l'inverse : cette stack "function" dépend de
+ * `data`. Et `data` dépend déjà de `auth` (mode d'authentification Cognito de l'API AppSync,
+ * comportement Gen2 standard) -- d'où un cycle `auth -> function -> data -> auth`, rejeté par
+ * CloudFormation (`CloudformationStackCircularDependencyError`, confirmé par un vrai `ampx
+ * sandbox` échoué). `resourceGroupName: 'data'` place directement cette fonction DANS la stack
+ * `data` : ses références aux tables deviennent des références INTRA-stack (plus de dépendance
+ * croisée function -> data), ce qui casse le cycle -- résolution suggérée par le message
+ * d'erreur d'Amplify lui-même ("If your function is used as data resolver or calls data API,
+ * you should assign this function to data stack").
  */
 export const missionValidationAutoFinalizer = defineFunction({
   name: 'mission-validation-auto-finalizer',
   entry: './handler.ts',
+  resourceGroupName: 'data',
   schedule: {
     cron: '15 3 * * ?',
     timezone: 'Europe/Paris',

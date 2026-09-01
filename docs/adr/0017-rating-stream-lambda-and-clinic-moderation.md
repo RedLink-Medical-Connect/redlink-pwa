@@ -307,6 +307,14 @@ robustesse de cette Lambda.
   variable d'environnement Lambda. Deux règles distinctes, volontairement — mais deux endroits à
   garder cohérents si le produit décide un jour de les aligner.
 
+## 8. Bug réel post-déploiement : cycle de dépendance entre stacks imbriquées
+
+Même cause et même correctif que **ADR-0016 §7** (`resourceGroupName: 'data'` ajouté au
+`defineFunction()` de cette fonction) — cette fonction est, avec `mission-validation-auto-
+finalizer`, l'une des deux dont les policies IAM sur `data` (§5 ci-dessus) fermaient le cycle
+`auth -> function -> data -> auth` détecté par un vrai `ampx sandbox` (2026-09-01). Détail complet
+dans ADR-0016, pas dupliqué ici.
+
 ## Relation avec le reste des ADR
 
 Complète **ADR-0016** en transposant son pattern (Lambda + SDK DynamoDB direct + IAM scopée +
