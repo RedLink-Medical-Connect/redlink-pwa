@@ -134,6 +134,12 @@ export function useClinicHistory() {
   })
 
   return {
+    // Exposé (correctif UX, 2026-09) pour que HistoryView.vue retrouve la Request complète
+    // derrière un `event.requestId` cliqué (`requests.value.find(...)`) et ouvre le même
+    // dialog de détail que RequestsView.vue (RequestDetailsPanel.vue) -- déjà chargée en
+    // interne par ce composable via `useClinicRequests()`, jamais un second aller-retour
+    // réseau dédié.
+    requests,
     historyEvents,
     isLoading,
     loadError,

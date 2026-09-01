@@ -1,17 +1,34 @@
 <script setup>
-import { onMounted } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import DashboardSidebar from '@/components/dashboard/DashboardSidebar.vue'
+import RequestDetailsPanel from '@/components/dashboard/RequestDetailsPanel.vue'
 import { useClinicHistory, HistoryEventType } from '@/composables/useClinicHistory.js'
 import { Species } from '@/constants/enums'
 
 const { t } = useI18n()
 
-const { historyEvents, isLoading, loadError, fetchRequests } = useClinicHistory()
+const { requests, historyEvents, isLoading, loadError, fetchRequests } = useClinicHistory()
 
 onMounted(() => {
   fetchRequests()
 })
+
+// Détail au clic (correctif UX, 2026-09) : un événement de l'historique pointe vers une
+// Request (`event.requestId`) déjà chargée par `useClinicHistory()` (qui réutilise
+// `useClinicRequests().requests` en interne, désormais exposée) -- aucun nouvel aller-retour
+// réseau. Même composant de détail que RequestsView.vue (RequestDetailsPanel.vue), sans les
+// slots `#actions`/`#rating` : une Mission déjà dans l'historique n'a plus d'action de
+// terrain à proposer côté clinique depuis cet écran (voir RequestDetailsPanel.vue).
+const showDetails = ref(false)
+const selectedRequest = ref(null)
+
+const openEventDetails = (event) => {
+  const request = requests.value.find((r) => r.id === event.requestId)
+  if (!request) return
+  selectedRequest.value = request
+  showDetails.value = true
+}
 
 // Icône + couleurs par type d'événement — pur habillage visuel (`.cursorrules` : les
 // clés i18n ne portent que du texte). Étend le vocabulaire visuel de l'ancienne version
@@ -133,7 +150,13 @@ const formatDateTime = (dateString) => {
             <div
               v-for="event in historyEvents"
               :key="event.id"
-              class="bg-white dark:bg-zinc-900 p-4 rounded border border-zinc-200 dark:border-zinc-800 flex gap-4 items-center shadow-sm transition-colors duration-300"
+              role="button"
+              tabindex="0"
+              :aria-label="$t('dashboard.history.event_details_aria', { label: eventLabel(event) })"
+              class="bg-white dark:bg-zinc-900 p-4 rounded border border-zinc-200 dark:border-zinc-800 flex gap-4 items-center shadow-sm transition-colors duration-300 cursor-pointer hover:border-zinc-300 dark:hover:border-zinc-700 focus:outline-none focus:ring-2 focus:ring-[#ff3b4e]"
+              @click="openEventDetails(event)"
+              @keydown.enter="openEventDetails(event)"
+              @keydown.space.prevent="openEventDetails(event)"
             >
               <div
                 class="w-10 h-10 rounded-full flex items-center justify-center"
@@ -152,5 +175,22 @@ const formatDateTime = (dateString) => {
         </div>
       </div>
     </div>
+
+    <Dialog
+      v-model:visible="showDetails"
+      modal
+      :header="$t('dashboard.requests.dialog.title')"
+      :style="{ width: '500px' }"
+    >
+      <RequestDetailsPanel v-if="selectedRequest" :request="selectedRequest" />
+      <template #footer>
+        <Button
+          :label="$t('common.close')"
+          icon="pi pi-times"
+          text
+          @click="showDetails = false"
+        />
+      </template>
+    </Dialog>
   </div>
 </template>
