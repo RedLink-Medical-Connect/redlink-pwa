@@ -3,9 +3,17 @@
 // docs/adr/0019-server-side-last-donation-date-on-completed.md §6.
 //
 // LE TROU QU'ELLE FERME (partiellement -- voir "CE QUE CETTE FONCTION NE FERME PAS" plus bas)
-// `Clinic.transfusionsDone`/`donorOwnersCount` portent une `.authorization()` de champ réservée
-// en écriture aux `Veterinarians` (voir `amplify/data/resource.ts`, section `Clinic`). Quand
-// c'est l'OWNER qui soumet le vote décisif faisant passer une Mission en `COMPLETED` (le cas
+// `Clinic.transfusionsDone`/`donorOwnersCount` n'ont PAS de `.authorization()` de CHAMP dédiée
+// (contrairement à `averageRatingAsClinic`/`needsAdminReview`/etc. juste en dessous dans
+// `amplify/data/resource.ts`, qui en ont une) -- ils héritent seulement des règles de NIVEAU
+// MODÈLE de `Clinic` : `allow.owner()` (CRUD complet pour le vétérinaire créateur de la ligne) +
+// `allow.group('Veterinarians').to(['create','read','update'])`. Un Owner n'étant ni "owner" de
+// `Clinic` ni membre de ce groupe, il ne peut PAS écrire ces champs -- même conclusion pratique
+// qu'une restriction de champ, mais par ABSENCE de règle applicable plutôt que par une règle
+// explicite (correctif graphql-schema-reviewer, 2026-09-01 : la version précédente de ce
+// commentaire affirmait à tort une `.authorization()` de champ, confirmé absente par
+// `resource.transform.test.ts`, "aucun AUTRE champ de Clinic ne porte de @auth au niveau champ").
+// Quand c'est l'OWNER qui soumet le vote décisif faisant passer une Mission en `COMPLETED` (le cas
 // nominal du produit : le vétérinaire clôture d'abord depuis `RequestsView.vue`, donc l'appel de
 // l'Owner finalise), AUCUN code client côté Owner ne peut porter cet incrément --
 // `applyOwnerCompletionSideEffects` (`src/composables/mission-completion-side-effects.js`) ne
@@ -31,17 +39,23 @@
 // `ctx.stash.statsClinicID`, seule source de vérité consommée par la 10e et dernière fonction
 // (`submit-mission-validation-increment-transfusions-done.js`).
 //
-// DEUX CHEMINS, UN SEUL RÉSULTAT DANS LE STASH (pas deux clés à réconcilier en aval)
+// DEUX CHEMINS, UN SEUL CAS RÉEL (pas de recopie à réconcilier en aval -- correctif
+// graphql-schema-reviewer, 2026-09-01 : la version précédente de ce commentaire affirmait que
+// `ctx.stash.statsClinicID` était "recopié depuis `callerClinicID`" sur le chemin CLINIC, ce que
+// le code ne fait PAS -- le `earlyReturn` ci-dessous est inconditionnel et précède toute
+// affectation du stash, donc `statsClinicID` reste `undefined` sur ce chemin, jamais égal à
+// `callerClinicID`. Sans conséquence fonctionnelle : la garde `!ctx.stash.statsClinicID` de la
+// 10e fonction traite `undefined` exactement comme `null`, donc aucun incrément en double -- mais
+// à ne pas modifier en croyant qu'une recopie existe déjà).
 // - Chemin OWNER (`ctx.stash.callerRole === 'OWNER'`) : le `clinicID` n'est PAS encore connu à ce
 //   stade du pipeline (la fonction 4/8, `verify-clinic-party`, qui lit `Request.clinicID`, est un
 //   no-op côté Owner) -- il faut le lire. `ctx.stash.missionRequestID` (posé par la fonction
 //   1/8, `resolve-parties.js`) sert de clé pour un `ddb.get` sur `Request`.
-// - Chemin CLINIC : le `clinicID` est DÉJÀ connu (`ctx.stash.callerClinicID`, posé par la
-//   fonction 3/8, `load-vet-clinic.js`) -- ce chemin n'a de toute façon pas besoin de cette
-//   fermeture (voir plus bas), donc aucune lecture réseau n'est faite ; `ctx.stash.statsClinicID`
-//   est simplement recopié depuis `callerClinicID` pour qu'un futur lecteur de ce stash n'ait
-//   jamais à choisir entre deux clés selon le chemin -- une seule source de vérité, décision
-//   documentée ici plutôt que laissée à deviner.
+// - Chemin CLINIC : `earlyReturn` immédiat (voir plus bas), aucune lecture, `statsClinicID`
+//   jamais affecté -- ce chemin n'a de toute façon pas besoin de cette fermeture (voir plus bas),
+//   `callerClinicID` (posé par la fonction 3/8, `load-vet-clinic.js`) reste la seule source
+//   connue du clinicID sur ce chemin si un futur besoin apparaissait, mais CETTE fonction ne le
+//   propage pas vers `statsClinicID`.
 //
 // POURQUOI PAS SUR LE CHEMIN CLINIC : sur ce chemin, `useMissionClosure.closeMission()` a déjà
 // incrémenté `transfusionsDone` CÔTÉ CLIENT (`applyVeterinarianCompletionSideEffects` ->

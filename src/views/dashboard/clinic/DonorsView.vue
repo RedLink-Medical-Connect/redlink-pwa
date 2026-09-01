@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import DashboardSidebar from '@/components/dashboard/DashboardSidebar.vue'
 import { useClinicDonors } from '@/composables/useClinicDonors.js'
@@ -20,6 +20,16 @@ const onRowSelect = (event) => {
   selectedDonor.value = event.data
   showDetails.value = true
 }
+
+// Revue a11y : sans ça, une ligne consultée puis le dialog fermé (Échap, bouton Fermer, croix)
+// reste marquée `aria-selected="true"`/en surbrillance dans le DataTable -- désorientant pour un
+// utilisateur clavier/lecteur d'écran qui reprend la navigation sans comprendre pourquoi cette
+// ligne précise reste signalée différemment. `watch` plutôt qu'un handler dédié par bouton de
+// fermeture : couvre TOUS les chemins de fermeture du Dialog (Échap, croix, bouton Fermer) en un
+// seul endroit, y compris ceux pilotés par PrimeVue lui-même via `v-model:visible`.
+watch(showDetails, (visible) => {
+  if (!visible) selectedDonor.value = null
+})
 
 const speciesLabel = (species) =>
   species === Species.DOG ? t('request.species.dog') : t('request.species.cat')

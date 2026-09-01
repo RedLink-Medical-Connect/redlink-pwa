@@ -246,6 +246,7 @@ const handleSubmit = async () => {
                   <BreedAutocomplete
                     v-model="form.breed"
                     :species="form.species?.toUpperCase()"
+                    :aria-label="$t('request.form.breed')"
                     class="!bg-zinc-50 dark:!bg-zinc-950 !border-zinc-300 dark:!border-zinc-800 !text-zinc-900 dark:!text-white !p-3 focus:!border-[#ff3b4e]"
                   />
                 </div>
