@@ -26,7 +26,11 @@ const {
   isSubmittingValidation,
   submitDonationValidation,
 } = useOwnerMissions()
-const { submitRating, checkRatingExists } = useRatings()
+const {
+  submitRating,
+  checkRatingExists,
+  isSubmitting: isSubmittingPostValidationRating,
+} = useRatings()
 
 const { t } = useI18n()
 const toast = useToast()
@@ -58,9 +62,10 @@ const openValidationDialog = (mission) => {
 
 const handleSubmitValidation = async (outcome) => {
   if (!selectedValidationMission.value) return
+  const mission = selectedValidationMission.value
   try {
-    await submitDonationValidation(
-      selectedValidationMission.value.id,
+    const finalStatus = await submitDonationValidation(
+      mission.id,
       outcome,
       outcome === MissionValidationOutcome.DENIED ? disputeReason.value : undefined,
     )
@@ -71,6 +76,19 @@ const handleSubmitValidation = async (outcome) => {
       life: 3000,
     })
     showValidationDialog.value = false
+
+    // Popup de notation post-validation (demande repo owner, 2026-09-01) : ouvert APRÈS que
+    // ce toast de succès soit déjà posé, jamais enchaîné de façon bloquante dans le même flux
+    // de soumission (CdC, en-tête useRatings.js : "la notation ne bloque jamais la validation
+    // de mission"). STRICTEMENT `COMPLETED` -- jamais `PENDING_VALIDATION` (l'autre côté n'a
+    // pas encore répondu) ni `NO_SHOW`/`DISPUTED` (aucun don n'a eu lieu / désaccord), même
+    // garde-fou que les écritures secondaires de fin de Mission ci-dessus
+    // (submitDonationValidation, useOwnerMissions.js).
+    if (finalStatus === MissionStatus.COMPLETED) {
+      postValidationRatingMission.value = mission
+      postValidationRatingForm.value = { stars: 0, comment: '' }
+      showPostValidationRatingDialog.value = true
+    }
   } catch (e) {
     toast.add({
       severity: 'error',
@@ -79,6 +97,68 @@ const handleSubmitValidation = async (outcome) => {
       life: 5000,
     })
   }
+}
+
+// ── Popup de notation post-validation ─────────────────────────────────────────────────────
+// Proposé juste après une validation Owner réussie qui fait passer la Mission en COMPLETED
+// (voir handleSubmitValidation ci-dessus) -- pour que l'Owner puisse tout faire d'un coup
+// sans avoir le réflexe d'aller noter depuis l'onglet Historique. Le widget de l'onglet
+// Historique (ci-dessous, ratingForms/ratingCheckStatus/handleSubmitRating) reste INCHANGÉ et
+// continue de fonctionner exactement comme avant : c'est un filet de rattrapage pour qui
+// ignore ou ferme ce popup (bouton "Plus tard"), demande explicite du repo owner.
+//
+// Pas de pré-check "déjà noté" ici (contrairement à `ensureRatingStatusChecked` plus bas) :
+// impossible qu'une `Rating` existe déjà pour une Mission qui vient tout juste de passer
+// COMPLETED pour la première fois -- même raisonnement que documenté dans le brief de cette
+// sous-tâche. État dédié plutôt que réutilisation de `ratingForms`/`submittingRatingFor`
+// (indexés par mission.id, pensés pour une LISTE de missions affichées simultanément dans
+// l'onglet Historique) : un seul popup n'affiche qu'une seule Mission à la fois, donc un ref
+// scalaire suffit -- même choix que `ownerRatingForm`/`isSubmittingOwnerRating` dans
+// RequestsView.vue (dialog de détail, une seule Mission ciblée).
+const showPostValidationRatingDialog = ref(false)
+const postValidationRatingMission = ref(null)
+const postValidationRatingForm = ref({ stars: 0, comment: '' })
+
+const handleSubmitPostValidationRating = async () => {
+  const mission = postValidationRatingMission.value
+  if (!mission) return
+  try {
+    await submitRating({
+      missionId: mission.id,
+      targetRole: RatingParticipantRole.CLINIC,
+      targetID: mission.request?.clinicID,
+      stars: postValidationRatingForm.value.stars,
+      comment: postValidationRatingForm.value.comment,
+    })
+    // Évite une relecture réseau superflue si l'Owner se rend ensuite dans l'onglet
+    // Historique pour cette même mission (`ensureRatingStatusChecked` ci-dessous) : la
+    // notation vient d'être créée avec succès, inutile de la revérifier pour le savoir --
+    // et ça masque immédiatement le widget de l'Historique au profit du libellé "déjà noté".
+    ratingCheckStatus[mission.id] = 'rated'
+    showPostValidationRatingDialog.value = false
+    toast.add({
+      severity: 'success',
+      summary: t('common.success'),
+      detail: t('dashboard.owner.missions_list.rating.toasts.success'),
+      life: 3000,
+    })
+  } catch (e) {
+    // Erreur avalée dans un toast, PAS de fermeture automatique de la dialog : l'Owner peut
+    // corriger (ex. étoiles) et réessayer, ou fermer lui-même via "Plus tard" -- la
+    // contrainte produit "la notation ne bloque/ne retarde jamais rien" s'applique à la
+    // VALIDATION déjà soumise avec succès à ce stade, pas à ce popup lui-même qui reste un
+    // simple formulaire optionnel.
+    toast.add({
+      severity: 'error',
+      summary: t('common.error'),
+      detail: mapSubmitRatingError(e.message),
+      life: 5000,
+    })
+  }
+}
+
+const skipPostValidationRating = () => {
+  showPostValidationRatingDialog.value = false
 }
 
 // ── Notation de la clinique (COMPLETED/COMPLETED_AUTO, historique) ────────────────────────
@@ -624,6 +704,51 @@ const getAnimalEmoji = (species) => (species === Species.DOG ? '🐶' : '🐱')
                 @click="handleSubmitValidation(MissionValidationOutcome.DENIED)"
               />
             </div>
+          </div>
+        </div>
+      </Dialog>
+
+      <!-- Popup de notation post-validation (demande repo owner, 2026-09-01) -- même pattern de
+           Dialog PrimeVue que la validation ci-dessus, même widget StarRating + Textarea que le
+           widget de l'onglet Historique. Ignorable ("Plus tard") : n'apparaît qu'APRÈS que la
+           validation ait déjà réussi et son propre toast affiché (voir handleSubmitValidation),
+           ne bloque/ne retarde jamais rien. -->
+      <Dialog
+        v-model:visible="showPostValidationRatingDialog"
+        modal
+        :header="$t('dashboard.owner.missions_list.post_validation_rating.dialog_title')"
+        :style="{ width: '420px' }"
+      >
+        <div v-if="postValidationRatingMission" class="flex flex-col gap-4">
+          <p class="text-sm text-zinc-600 dark:text-zinc-300">
+            {{ $t('dashboard.owner.missions_list.post_validation_rating.question') }}
+          </p>
+
+          <StarRating
+            v-model="postValidationRatingForm.stars"
+            :aria-label="$t('dashboard.owner.missions_list.rating.stars_aria')"
+          />
+          <Textarea
+            v-model="postValidationRatingForm.comment"
+            rows="3"
+            :placeholder="$t('dashboard.owner.missions_list.rating.comment_placeholder')"
+            :aria-label="$t('dashboard.owner.missions_list.rating.comment_aria')"
+            class="!bg-zinc-50 dark:!bg-zinc-950 !border-zinc-300 dark:!border-zinc-800 !p-3"
+          />
+
+          <div class="flex justify-end gap-3">
+            <Button
+              :label="$t('dashboard.owner.missions_list.post_validation_rating.later_btn')"
+              text
+              @click="skipPostValidationRating"
+            />
+            <Button
+              :label="$t('dashboard.owner.missions_list.rating.submit_btn')"
+              class="!bg-[#ff3b4e] !border-[#ff3b4e]"
+              :loading="isSubmittingPostValidationRating"
+              :disabled="!postValidationRatingForm.stars"
+              @click="handleSubmitPostValidationRating"
+            />
           </div>
         </div>
       </Dialog>

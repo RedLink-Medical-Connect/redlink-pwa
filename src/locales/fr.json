@@ -576,6 +576,11 @@
           "toasts": {
             "success": "Merci pour votre avis !"
           }
+        },
+        "post_validation_rating": {
+          "dialog_title": "Donneur validé !",
+          "question": "Le don a bien eu lieu, voulez-vous noter la clinique dès maintenant ?",
+          "later_btn": "Plus tard"
         }
       }
     },

@@ -576,6 +576,11 @@
           "toasts": {
             "success": "Thank you for your feedback!"
           }
+        },
+        "post_validation_rating": {
+          "dialog_title": "Donor validated!",
+          "question": "The donation has taken place — would you like to rate the clinic now?",
+          "later_btn": "Later"
         }
       }
     },
