@@ -79,10 +79,11 @@ architecturales) et `.cursorrules` (conventions détaillées pour l'éditeur).
   qui écrit `Animal` alors que la mutation `.returns(a.ref('Mission'))`), elle doit
   explicitement propager le résultat de la fonction précédente, pas son propre
   résultat. **Plafond AppSync : 10 fonctions par pipeline.** Voir
-  `submitMissionValidation` (`amplify/data/resource.ts`, 8 fonctions,
-  `amplify/data/resolvers/submit-mission-validation-*.js`) et ADR-0018/0019/0020
-  pour l'exemple de référence complet (vérification d'identité multi-modèle +
-  écriture cross-table).
+  `submitMissionValidation` (`amplify/data/resource.ts`, **10/10 fonctions — plafond
+  atteint, plus aucune marge sans retirer une fonction existante ou changer de
+  mécanisme**, `amplify/data/resolvers/submit-mission-validation-*.js`) et
+  ADR-0018/0019/0020 pour l'exemple de référence complet (vérification d'identité
+  multi-modèle + écriture cross-table).
 - Cognito via `defineAuth` (`amplify/auth/resource.ts`) — user pools, groupes
   `Veterinarians`/`Owners` déclarés statiquement (`groups: [...]`),
   contrairement à Gen1 où ils étaient créés paresseusement au premier signup —

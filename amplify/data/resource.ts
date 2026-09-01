@@ -1103,9 +1103,9 @@ export const schema = a.schema({
   // l'écriture étant write-once par côté, la priver DÉFINITIVEMENT de son vote. Voir l'en-tête
   // de `submit-mission-validation-resolve-parties.js` pour l'analyse complète.
   //
-  // Les 8 fichiers, dans l'ordre d'exécution du pipeline (noter que ce sont les 4 premiers et le
-  // DERNIER qui portent une source de données AUTRE que `Mission` -- une fonction AppSync ne peut
-  // interroger qu'UNE source, d'où le découpage) :
+  // Les 10 fichiers, dans l'ordre d'exécution du pipeline (noter que ce sont les 4 premiers et
+  // les 3 derniers qui portent une source de données AUTRE que `Mission` -- une fonction AppSync
+  // ne peut interroger qu'UNE source, d'où le découpage) :
   // 1. `submit-mission-validation-resolve-parties.js` (`Mission`) -- rôle de l'appelant +
   //    `animalID`/`requestID` de la Mission (et, depuis le 2026-08-28, son `status` COURANT),
   //    rangés dans `ctx.stash` (espace serveur).
@@ -1200,6 +1200,14 @@ export const schema = a.schema({
       a.handler.custom({
         dataSource: a.ref('Animal'),
         entry: './resolvers/submit-mission-validation-record-donation-date.js',
+      }),
+      a.handler.custom({
+        dataSource: a.ref('Request'),
+        entry: './resolvers/submit-mission-validation-resolve-clinic-id-for-stats.js',
+      }),
+      a.handler.custom({
+        dataSource: a.ref('Clinic'),
+        entry: './resolvers/submit-mission-validation-increment-transfusions-done.js',
       }),
     ]),
 })

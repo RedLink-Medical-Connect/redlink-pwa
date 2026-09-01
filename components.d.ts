@@ -40,6 +40,7 @@ declare module 'vue' {
     Message: typeof import('primevue/message')['default']
     Password: typeof import('primevue/password')['default']
     PhoneInput: typeof import('./src/components/common/PhoneInput.vue')['default']
+    RequestDetailsPanel: typeof import('./src/components/dashboard/RequestDetailsPanel.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
     Select: typeof import('primevue/select')['default']

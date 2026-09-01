@@ -203,11 +203,22 @@ export function useClinicDonors() {
             breed: animal.breed,
             bloodGroup: animal.bloodGroup,
             lastDonationDate: animal.lastDonationDate,
+            // Correctif UX (2026-09) : déjà chargés par le `selectionSet` ci-dessus mais
+            // jusqu'ici jamais recopiés dans la ligne poussée -- consommés par le dialog de
+            // détail de DonorsView.vue (statut/date d'expiration de la validation).
+            isValidatedDonor: animal.isValidatedDonor,
+            validationExpiresAt: animal.validationExpiresAt,
             distanceKM,
             ownerId: owner.id,
             ownerFirstname: owner.firstname,
             ownerLastname: owner.lastname,
             ownerPhone: owner.phone,
+            // Liste complète des animaux de CE propriétaire (id/name/species/breed/
+            // bloodGroup/isValidatedDonor), déjà en mémoire via le même `selectionSet` --
+            // aucun aller-retour réseau supplémentaire. Consommée par DonorsView.vue pour
+            // afficher "les autres animaux de ce propriétaire" dans le dialog de détail
+            // (l'animal courant y reste inclus ; la vue filtre au besoin).
+            ownerAnimals: animals,
           })
         }
       }

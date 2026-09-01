@@ -290,3 +290,27 @@ describe('useClinicRequests > fetchRequests / fetchClinicId error vs. "no clinic
     expect(loadError.value).toBe(false)
   })
 })
+
+// Correctif UX (2026-09) : `appointmentDatetime` était déjà un champ du modèle `Request`
+// (utilisé par createNewRequest()) mais n'était jamais SÉLECTIONNÉ par fetchRequests() --
+// RequestDetailsPanel.vue (RequestsView.vue/HistoryView.vue) a besoin de le lire pour
+// afficher la date/heure de RDV. Ce test pin le `selectionSet` plutôt que de vérifier
+// l'affichage (pas de test de composant `.vue` dans ce repo pour ces deux vues, voir
+// CLAUDE.md).
+describe('useClinicRequests > fetchRequests selectionSet', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    getCurrentUser.mockResolvedValue({ userId: 'vet-cognito-id' })
+    vetGetMock.mockResolvedValue({ data: { id: 'vet-cognito-id', clinicID: 'clinic-1' }, errors: undefined })
+  })
+
+  it('inclut appointmentDatetime parmi les champs de premier niveau de Request', async () => {
+    requestListMock.mockResolvedValueOnce({ data: [], errors: undefined })
+
+    const { fetchRequests } = useClinicRequests()
+    await fetchRequests()
+
+    const [{ selectionSet }] = requestListMock.mock.calls[0]
+    expect(selectionSet).toContain('appointmentDatetime')
+  })
+})

@@ -581,6 +581,16 @@
           "dialog_title": "Donor validated!",
           "question": "The donation has taken place — would you like to rate the clinic now?",
           "later_btn": "Later"
+        },
+        "history_details_aria": "View details: {name}",
+        "history_details": {
+          "dialog_title": "Mission details",
+          "species": "Species:",
+          "type": "Type:",
+          "status": "Status:",
+          "appointment_datetime": "Date/time:",
+          "clinic_section": "Clinic",
+          "validation_section": "Validation"
         }
       }
     },
@@ -690,6 +700,7 @@
         "species": "Species:",
         "blood": "Blood:",
         "quantity": "Quantity:",
+        "appointment_datetime": "Appointment date/time:",
         "donor_found": "Donor found!",
         "owner_contact": "Owner contact",
         "waiting_donor": "Waiting for a donor...",
@@ -756,7 +767,23 @@
       "empty": "No donor linked to your clinic yet.",
       "no_search_results": "No donor matches your search.",
       "load_error": "Couldn't load the donor directory — try again.",
-      "retry": "Retry"
+      "retry": "Retry",
+      "dialog": {
+        "title": "Donor details",
+        "animal_section": "Animal",
+        "species": "Species:",
+        "breed": "Breed:",
+        "blood": "Blood group:",
+        "validation_status": "Validation status:",
+        "validated_until": "Validated until {date}",
+        "not_validated": "Not validated",
+        "owner_section": "Owner",
+        "distance": "Distance:",
+        "other_animals_section": "This owner's other animals",
+        "other_animals_empty": "No other animal registered.",
+        "validated_badge": "Validated",
+        "not_validated_badge": "Not validated"
+      }
     },
     "validations": {
       "title": "Donor Validations",
@@ -805,7 +832,8 @@
       },
       "empty": "No activity yet.",
       "load_error": "Unable to load the activity history — please retry.",
-      "retry": "Retry"
+      "retry": "Retry",
+      "event_details_aria": "View details: {label}"
     }
   },
   "menu": {

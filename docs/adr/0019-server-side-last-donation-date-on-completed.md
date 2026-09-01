@@ -187,17 +187,21 @@ agir. Ici l'écriture est un effet de bord serveur d'une mutation dont le contra
   `Animal` n'est plus émise côté client. Contrepartie acceptée : un échec de l'écriture serveur
   est désormais **silencieux** sans rattrapage client (§3, résidu d'observabilité déjà connu) —
   préféré à une écriture bruyante mais **fausse**.
-- **Compteurs `Clinic`** (`transfusionsDone`/`donorOwnersCount`) quand l'Owner vote en second :
-  **non ajoutés**, résidu assumé (dérive déjà documentée pour ces compteurs). Coût réel :
-  DEUX fonctions de pipeline supplémentaires (9/10 puis 10/10 — le `clinicID` n'est dans le stash
-  que sur le chemin CLINIQUE, la fonction 4 étant un no-op côté Owner, il faudrait donc relire la
-  `Request`), pour un compteur de tableau de bord — et `donorOwnersCount` resterait faux, sa
-  valeur dépendant de la création ou non d'une `ClinicOwnerRelation`, décidée côté client.
+- ~~**Compteurs `Clinic`** (`transfusionsDone`/`donorOwnersCount`) quand l'Owner vote en second :
+  non ajoutés, résidu assumé.~~ — **`transfusionsDone` FERMÉ le 2026-09-01** (bug produit remonté
+  après l'ouverture de la PR #55 : le compteur "Transfusions réalisées" restait bloqué à 0/sous-
+  compté sur le chemin nominal). Voir §6. `donorOwnersCount`, lui, reste un résidu assumé — sa
+  valeur dépend de la création ou non d'une `ClinicOwnerRelation`, décision prise côté CLIENT, non
+  reproductible dans un resolver `APPSYNC_JS` sans dupliquer cette règle (et le budget de pipeline
+  ne le permettait de toute façon pas une fois `transfusionsDone` fermé — voir §6).
 - **`ClinicOwnerRelation`** : déjà porté côté client par les DEUX composables depuis `09b87c1`.
   Le dupliquer ici produirait une double écriture réelle (pas idempotente : une relation créée
   deux fois), pas juste redondante.
-- **Plafond AppSync** : un resolver de pipeline accepte au plus 10 fonctions ; ce pipeline en
-  consomme **8**. Il ne reste que 2 places. Pin-testé (`resource.transform.test.ts`).
+- ~~**Plafond AppSync** : un resolver de pipeline accepte au plus 10 fonctions ; ce pipeline en
+  consomme 8. Il ne reste que 2 places.~~ — **consomme désormais 10/10 depuis le 2026-09-01** (§6) :
+  le plafond exact, plus aucune marge. Toute future écriture secondaire de ce pipeline devra
+  retirer une fonction existante ou changer de mécanisme. Pin-testé
+  (`resource.transform.test.ts`).
 - **`updatedAt` de `Mission`** n'est toujours écrit par aucune fonction de ce pipeline (écart
   préexistant aux fonctions 5 et 7). La fonction 8 écrit, elle, `Animal.updatedAt` — comme la
   Lambda le fait sur la même table et le même champ. Incohérence signalée, non corrigée ici
@@ -217,7 +221,8 @@ impacté), `response()` qui renvoie la Mission et jamais l'Animal, erreurs aval�
 `finalMissionStatus` <-> statut réellement écrit.
 
 `amplify/data/__tests__/resource.transform.test.ts` : l'ordre exact des **8** fonctions et leurs
-sources de données (`AnimalTable` en 8e), plus le plafond de 10.
+sources de données (`AnimalTable` en 8e), plus le plafond de 10. Étendu à **10** fonctions le
+2026-09-01 (§6, `RequestTable` en 9e, `ClinicTable` en 10e).
 
 `src/composables/__tests__/mission-dual-validation.integration.test.js` : touché au **minimum**
 (harnais d'une autre sous-tâche) — `stash: {}` ajouté aux contextes qu'il fabrique (toujours
@@ -226,3 +231,72 @@ Frequency Rule comme un « résidu ouvert » mis à jour. Ses assertions sont in
 comptent les écritures **du composable**, qui restent nulles côté Owner. Ce harnais ne rejoue que
 les 3 fonctions d'écriture et ne modélise pas la table `Animal` — l'étendre à la 8e fonction est
 un bon candidat pour la prochaine passe QA.
+
+## 6. Bug produit post-PR#55 : `Clinic.transfusionsDone` sous-compté (2026-09-01)
+
+**Remonté par le produit après l'ouverture de la PR #55** ("les deux blocs transfusions
+réalisées et propriétaire donneur ne semblent pas fonctionnels"), pas suspecté en revue —
+exactement le résidu déjà signalé, mais laissé ouvert, au §4 ci-dessus. Diagnostic confirmé par
+lecture directe du code (pas de déploiement nécessaire pour l'établir) : `Clinic.transfusionsDone`
+porte une `.authorization()` de champ réservée en écriture aux `Veterinarians` ; dans le flux
+nominal du produit (le vétérinaire clôture d'abord depuis `RequestsView.vue`, donc c'est l'appel
+de l'**Owner** qui finalise la Mission), aucun code client côté Owner n'a jamais pu porter cet
+incrément — `applyOwnerCompletionSideEffects` (`src/composables/mission-completion-side-
+effects.js`) ne le tentait même pas. Le compteur restait donc sous-compté sur le chemin le plus
+fréquent, pas seulement en cas de course.
+
+**Décision produit (deux allers-retours de clarification avant implémentation)** : fermer
+`transfusionsDone` **côté serveur**, dans CE pipeline — même mécanisme que §2 pour
+`Animal.lastDonationDate` — plutôt qu'ouvrir l'`@auth` de `Clinic` à l'Owner (aurait permis à un
+Owner d'écrire N'IMPORTE QUELLE valeur, pas seulement +1). `donorOwnersCount`, lui, reste hors
+périmètre : fermer ce second compteur aurait demandé une 3e fonction rien que pour relire
+`Animal.ownerID` (indisponible dans `ctx.stash` sur le chemin où la CLINIQUE vote en second — la
+fonction 2/8, qui lit `Animal`, est un no-op sur ce chemin) : 4 fonctions au total pour fermer les
+deux compteurs sur les deux chemins, dépassant le plafond AppSync de 10 alors que le pipeline en
+consommait déjà 8. Périmètre resserré à SEUL `transfusionsDone`, SEUL chemin Owner-vote-en-second
+(le chemin Clinique reste porté côté client, `mission-completion-side-effects.js`, inchangé — deux
+mécanismes différents pour la même écriture selon le chemin, résidu de cohérence assumé plutôt que
+retravailler les 4 fonctions de vérification d'identité existantes, ADR-0018, pour un compteur de
+tableau de bord).
+
+**Deux fonctions ajoutées, plafond AppSync désormais atteint (10/10, plus aucune marge)** :
+
+- **9/10** — `submit-mission-validation-resolve-clinic-id-for-stats.js` (source `Request`) :
+  lecture seule. `earlyReturn` inconditionnel si l'appelant n'est pas l'Owner (écrit en PREMIER
+  dans la condition, avant même de regarder `finalMissionStatus` — le chemin Clinique n'a jamais
+  besoin de cette fonction, déjà couvert côté client) ou si la Mission ne vient pas de passer
+  `COMPLETED`. Sinon, relit `Request` par `ctx.stash.missionRequestID` (posé par la fonction 1/8)
+  et range son `clinicID` dans `ctx.stash.statsClinicID` — best-effort, une erreur de lecture y
+  stashe `null` plutôt que de faire échouer la mutation.
+- **10/10 (DERNIÈRE du pipeline)** — `submit-mission-validation-increment-transfusions-done.js`
+  (source `Clinic`) : `earlyReturn` sauf `finalMissionStatus === 'COMPLETED'` ET
+  `ctx.stash.statsClinicID` non nul. Incrément ATOMIQUE (`operations.increment(1)`, PAS
+  lire-puis-écrire — écart de mécanisme assumé avec `incrementClinicStats` côté client, qui
+  documente lui-même sa propre course non résolue depuis la Phase 6.7, même famille d'écart que
+  §4/ADR-0016 §4 entre la Lambda planifiée et ce même composable). Garde anti-upsert
+  `id: { attributeExists: true }` (même raison que la fonction 8/8). **Doit renvoyer
+  `ctx.prev.result` (la Mission), jamais `ctx.result` (la Clinic)** — même contrat, même risque
+  documenté, que la fonction 8/8. Best-effort, même doctrine que §3 : le vote de l'appelant est
+  déjà écrit, irréversible, au moment où cette fonction s'exécute.
+
+**Ce que ce correctif ne fait PAS** (résidus signalés, pas cachés) :
+
+- `donorOwnersCount` reste sous-compté sur le chemin Owner — voir "Décision produit" ci-dessus.
+  Inchangé par rapport à avant ce correctif : pas une régression, juste pas une nouvelle garantie.
+- Le chemin Clinique garde son incrément client best-effort, lire-puis-écrire, avec sa course déjà
+  documentée (Phase 6.7) — non touché, non aggravé.
+- Le pipeline est maintenant au plafond AppSync exact (10/10) : toute future écriture secondaire
+  de ce pipeline devra retirer une fonction existante ou changer de mécanisme.
+
+**Tests** : `amplify/data/__tests__/submit-mission-validation.resolvers.test.js` étendu (pas
+dupliqué) — deux nouveaux `describe` isolés pour les fonctions 9/10 et 10/10 (mêmes gardes que la
+8e : `earlyReturn` sur chaque statut non-`COMPLETED`, défense en profondeur `requestID`/
+`statsClinicID` absent, garde anti-upsert, `response()` qui renvoie la Mission et jamais la
+Clinic/la Request, erreurs avalées), plus deux scénarios de bout en bout dans le harnais `PIPELINE`
+existant (Owner vote en second : `transfusionsDone` incrémenté de 1 ; Clinique vote en second :
+inchangé côté serveur). Le mock `@aws-appsync/utils/dynamodb` et le magasin en mémoire
+(`applyUpdate`) ont dû être étendus pour comprendre `operations.increment` (résolu en
+`if_not_exists(x, 0) + by`, sémantique DynamoDB réelle — vérifiée dans les types installés,
+`node_modules/@aws-appsync/utils/lib/dynamodb-helpers.d.ts`, pas supposée) — sans ça le harnais
+aurait stocké l'objet marqueur du mock au lieu d'un nombre incrémenté. `amplify/data/__tests__/
+resource.transform.test.ts` : pin étendu à 10 fonctions (§5 ci-dessus).

@@ -65,6 +65,15 @@ vi.mock('@aws-appsync/utils/dynamodb', () => ({
   // quelle clé, quelle condition, quels champs écrits).
   update: (input) => ({ operation: 'UpdateItem', ...input }),
   get: (input) => ({ operation: 'GetItem', ...input }),
+  // AJOUTÉ le 2026-09-01 (fonction 10/10, `increment-transfusions-done.js`) : marqueur inspecté
+  // par `applyUpdate` ci-dessous pour reproduire le comportement RÉEL de DynamoDB
+  // (`if_not_exists(x, 0) + by`, sémantique documentée par
+  // `node_modules/@aws-appsync/utils/lib/dynamodb-helpers.d.ts`), pas un objet marshallé —
+  // même esprit que `update`/`get` ci-dessus : le test inspecte la DÉCISION (quel champ, de
+  // combien), le harnais applique l'effet.
+  operations: {
+    increment: (by = 1) => ({ _type: 'increment', by }),
+  },
 }))
 
 // Sentinelle d'`runtime.earlyReturn()` : côté AppSync, l'appel interrompt la fonction SANS
@@ -117,6 +126,8 @@ import * as writeSide from '../resolvers/submit-mission-validation-write-side'
 import * as readMission from '../resolvers/submit-mission-validation-read-mission'
 import * as finalizeStatus from '../resolvers/submit-mission-validation-finalize-status'
 import * as recordDonationDate from '../resolvers/submit-mission-validation-record-donation-date'
+import * as resolveClinicIdForStats from '../resolvers/submit-mission-validation-resolve-clinic-id-for-stats'
+import * as incrementTransfusionsDone from '../resolvers/submit-mission-validation-increment-transfusions-done'
 
 // ─────────────────────────────────────────────────────────────────────────────────────────
 // Magasin en mémoire + exécuteur de pipeline
@@ -156,7 +167,21 @@ function applyUpdate(store, payload) {
 
   // Sans condition d'existence satisfaite, DynamoDB ferait un upsert ; le harnais le reproduit
   // pour que le test anti-upsert de la fonction 1/3 ait un vrai pouvoir de détection.
-  const next = { ...(item ?? { id: payload.key.id }), ...payload.update }
+  //
+  // AJOUTÉ le 2026-09-01 (fonction 10/10) : résout les marqueurs `{ _type: 'increment', by }`
+  // (voir le mock de `operations.increment` ci-dessus) en `if_not_exists(x, 0) + by`, la
+  // sémantique réelle de DynamoDB — sans ça, `world.clinics.get(id).transfusionsDone`
+  // contiendrait littéralement l'objet marqueur au lieu d'un nombre incrémenté.
+  const resolvedUpdate = Object.fromEntries(
+    Object.entries(payload.update).map(([field, value]) => {
+      if (value && typeof value === 'object' && value._type === 'increment') {
+        const current = item?.[field] ?? 0
+        return [field, current + value.by]
+      }
+      return [field, value]
+    }),
+  )
+  const next = { ...(item ?? { id: payload.key.id }), ...resolvedUpdate }
   store.set(payload.key.id, next)
   return { result: { ...next } }
 }
@@ -178,6 +203,10 @@ function applyGet(store, payload) {
 // vient d'écrire `COMPLETED`, quel que soit le côté qui a voté en second. C'est le seul endroit
 // du système qui peut le faire quand c'est l'OWNER qui finalise (il n'a que `[read]` sur ce
 // champ, ADR-0003).
+// ÉTENDU LE 2026-09-01 (docs/adr/0019 §6) : deux fonctions supplémentaires (9e et 10e, DERNIÈRE
+// du pipeline — plafond AppSync atteint) ferment le sous-comptage de `Clinic.transfusionsDone`
+// quand c'est l'Owner qui vote en second (`resolve-clinic-id-for-stats`, source `Request` ;
+// `increment-transfusions-done`, source `Clinic`).
 const PIPELINE = [
   { fn: resolveParties, table: 'missions' },
   { fn: verifyOwnerParty, table: 'animals' },
@@ -187,6 +216,8 @@ const PIPELINE = [
   { fn: readMission, table: 'missions' },
   { fn: finalizeStatus, table: 'missions' },
   { fn: recordDonationDate, table: 'animals' },
+  { fn: resolveClinicIdForStats, table: 'requests' },
+  { fn: incrementTransfusionsDone, table: 'clinics' },
 ]
 
 const OWNER_SUB = 'owner-sub-1'
@@ -216,6 +247,7 @@ function runSubmitMissionValidation(store, { args, groups, sub }) {
     animals: world.animals,
     veterinarians: world.veterinarians,
     requests: world.requests,
+    clinics: world.clinics,
   }
   const callerSub = sub || ((groups || []).includes('Veterinarians') ? VET_SUB : OWNER_SUB)
   const ctx = { args, identity: { groups, sub: callerSub }, prev: {}, stash: {} }
@@ -283,6 +315,12 @@ beforeEach(() => {
     veterinarians: new Map([
       [VET_SUB, { id: VET_SUB, clinicID: CLINIC_ID }],
       [OTHER_VET_SUB, { id: OTHER_VET_SUB, clinicID: OTHER_CLINIC_ID }],
+    ]),
+    // AJOUTÉ le 2026-09-01 (fonction 10/10) : `transfusionsDone` non nul pour prouver un
+    // INCRÉMENT réel (pas une simple écriture de `1` en dur) sur la clinique nominale.
+    clinics: new Map([
+      [CLINIC_ID, { id: CLINIC_ID, transfusionsDone: 4 }],
+      [OTHER_CLINIC_ID, { id: OTHER_CLINIC_ID, transfusionsDone: 0 }],
     ]),
   }
 })
@@ -1372,8 +1410,149 @@ describe('submit-mission-validation-record-donation-date (8/8) — écriture iso
   })
 })
 
-describe('submitMissionValidation — Frequency Rule réarmée, pipeline COMPLET (8 fonctions)', () => {
+describe('submit-mission-validation-resolve-clinic-id-for-stats (9/10) — écriture isolée', () => {
+  const ownerCompletedCtx = (overrides = {}) => ({
+    args: { missionId: 'mission-1', outcome: 'CONFIRMED' },
+    identity: { groups: ['Owners'], sub: OWNER_SUB },
+    prev: { result: buildMission({ status: 'COMPLETED' }) },
+    stash: {
+      callerRole: 'OWNER',
+      missionAnimalID: 'animal-1',
+      missionRequestID: 'request-1',
+      finalMissionStatus: 'COMPLETED',
+    },
+    ...overrides,
+  })
+
+  it('lit la Request par l’id du stash (JAMAIS un argument client) pour en tirer le clinicID', () => {
+    const payload = resolveClinicIdForStats.request(ownerCompletedCtx())
+
+    expect(payload.operation).toBe('GetItem')
+    expect(payload.key).toEqual({ id: 'request-1' })
+  })
+
+  // LE garde-fou anti-doublon : ce chemin est déjà porté côté CLIENT
+  // (`applyVeterinarianCompletionSideEffects` -> `incrementClinicStats`), écrit AVANT même de
+  // regarder `finalMissionStatus` pour que ce soit la première chose qu'un futur lecteur voie.
+  it('appelant CLINIQUE : earlyReturn inconditionnel, AUCUNE lecture de Request — même si finalMissionStatus est COMPLETED', () => {
+    const ctx = ownerCompletedCtx({ stash: { ...ownerCompletedCtx().stash, callerRole: 'CLINIC' } })
+
+    expect(() => resolveClinicIdForStats.request(ctx)).toThrow(EarlyReturn)
+  })
+
+  it.each(['PENDING_VALIDATION', 'NO_SHOW', 'DISPUTED', 'COMPLETED_AUTO', null, undefined, ''])(
+    'statut final %s (Owner pourtant appelant) : earlyReturn, AUCUNE lecture de Request',
+    (finalMissionStatus) => {
+      const ctx = ownerCompletedCtx()
+      ctx.stash.finalMissionStatus = finalMissionStatus
+
+      expect(() => resolveClinicIdForStats.request(ctx)).toThrow(EarlyReturn)
+    },
+  )
+
+  it('Mission sans requestID dans le stash (inatteignable via la 1/8, défense en profondeur) : stash statsClinicID à null, earlyReturn', () => {
+    const ctx = ownerCompletedCtx()
+    ctx.stash.missionRequestID = undefined
+
+    expect(() => resolveClinicIdForStats.request(ctx)).toThrow(EarlyReturn)
+    expect(ctx.stash.statsClinicID).toBeNull()
+  })
+
+  it('response() : stash statsClinicID = clinicID de la Request lue', () => {
+    const ctx = ownerCompletedCtx()
+    ctx.result = { id: 'request-1', clinicID: CLINIC_ID }
+
+    expect(resolveClinicIdForStats.response(ctx)).toEqual(buildMission({ status: 'COMPLETED' }))
+    expect(ctx.stash.statsClinicID).toBe(CLINIC_ID)
+  })
+
+  // Best-effort, même doctrine que la fonction 8/8 : le vote de l'appelant est déjà écrit,
+  // irréversible, au moment où cette fonction s'exécute.
+  it('response() : erreur DynamoDB avalée — stash statsClinicID à null (la 10/10 fera alors elle-même un no-op)', () => {
+    const ctx = ownerCompletedCtx()
+    ctx.error = { type: 'DynamoDB:ThrottlingException', message: 'boom' }
+
+    expect(resolveClinicIdForStats.response(ctx)).toEqual(buildMission({ status: 'COMPLETED' }))
+    expect(ctx.stash.statsClinicID).toBeNull()
+  })
+})
+
+describe('submit-mission-validation-increment-transfusions-done (10/10) — écriture isolée', () => {
+  const readyToIncrementCtx = (overrides = {}) => ({
+    args: { missionId: 'mission-1', outcome: 'CONFIRMED' },
+    identity: { groups: ['Owners'], sub: OWNER_SUB },
+    prev: { result: buildMission({ status: 'COMPLETED' }) },
+    stash: {
+      finalMissionStatus: 'COMPLETED',
+      statsClinicID: CLINIC_ID,
+    },
+    ...overrides,
+  })
+
+  it('incrémente transfusionsDone de 1, ATOMIQUEMENT (operations.increment, pas lire-puis-écrire)', () => {
+    const payload = incrementTransfusionsDone.request(readyToIncrementCtx())
+
+    expect(payload.operation).toBe('UpdateItem')
+    expect(payload.key).toEqual({ id: CLINIC_ID })
+    expect(payload.update.transfusionsDone).toEqual({ _type: 'increment', by: 1 })
+  })
+
+  it('garde anti-upsert : la condition exige l’existence de la Clinic (sinon UpdateItem créerait une Clinic partielle)', () => {
+    expect(incrementTransfusionsDone.request(readyToIncrementCtx()).condition).toEqual({
+      id: { attributeExists: true },
+    })
+  })
+
+  it('n’écrit QUE transfusionsDone/updatedAt — aucun autre champ de Clinic n’est touché', () => {
+    expect(Object.keys(incrementTransfusionsDone.request(readyToIncrementCtx()).update).sort()).toEqual([
+      'transfusionsDone',
+      'updatedAt',
+    ])
+  })
+
+  it.each(['PENDING_VALIDATION', 'NO_SHOW', 'DISPUTED', 'COMPLETED_AUTO', null, undefined, ''])(
+    'statut final %s : earlyReturn, AUCUNE écriture sur la table Clinic',
+    (finalMissionStatus) => {
+      const ctx = readyToIncrementCtx()
+      ctx.stash.finalMissionStatus = finalMissionStatus
+
+      expect(() => incrementTransfusionsDone.request(ctx)).toThrow(EarlyReturn)
+    },
+  )
+
+  it('statsClinicID absent du stash (Request introuvable/lecture en erreur côté 9/10) : earlyReturn, AUCUNE écriture', () => {
+    const ctx = readyToIncrementCtx()
+    ctx.stash.statsClinicID = null
+
+    expect(() => incrementTransfusionsDone.request(ctx)).toThrow(EarlyReturn)
+  })
+
+  // Cette fonction est la DERNIÈRE du pipeline : sa valeur de retour EST celle de la mutation,
+  // typée `Mission`. Renvoyer `ctx.result` (la Clinic) casserait `data.status`, lu juste après
+  // par `useOwnerMissions`/`useMissionClosure`.
+  it('response() renvoie la MISSION (ctx.prev.result), jamais la Clinic écrite', () => {
+    const ctx = readyToIncrementCtx()
+    ctx.result = { id: CLINIC_ID, transfusionsDone: 5 }
+
+    expect(incrementTransfusionsDone.response(ctx)).toEqual(buildMission({ status: 'COMPLETED' }))
+  })
+
+  // Décision documentée (même doctrine que la fonction 8/8, ADR-0019 §3) : best-effort, PAS
+  // critique. Le vote de l'appelant est déjà écrit et la Mission déjà COMPLETED.
+  it.each([
+    ['Clinic inexistante (condition non satisfaite)', 'DynamoDB:ConditionalCheckFailedException'],
+    ['échec dur (throttle, incident)', 'DynamoDB:ThrottlingException'],
+  ])('response() : %s est avalé — la Mission est quand même renvoyée à l’appelant', (_label, type) => {
+    const ctx = readyToIncrementCtx()
+    ctx.error = { type, message: 'boom' }
+
+    expect(incrementTransfusionsDone.response(ctx)).toEqual(buildMission({ status: 'COMPLETED' }))
+  })
+})
+
+describe('submitMissionValidation — Frequency Rule réarmée, pipeline COMPLET (10 fonctions)', () => {
   const lastDonationDateOf = (animalId) => world.animals.get(animalId)?.lastDonationDate
+  const transfusionsDoneOf = (clinicId) => world.clinics.get(clinicId)?.transfusionsDone
 
   // LE bug que cette sous-tâche ferme : dans le flux nominal (le vétérinaire clôture d'abord
   // depuis RequestsView.vue), c'est le vote de l'OWNER qui finalise — et lui ne peut pas écrire
@@ -1411,6 +1590,51 @@ describe('submitMissionValidation — Frequency Rule réarmée, pipeline COMPLET
 
     expect(clinicSide.data.status).toBe('COMPLETED')
     expect(lastDonationDateOf('animal-1')).toBe(TODAY_IN_PARIS)
+  })
+
+  // AJOUTÉ le 2026-09-01 (docs/adr/0019 §6) : même trou, même chemin, mais pour
+  // `Clinic.transfusionsDone` plutôt que `Animal.lastDonationDate` — sous-compté quand l'Owner
+  // finalise, faute d'un droit d'écriture côté client (voir l'en-tête des fonctions 9/10 et
+  // 10/10).
+  it('l’OWNER vote en second : transfusionsDone de la clinique de la Request est INCRÉMENTÉ de 1 (le seul chemin qui pouvait le porter)', () => {
+    runSubmitMissionValidation(store, {
+      args: { missionId: 'mission-1', outcome: 'CONFIRMED' },
+      groups: ['Veterinarians'],
+      sub: VET_SUB,
+    })
+    expect(transfusionsDoneOf(CLINIC_ID)).toBe(4)
+
+    const ownerSide = runSubmitMissionValidation(store, {
+      args: { missionId: 'mission-1', outcome: 'CONFIRMED' },
+      groups: ['Owners'],
+      sub: OWNER_SUB,
+    })
+
+    expect(ownerSide.errors).toBeUndefined()
+    expect(transfusionsDoneOf(CLINIC_ID)).toBe(5)
+    // La clinique TIERCE (jamais partie à cette Mission) n'est pas touchée.
+    expect(transfusionsDoneOf(OTHER_CLINIC_ID)).toBe(0)
+  })
+
+  // Chemin déjà couvert côté CLIENT (`useMissionClosure.js` ->
+  // `applyVeterinarianCompletionSideEffects` -> `incrementClinicStats`, la clinique EST
+  // `Veterinarians` et a le droit d'écrire ce champ) : la 9e fonction fait un `earlyReturn`
+  // inconditionnel dès que l'appelant n'est pas l'Owner (AVANT même de regarder
+  // `finalMissionStatus`) précisément pour ne jamais incrémenter une SECONDE fois ici.
+  it('le VÉTÉRINAIRE vote en second : transfusionsDone N’EST PAS touché côté serveur (déjà porté côté client, doublerait le compteur)', () => {
+    runSubmitMissionValidation(store, {
+      args: { missionId: 'mission-1', outcome: 'CONFIRMED' },
+      groups: ['Owners'],
+      sub: OWNER_SUB,
+    })
+    const clinicSide = runSubmitMissionValidation(store, {
+      args: { missionId: 'mission-1', outcome: 'CONFIRMED' },
+      groups: ['Veterinarians'],
+      sub: VET_SUB,
+    })
+
+    expect(clinicSide.data.status).toBe('COMPLETED')
+    expect(transfusionsDoneOf(CLINIC_ID)).toBe(4)
   })
 
   it('un seul côté a voté (PENDING_VALIDATION) : rien n’est écrit — un don n’est pas encore confirmé', () => {

@@ -755,7 +755,7 @@ describe('amplify/data/resource.ts — double validation de Mission + notation (
     })
   })
 
-  describe('submitMissionValidation — mutation custom en pipeline (8 fonctions, voir resource.ts et les resolvers)', () => {
+  describe('submitMissionValidation — mutation custom en pipeline (10 fonctions, voir resource.ts et les resolvers)', () => {
     it('compile avec les bons arguments et retourne Mission', () => {
       const mutationType = extractType('Mutation')
       expect(mutationType).toContain(
@@ -787,7 +787,14 @@ describe('amplify/data/resource.ts — double validation de Mission + notation (
     // 7e vient d'écrire `COMPLETED`. Sa POSITION est aussi une garantie de correction, pas un
     // détail de style : elle lit `ctx.stash.finalMissionStatus`, posé par la 7e, et doit donc
     // s'exécuter APRÈS elle (avant, elle n'écrirait jamais rien).
-    it('le pipeline compte 8 fonctions, dans l’ordre exact vérification -> écriture -> effet de bord, chacune sur la bonne source de données', () => {
+    // Étendu à nouveau le 2026-09-01 (docs/adr/0019 §6) : deux fonctions supplémentaires (9e et
+    // 10e, DERNIÈRE du pipeline — plafond AppSync atteint) ferment le sous-comptage de
+    // `Clinic.transfusionsDone` quand c'est l'Owner qui vote en second (`resolve-clinic-id-for-
+    // stats`, source `Request` ; `increment-transfusions-done`, source `Clinic`). Même
+    // raisonnement de position que la 8e : la 9e lit `ctx.stash.finalMissionStatus`/`callerRole`
+    // (posés respectivement par la 7e et la 1re) et doit donc s'exécuter après elles ; la 10e
+    // consomme `ctx.stash.statsClinicID`, posé par la 9e.
+    it('le pipeline compte 10 fonctions, dans l’ordre exact vérification -> écriture -> effets de bord, chacune sur la bonne source de données', () => {
       const jsFunctions = (
         schema.transform() as unknown as {
           jsFunctions: {
@@ -813,11 +820,14 @@ describe('amplify/data/resource.ts — double validation de Mission + notation (
         ['./resolvers/submit-mission-validation-read-mission.js', 'MissionTable'],
         ['./resolvers/submit-mission-validation-finalize-status.js', 'MissionTable'],
         ['./resolvers/submit-mission-validation-record-donation-date.js', 'AnimalTable'],
+        ['./resolvers/submit-mission-validation-resolve-clinic-id-for-stats.js', 'RequestTable'],
+        ['./resolvers/submit-mission-validation-increment-transfusions-done.js', 'ClinicTable'],
       ])
     })
 
-    // AppSync plafonne un resolver de pipeline à 10 fonctions : ce pipeline en consomme 8. Le
-    // pin sert d'alerte précoce si une future sous-tâche s'en approche sans le savoir.
+    // AppSync plafonne un resolver de pipeline à 10 fonctions : ce pipeline en consomme
+    // désormais 10 (2026-09-01, docs/adr/0019 §6) — le plafond exact, plus aucune marge pour une
+    // future écriture secondaire sans retirer une fonction existante ou changer de mécanisme.
     it('reste sous le plafond AppSync de 10 fonctions par resolver de pipeline', () => {
       const jsFunctions = (
         schema.transform() as unknown as {
