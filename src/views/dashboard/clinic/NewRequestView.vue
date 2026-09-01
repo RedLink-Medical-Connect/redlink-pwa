@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useToast } from 'primevue/usetoast'
 import DashboardSidebar from '@/components/dashboard/DashboardSidebar.vue'
+import BreedAutocomplete from '@/components/common/BreedAutocomplete.vue'
 import { useClinicRequests } from '@/composables/useClinicRequest.js'
 import { BloodGroupsBySpecies } from '@/constants/enums.js'
 
@@ -235,8 +236,16 @@ const handleSubmit = async () => {
                   <label class="text-xs font-bold text-zinc-500 uppercase">{{
                     $t('request.form.breed')
                   }}</label>
-                  <InputText
+                  <!-- `form.species` reste en minuscules ('dog'/'cat', voir `speciesOptions`
+                       ci-dessus) alors que `breedsForSpecies()` (constants/breeds.js) compare
+                       strictement à `Species.DOG`/`Species.CAT` ('DOG'/'CAT') -- même pont
+                       `toUpperCase()` que `bloodOptions` juste au-dessus, sinon la liste de
+                       suggestions resterait silencieusement vide (le champ resterait
+                       utilisable en texte libre, `forceSelection` étant absent, mais sans
+                       aucune suggestion). -->
+                  <BreedAutocomplete
                     v-model="form.breed"
+                    :species="form.species?.toUpperCase()"
                     class="!bg-zinc-50 dark:!bg-zinc-950 !border-zinc-300 dark:!border-zinc-800 !text-zinc-900 dark:!text-white !p-3 focus:!border-[#ff3b4e]"
                   />
                 </div>
