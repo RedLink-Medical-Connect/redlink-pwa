@@ -58,7 +58,31 @@ architecturales) et `.cursorrules` (conventions détaillées pour l'éditeur).
   obligatoirement `.js` (pas `.ts` : `resolveEntryPath()` l'upload tel quel,
   sans transpilation, vers le runtime `APPSYNC_JS`). Voir ADR-0011
   (`linkRequestToMission`, `amplify/data/resolvers/link-request-to-mission.js`)
-  pour l'exemple de référence si un futur besoin similaire apparaît.
+  pour l'exemple de référence à une seule fonction (un seul `dataSource`, un
+  seul aller-retour DynamoDB).
+- **Mutation custom en PIPELINE** (plusieurs fonctions, sources de données
+  hétérogènes) : `.handler([...])` accepte un TABLEAU de `a.handler.custom({...})`
+  — compile en un vrai resolver AppSync `kind: PIPELINE`, une fonction = UNE SEULE
+  source de données (`dataSource: a.ref('ModelName')`), chaînées via
+  `ctx.prev.result`. Nécessaire dès qu'une écriture doit (a) vérifier des données
+  sur PLUSIEURS modèles avant/pendant l'écriture (ex. l'appelant est-il réellement
+  partie à la ressource ?), ou (b) écrire sur plusieurs tables dans le même appel.
+  `ctx.stash` : espace serveur partagé entre fonctions du pipeline, inaccessible au
+  client, pour faire transiter un état calculé tôt (rôle de l'appelant, FK résolus)
+  vers une fonction plus tardive sans le relire. `runtime.earlyReturn(ctx.prev.result)` :
+  fait sauter la source de données ET le `response()` de la fonction courante — le
+  moyen de porter plusieurs branches conditionnelles (ex. une vérification qui ne
+  s'applique qu'à UN des deux rôles appelants) dans un seul pipeline sans payer les
+  lectures qui ne concernent pas l'appelant courant. La DERNIÈRE fonction du
+  pipeline doit renvoyer `ctx.prev.result` du type attendu par `.returns(...)` —
+  si elle écrit sur une AUTRE table que le type de retour (ex. une fonction finale
+  qui écrit `Animal` alors que la mutation `.returns(a.ref('Mission'))`), elle doit
+  explicitement propager le résultat de la fonction précédente, pas son propre
+  résultat. **Plafond AppSync : 10 fonctions par pipeline.** Voir
+  `submitMissionValidation` (`amplify/data/resource.ts`, 8 fonctions,
+  `amplify/data/resolvers/submit-mission-validation-*.js`) et ADR-0018/0019/0020
+  pour l'exemple de référence complet (vérification d'identité multi-modèle +
+  écriture cross-table).
 - Cognito via `defineAuth` (`amplify/auth/resource.ts`) — user pools, groupes
   `Veterinarians`/`Owners` déclarés statiquement (`groups: [...]`),
   contrairement à Gen1 où ils étaient créés paresseusement au premier signup —
@@ -82,7 +106,45 @@ architecturales) et `.cursorrules` (conventions détaillées pour l'éditeur).
 - Lambda : trigger PostConfirmation sur le modèle de fonctions Gen2
   (`amplify/functions/post-confirmation/`, TypeScript, `defineFunction`),
   référencé depuis `amplify/auth/resource.ts` — voir ADR-0008.
+- **Lambda planifiée + accès DynamoDB direct** : `defineFunction({ schedule: { cron,
+  timezone } })` (`amplify/functions/mission-validation-auto-finalizer/`, EventBridge
+  Scheduler ; cron EventBridge à 5-6 champs, `day-of-month` OU `day-of-week` à `?`).
+  Une Lambda qui doit écrire dans les données managées par `defineData` passe par le
+  **SDK DynamoDB sur la table managée** (`backend.data.resources.tables['<Model>']`,
+  policy IAM scopée à l'ARN exact — l'ARN de l'INDEX pour un `Query` sur GSI), pas par
+  le client Data en mode IAM (`allow.resource()`) : les mutations générées n'ont pas de
+  `condition` (ADR-0011) et une règle `allow.resource()` de niveau modèle ne s'applique
+  pas aux champs portant un `@auth` de CHAMP (ADR-0009). Corollaire : écrire en direct
+  bypasse AppSync, donc `createdAt`/`updatedAt`/`__typename` sont à poser à la main.
+  Index secondaire : `.secondaryIndexes((index) => [index('champ').name(...)])` — un
+  champ `a.ref()` d'enum y est éligible (contrairement à `.identifier()`, ADR-0015).
+  Voir ADR-0016.
+- **Lambda déclenchée par un flux DynamoDB** : les tables managées Gen2 ont DÉJÀ
+  leurs Streams activés (`NEW_AND_OLD_IMAGES`, posé en dur par le transformer sur
+  toute table `AMPLIFY_TABLE`) — rien à activer, `tables['<Model>'].tableStreamArn`
+  est directement exploitable. `defineFunction` n'a pas de déclencheur "flux" :
+  câblage CDK dans `backend.ts` (`lambda.addEventSource(new DynamoEventSource(table,
+  {...}))`, qui pose l'`EventSourceMapping` ET les droits de lecture du flux).
+  Régler explicitement `retryAttempts` (défaut = rejeu INFINI, shard bloqué 24 h) et
+  filtrer sur `eventName` ; le handler doit être idempotent (le lot entier est rejoué
+  sur échec). Voir `amplify/functions/rating-aggregation/` et ADR-0017.
 - DynamoDB via les modèles `defineData` (`@model`/`a.model()`).
+- **Champ dénormalisé calculé côté serveur (agrégat)** : quatrième idiome `@auth` de ce
+  schéma — `.authorization()` de CHAMP n'accordant que `read`, à personne `create`/
+  `update` (`clinicRatingAndModerationFieldsReadOnly`/`ownerRatingAggregateFieldsReadOnly`,
+  agrégats de notation sur `Clinic`/`Owner`). Pour toute valeur qu'un client ne doit pas
+  pouvoir falsifier ni même calculer : l'écriture passe uniquement par une Lambda (SDK
+  direct). Attention en posant ce genre de règle : elle REMPLACE la règle de modèle
+  (ADR-0009), donc retirer un rôle qui y avait `read` casse toute lecture SANS
+  `selectionSet` explicite faite par ce rôle. Voir ADR-0017. Les seuils de
+  modération (3 étoiles/5 avis pour `needsAdminReview`) sont des variables
+  d'environnement de la Lambda `rating-aggregation` (`amplify/functions/
+  rating-aggregation/resource.ts`), PAS dans `src/constants/` — un futur seuil
+  d'alerte dashboard clinique (3,5 étoiles/3 avis, ADR-0017 §7, pas encore
+  câblé côté front) devra décider où il vit : dupliquer la valeur côté
+  `src/constants/enums.js` casserait la source de vérité unique si les deux
+  seuils divergent un jour, la lire depuis le backend n'a pas de mécanisme
+  établi dans ce repo à ce jour.
 - **Enregistrement write-once (preuve immuable)** : `.authorization()` de niveau modèle
   posant `create`+`read` seul, sans jamais accorder `update`/`delete` à qui que ce soit,
   même l'auteur de la ligne — troisième idiome `@auth` de ce schéma, à côté des deux
@@ -96,13 +158,25 @@ architecturales) et `.cursorrules` (conventions détaillées pour l'éditeur).
   `fetch()` (`useLegalDocument.js`) et rendu via `marked`
   (`src/services/legal-content-service.js`) — version en vigueur centralisée dans
   `src/constants/legal.js`, séparée du contenu lui-même. Voir ADR-0014.
-- Les 12 composables/services applicatifs qui parlent GraphQL sont sur
+- Les 13 composables applicatifs qui parlent GraphQL sont sur
   `client.models.X` (`aws-amplify/data`) : `useAnimals.js`,
   `useOwnerProfile.js`, `useOwnerAvailability.js`,
   `useRegistrationCompletion.js`, `useClinicDonors.js`, `useClinicRequest.js`,
   `useClinicSettings.js`, `useClinicStats.js`, `useAnimalValidation.js`,
-  `useMatchingRequests.js`, `useMissionClosure.js`, `useOwnerMissions.js` (ce
-  dernier via `client.mutations.linkRequestToMission`, ADR-0011). `src/
+  `useMatchingRequests.js`, `useMissionClosure.js`, `useOwnerMissions.js` (ces
+  deux derniers via `client.mutations.submitMissionValidation`, double
+  validation de Mission, ADR-0018/0019/0020 — `useOwnerMissions.js` aussi via
+  `client.mutations.linkRequestToMission`, ADR-0011), `useRatings.js`
+  (notation par étoiles, `client.models.Rating.create()`, ADR-0015).
+  **`src/composables/mission-completion-side-effects.js`** est un module à
+  part — ni un `useXxx()` composable (aucune réactivité, rien à exposer à un
+  composant) ni un `service` au sens strict ci-dessous (il fait des appels
+  GraphQL, ce que `.cursorrules` interdit à un service) : un module partagé
+  "composable-like" qui reçoit le client Gen2 en PARAMÈTRE (jamais
+  `generateClient()` en interne) pour être appelable depuis `useMissionClosure.js`
+  ET `useOwnerMissions.js` sans qu'un composable importe les internals d'un
+  autre — convention à réutiliser pour toute future logique d'écriture
+  GraphQL partagée par plusieurs composables. `src/
   main.js` importe `amplify_outputs.json` (généré par `npx ampx sandbox`,
   gitignored — n'existe qu'après un premier déploiement réel, action du repo
   owner, aucun agent ne déploie). Comportement central à connaître : le

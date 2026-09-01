@@ -25,7 +25,14 @@
     "km": "km",
     "ml": "ml",
     "kg": "kg",
-    "locale": "en-US"
+    "locale": "en-US",
+    "star_rating": {
+      "star_1": "1 star",
+      "star_2": "2 stars",
+      "star_3": "3 stars",
+      "star_4": "4 stars",
+      "star_5": "5 stars"
+    }
   },
   "errors": {
     "fill_all_fields": "Please fill in all fields.",
@@ -515,11 +522,13 @@
         "title": "My missions",
         "tabs": {
           "active": "Active",
-          "history": "History"
+          "history": "History",
+          "pending_validation": "Awaiting validation"
         },
         "empty": {
           "active": "No active missions.",
           "history": "No history yet.",
+          "pending_validation": "No missions awaiting validation.",
           "go_to_board": "View available requests"
         },
         "load_error": "Unable to load your missions — try again.",
@@ -528,7 +537,10 @@
           "pending_arrival": "Pending arrival",
           "accepted": "Accepted",
           "completed": "Completed",
-          "no_show": "Cancelled (no show)"
+          "no_show": "Cancelled (no show)",
+          "pending_validation": "Awaiting validation",
+          "completed_auto": "Completed (auto)",
+          "disputed": "Disputed"
         },
         "unknown_clinic": "Unknown clinic",
         "planned_on": "Scheduled on:",
@@ -536,6 +548,39 @@
         "actions": {
           "call": "Call",
           "go": "Navigate"
+        },
+        "dispute_reason_label": "Dispute reason:",
+        "validation": {
+          "cta": "Did the donation take place?",
+          "awaiting_clinic": "Awaiting confirmation from the clinic",
+          "dialog_title": "Donation confirmation",
+          "question": "Did the donation actually take place with {name}?",
+          "confirm_btn": "Yes, the donation took place",
+          "deny_btn": "No, the donation did not take place",
+          "dispute_reason_label": "Reason (optional)",
+          "dispute_reason_placeholder": "Explain what happened...",
+          "send_btn": "Send",
+          "back_btn": "Back",
+          "toasts": {
+            "success": "Your answer has been recorded."
+          }
+        },
+        "rating": {
+          "checking": "Checking...",
+          "already_rated": "You have already rated this clinic.",
+          "prompt": "Rate this clinic",
+          "stars_aria": "Clinic rating",
+          "comment_placeholder": "Comment (optional)",
+          "comment_aria": "Comment about the clinic (optional)",
+          "submit_btn": "Send",
+          "toasts": {
+            "success": "Thank you for your feedback!"
+          }
+        },
+        "post_validation_rating": {
+          "dialog_title": "Donor validated!",
+          "question": "The donation has taken place — would you like to rate the clinic now?",
+          "later_btn": "Later"
         }
       }
     },
@@ -556,6 +601,12 @@
         "deleted": "Account deleted.",
         "delete_failed": "Unable to delete the account",
         "load_failed": "Unable to load the profile"
+      },
+      "reputation": {
+        "title": "Your reputation",
+        "count_label": "{average} / 5 — {count} reviews",
+        "no_reviews": "No reviews yet.",
+        "stars_aria": "Your average rating"
       }
     },
     "settings": {
@@ -564,7 +615,8 @@
         "subscription": "SUBSCRIPTION",
         "vet_ref": "REFERRING VETERINARIAN",
         "notifications": "NOTIFICATION PREFERENCES",
-        "activity": "ACTIVITY HISTORY"
+        "activity": "ACTIVITY HISTORY",
+        "reputation": "REPUTATION"
       },
       "clinic_name": "Clinic name",
       "phone": "Phone number",
@@ -589,6 +641,15 @@
         "title": "Warning!",
         "confirm": "Are you sure? This action is irreversible. If you are the only veterinarian attached to this clinic, it will be deleted along with your account; otherwise, only your account will be deleted.",
         "confirm_action": "Confirm"
+      },
+      "reputation": {
+        "count_label": "{average} / 5 — {count} reviews",
+        "no_reviews": "No reviews yet.",
+        "stars_aria": "Clinic average rating",
+        "under_review_title": "Account under review",
+        "under_review_message": "Your average rating has crossed a threshold that triggers a human review of your account. This does not affect your current activity — a member of our team will get back to you if needed.",
+        "proactive_alert_title": "Your rating is declining",
+        "proactive_alert_message": "Your recent average rating is below 3.5 stars. This is just an information — keep nurturing your relationship with donor owners."
       }
     },
     "requests": {
@@ -653,7 +714,29 @@
         "mission_completed_success": "Mission closed: donation recorded",
         "mission_no_show_success": "Mission closed: donor no-show",
         "mission_closure_failed": "Error while closing the mission",
-        "mission_closed_request_still_open": "Mission closed, but the request couldn't be closed automatically — check its status."
+        "mission_closed_request_still_open": "Mission closed, but the request couldn't be closed automatically — check its status.",
+        "mission_already_finalized": "This mission was already finalized (response window expired) — your answer could not be recorded."
+      },
+      "validation": {
+        "awaiting_owner": "Awaiting confirmation from the owner",
+        "disputed_title": "Disputed",
+        "your_answer_confirmed": "You confirmed the donation took place",
+        "your_answer_denied": "You indicated the donation did not take place",
+        "owner_answer_confirmed": "The owner confirmed the donation took place",
+        "owner_answer_denied": "The owner indicated the donation did not take place",
+        "dispute_reason_label": "Reason given by the owner:",
+        "completed_auto_label": "Completed automatically"
+      },
+      "rating": {
+        "prompt": "Rate this owner",
+        "stars_aria": "Owner rating",
+        "comment_placeholder": "Comment (optional)",
+        "comment_aria": "Comment about the owner (optional)",
+        "submit_btn": "Send",
+        "already_rated": "You have already rated this owner.",
+        "toasts": {
+          "success": "Thank you for your feedback!"
+        }
       }
     },
     "donors": {

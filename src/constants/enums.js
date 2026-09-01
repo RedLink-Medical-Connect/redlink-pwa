@@ -28,12 +28,49 @@ export const RequestStatus = Object.freeze({
   CANCELLED: 'CANCELLED',
 })
 
+// PENDING_VALIDATION/COMPLETED_AUTO/DISPUTED (2026-08-26, double validation de Mission,
+// amplify/data/resource.ts) ajoutés en miroir du schéma -- EN_ROUTE/ARRIVED existent côté
+// schéma (amplify/data/resource.ts, MissionStatus) mais n'avaient déjà pas d'équivalent ici
+// avant ce lot (gap préexistant, hors périmètre de cette sous-tâche, non ajouté ici pour ne
+// pas élargir le diff au-delà de ce qui est demandé). COMPLETED_AUTO est écrit par la Lambda
+// planifiée `mission-validation-auto-finalizer` depuis le commit `4cf287a` (ADR-0016) -- elle
+// existe, ce commentaire la disait "future, non implémentée" jusqu'au 2026-08-28. AUCUN code
+// front ne l'écrit ni ne peut l'écrire (Mission.status n'est écrivable que par la mutation
+// custom `submitMissionValidation`, qui ne produit jamais cette valeur) : il n'est présent ici
+// que pour la LECTURE (libellé d'état, filtrage d'historique -- voir `historyMissions` dans
+// useOwnerMissions.js) et pour les garde-fous "COMPLETED STRICT" des deux composables de
+// validation, qui doivent pouvoir le distinguer d'un COMPLETED réel (sans quoi les écritures
+// secondaires de fin de Mission seraient comptées deux fois, ADR-0016 §4).
 export const MissionStatus = Object.freeze({
   ACCEPTED: 'ACCEPTED',
   PENDING_ARRIVAL: 'PENDING_ARRIVAL',
   COMPLETED: 'COMPLETED',
   NO_SHOW: 'NO_SHOW',
   CANCELLED: 'CANCELLED',
+  PENDING_VALIDATION: 'PENDING_VALIDATION',
+  COMPLETED_AUTO: 'COMPLETED_AUTO',
+  DISPUTED: 'DISPUTED',
+})
+
+// Miroir front de `MissionValidationOutcome` (amplify/data/resource.ts) -- même convention
+// que `AccountRole`/`LegalDocumentType` ci-dessus : seul endroit où le front a besoin de
+// connaître ces valeurs (soumission de `submitMissionValidation`, prochaine sous-tâche —
+// composables non implémentés dans cette étape 1/5, schéma uniquement). 'PENDING' est l'état
+// initial implicite (jamais écrit explicitement côté resolver, voir
+// amplify/data/resolvers/submit-mission-validation-write-side.js) — un champ non encore
+// validé apparaît comme `null`/absent côté client, pas littéralement 'PENDING'.
+export const MissionValidationOutcome = Object.freeze({
+  PENDING: 'PENDING',
+  CONFIRMED: 'CONFIRMED',
+  DENIED: 'DENIED',
+})
+
+// Miroir front de `RatingParticipantRole` (amplify/data/resource.ts) -- distingue les deux
+// côtés d'une `Rating` (Owner note la Clinic, Clinic note l'Owner). Voir
+// docs/adr/0015-rating-model-and-forgery-residual.md.
+export const RatingParticipantRole = Object.freeze({
+  OWNER: 'OWNER',
+  CLINIC: 'CLINIC',
 })
 
 export const RequestType = Object.freeze({

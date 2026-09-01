@@ -93,6 +93,14 @@ export function useClinicRequests() {
 
       const { data, errors } = await client.models.Request.list({
         filter: { clinicID: { eq: cId } },
+        // Câblage UI double validation/notation (sous-tâche suivante, PR de suivi) : 3 champs
+        // ajoutés à ce selectionSet préexistant, tous consommés par RequestsView.vue --
+        // `mission.clinicValidationOutcome`/`mission.ownerValidationOutcome` pilotent
+        // l'affichage des boutons Compléter/Absent (masqués si la clinique a déjà voté) et de
+        // l'état "en attente du propriétaire"/Litige ; `mission.ownerDisputeReason` est affiché
+        // en lecture seule sur une Mission DISPUTED. `mission.animal.ownerID` (déjà présent
+        // ci-dessus) sert de `targetID` à `submitRating` (noter le propriétaire) sans
+        // aller-retour réseau dédié.
         selectionSet: [
           'id',
           'requestType',
@@ -108,6 +116,9 @@ export function useClinicRequests() {
           'mission.animalID',
           'mission.createdAt',
           'mission.updatedAt',
+          'mission.clinicValidationOutcome',
+          'mission.ownerValidationOutcome',
+          'mission.ownerDisputeReason',
           'mission.animal.name',
           'mission.animal.breed',
           'mission.animal.weight',

@@ -7,8 +7,36 @@ import {
   satisfiesFrequencyRule,
 } from '@/services/eligibility-service'
 import { throwIfGraphqlError } from '@/services/graphql-error-service'
-import { RequestStatus, RequestType, MissionStatus } from '@/constants/enums'
+import { applyOwnerCompletionSideEffects } from '@/composables/mission-completion-side-effects'
+import {
+  RequestStatus,
+  RequestType,
+  MissionStatus,
+  MissionValidationOutcome,
+} from '@/constants/enums'
 
+// Correctif QA (2026-08-27) : `submitDonationValidation` déclenche désormais les écritures
+// secondaires de fin de Mission quand c'est SON vote qui fait passer la Mission en COMPLETED
+// (module partagé `mission-completion-side-effects.js`, importé aussi par
+// `useMissionClosure.js` — aucun des deux composables n'importe l'autre). Avant ce correctif,
+// aucune ne partait sur ce chemin, alors que le flux nominal (le vétérinaire clôture d'abord
+// depuis RequestsView.vue) fait précisément de l'Owner le SECOND votant : l'annuaire donneurs
+// restait vide et la Frequency Rule non réarmée pour un don pourtant confirmé des deux côtés.
+// ⚠️ Ce correctif front est PARTIEL par construction et c'est documenté, pas oublié : `@auth`
+// interdit à un Owner d'écrire `Animal.lastDonationDate` et les compteurs `Clinic`. La moitié
+// qui comptait vraiment a été fermée CÔTÉ SERVEUR depuis (commit `8c14e7d`, ADR-0019) : la 8e
+// fonction du pipeline `submitMissionValidation` écrit `Animal.lastDonationDate` dès que la
+// Mission atteint `COMPLETED`, quel que soit le côté qui vote en second — la Frequency Rule est
+// donc réarmée sur tous les chemins. Seuls les compteurs `Clinic` restent non incrémentés quand
+// l'Owner vote en second (résidu assumé, indicateurs de tableau de bord — voir l'en-tête du
+// module partagé et le JSDoc de `submitDonationValidation`).
+//
+// Double validation de Mission (2026-08-26, étape 4/5) : ce composable gagne
+// `submitDonationValidation` (`client.mutations.submitMissionValidation`, seconde mutation
+// custom de ce schéma après `linkRequestToMission`) — le pendant Owner de `closeMission`
+// (useMissionClosure.js). Voir sa doc pour le contrat, et `historyMissions`/
+// `awaitingValidationMissions` pour les statuts que la double validation ajoute.
+//
 // Phase 8, sous-tâche 5 (lot 3/3, le dernier) : migré sur le client Gen2 (`aws-amplify/data`,
 // `client.models.Request.*`/`client.models.Animal.*`/`client.models.Mission.*`/
 // `client.mutations.linkRequestToMission`). Les documents Gen1 (`listRequests`/`getRequest`
@@ -62,6 +90,42 @@ export function mapAcceptMissionError(
   return ACCEPT_MISSION_ERROR_MESSAGES[errorMessage] || fallback
 }
 
+// Double validation de Mission (2026-08-26, étape 4/5) — pendant de
+// `ACCEPT_MISSION_ERROR_MESSAGES` ci-dessus pour `submitDonationValidation`. Les deux codes
+// couverts sont les seuls que la fonction NORMALISE elle-même (voir sa doc) : tout le reste
+// (réseau, `@auth`, `Unauthorized` du resolver pour un appelant hors groupe) retombe sur le
+// message générique.
+const SUBMIT_DONATION_VALIDATION_ERROR_MESSAGES = {
+  ALREADY_VALIDATED:
+    'Vous avez déjà répondu pour cette mission — votre réponse ne peut plus être modifiée.',
+  INVALID_OUTCOME: 'Réponse invalide : indiquez si le don a eu lieu ou non.',
+  // 2026-08-28 (docs/adr/0020) : message VOLONTAIREMENT distinct d'`ALREADY_VALIDATED`, c'est
+  // toute la raison d'être du code d'erreur serveur séparé. Les deux cas sont irrécupérables de
+  // la même façon (aucun retry possible) mais n'ont pas la même cause côté utilisateur : ici
+  // l'Owner n'a rien fait de mal — c'est le délai de réponse qui a expiré et la finalisation
+  // automatique (`COMPLETED_AUTO`/`DISPUTED`, Lambda planifiée, ADR-0016) qui a tranché à sa
+  // place. Lui répondre "vous avez déjà répondu" serait faux et incompréhensible.
+  MISSION_ALREADY_FINALIZED:
+    'Cette mission a déjà été clôturée (délai de réponse dépassé) — votre réponse ne peut plus être enregistrée.',
+}
+
+/**
+ * Traduit une erreur levée par `submitDonationValidation` (son `.message`, l'un des codes
+ * ci-dessus) en message utilisateur clair. Même forme, mêmes raisons et même testabilité que
+ * `mapAcceptMissionError` ci-dessus (fonction pure exportée à côté du composable, hors de
+ * tout composant `.vue`). Retourne `fallback` pour tout code non reconnu.
+ *
+ * @param {string} errorMessage
+ * @param {string} [fallback]
+ * @returns {string}
+ */
+export function mapSubmitDonationValidationError(
+  errorMessage,
+  fallback = 'Impossible d’enregistrer votre réponse pour cette mission.',
+) {
+  return SUBMIT_DONATION_VALIDATION_ERROR_MESSAGES[errorMessage] || fallback
+}
+
 /**
  * Détecte si une erreur renvoyée par `client.graphql()` correspond à l'échec de la
  * condition atomique posée sur `linkRequestToMission` (ADR-0001 : `Request.status = OPEN`),
@@ -96,6 +160,60 @@ const isConditionalCheckFailure = (error) => {
   })
 }
 
+/**
+ * Détecte l'erreur `ALREADY_VALIDATED` levée par le resolver `submitMissionValidation`
+ * (fonction 1/3, `submit-mission-validation-write-side.js`) quand CE côté a déjà soumis sa
+ * validation pour cette Mission — write-once par côté, condition DynamoDB
+ * `attributeExists: false` sur le champ d'outcome de l'appelant.
+ *
+ * Contrairement à `isConditionalCheckFailure` ci-dessus (qui doit deviner la forme d'une
+ * erreur DynamoDB remontée par un resolver GÉNÉRÉ), le code lu ici est celui que NOTRE
+ * resolver pose explicitement : `util.error(message, 'ALREADY_VALIDATED', ...)` place cette
+ * chaîne dans `errorType` de l'entrée `errors` correspondante — pas une supposition sur le
+ * comportement d'AppSync, mais le contrat de `util.error(message, errorType, data)`. On lit
+ * quand même le `message` en repli, par symétrie avec `isConditionalCheckFailure` et pour
+ * rester robuste si une future version d'AppSync remaniait la sérialisation.
+ *
+ * L'erreur inspectée ici est celle synthétisée par `throwIfGraphqlError` (elle porte
+ * `.errors`, le tableau `GraphQLFormattedError` d'origine), pas la réponse `{ data, errors }`
+ * elle-même — voir graphql-error-service.js.
+ */
+const isAlreadyValidatedError = (error) => {
+  const graphQLErrors = error?.errors
+  if (!Array.isArray(graphQLErrors)) return false
+
+  return graphQLErrors.some((e) => {
+    const errorType = e?.errorType || ''
+    const message = (e?.message || '').toLowerCase()
+    return errorType === 'ALREADY_VALIDATED' || message.includes('déjà soumis sa validation')
+  })
+}
+
+/**
+ * Détecte l'erreur `MISSION_ALREADY_FINALIZED` levée par le resolver (fonction 5/8,
+ * `submit-mission-validation-write-side.js`, correctif du 2026-08-28 — docs/adr/0020) quand la
+ * Mission porte DÉJÀ un statut terminal au moment du vote : typiquement une finalisation
+ * automatique (`COMPLETED_AUTO`/`DISPUTED`) prononcée par la Lambda planifiée après expiration du
+ * délai de réponse. Ce cas est MUTUELLEMENT EXCLUSIF d'`ALREADY_VALIDATED` côté serveur (la garde
+ * de statut précède la condition write-once, et le resolver n'émet qu'une seule erreur), mais les
+ * deux sont testés séparément ici : les confondre redonnerait à l'Owner le message "vous avez déjà
+ * répondu" alors qu'il n'a précisément jamais pu répondre.
+ *
+ * Même forme et mêmes garanties que `isAlreadyValidatedError` ci-dessus : le code lu est celui que
+ * NOTRE resolver pose explicitement (`util.error(message, 'MISSION_ALREADY_FINALIZED')` -> champ
+ * `errorType`), avec le `message` en repli par symétrie.
+ */
+const isMissionAlreadyFinalizedError = (error) => {
+  const graphQLErrors = error?.errors
+  if (!Array.isArray(graphQLErrors)) return false
+
+  return graphQLErrors.some((e) => {
+    const errorType = e?.errorType || ''
+    const message = (e?.message || '').toLowerCase()
+    return errorType === 'MISSION_ALREADY_FINALIZED' || message.includes('déjà clôturée')
+  })
+}
+
 export function useOwnerMissions() {
   const client = generateClient()
 
@@ -103,6 +221,11 @@ export function useOwnerMissions() {
   const myMissions = ref([])
   const isLoading = ref(false)
   const isAccepting = ref(false)
+  // Ref de chargement dédiée à `submitDonationValidation` (même convention que `isAccepting`
+  // ci-dessus) — surtout PAS partagée avec `isAccepting` : accepter une Request et valider un
+  // don sont deux actions distinctes, potentiellement affichées sur le même écran, et un
+  // spinner partagé bloquerait visuellement la mauvaise.
+  const isSubmittingValidation = ref(false)
   // Phase 7.6 (R-09) : distingue "chargement en erreur" d'une liste réellement vide pour les
   // deux flux principaux de lecture ci-dessous (fetchAvailableMissions/fetchMyMissions),
   // même convention `loadError` que le reste du repo (CLAUDE.md). Partagé entre les deux
@@ -157,6 +280,18 @@ export function useOwnerMissions() {
       // directs (relation `selectionSet` Gen2), jamais enveloppés dans `{ items: [...] }`
       // comme le faisait Gen1 -- voir useClinicDonors.js pour ce même comportement déjà
       // rencontré en lot 2.
+      //
+      // Câblage UI double validation/notation (sous-tâche suivante, PR de suivi) : champs
+      // ajoutés à ce selectionSet préexistant, chacun consommé par MissionsView.vue --
+      // `missions.ownerValidationOutcome` pilote l'affichage "en attente de validation"/CTA
+      // de `submitDonationValidation` (`missions.clinicValidationOutcome` retiré le
+      // 2026-08-31 -- revue a11y/lead-dev : aucun endroit de `src/` ne le consommait,
+      // convention stricte de ce repo contre la sur-sélection, voir CLAUDE.md) ;
+      // `missions.ownerDisputeReason` est affiché en lecture seule sur une Mission DISPUTED ;
+      // `missions.request.clinicID` sert de `targetID` à `submitRating` (noter la clinique)
+      // sans aller-retour réseau dédié -- même raisonnement que
+      // `resolveMissionClinicId()` ci-dessous, qui ne peut pas être réutilisée ici (elle lit
+      // une SEULE Mission par id, hors de toute liste chargée).
       const { data, errors } = await client.models.Animal.list({
         filter: { ownerID: { eq: userId } },
         selectionSet: [
@@ -166,8 +301,11 @@ export function useOwnerMissions() {
           'missions.id',
           'missions.status',
           'missions.appointmentDatetime',
+          'missions.ownerValidationOutcome',
+          'missions.ownerDisputeReason',
           'missions.request.id',
           'missions.request.requestType',
+          'missions.request.clinicID',
           'missions.request.clinic.name',
           'missions.request.clinic.address',
           'missions.request.clinic.phone',
@@ -351,17 +489,244 @@ export function useOwnerMissions() {
       isAccepting.value = false
     }
   }
+  /**
+   * Résout le `clinicID` de la clinique concernée par une Mission (`Mission.request.clinicID`),
+   * nécessaire à l'upsert `ClinicOwnerRelation` déclenché quand le vote de l'Owner fait passer
+   * la Mission en `COMPLETED`.
+   *
+   * CHOIX (à scruter en revue) : résolu ICI par une lecture dédiée, plutôt que reçu en
+   * paramètre comme `closeMission(..., clinicID, ownerID)` le fait côté vétérinaire. Les deux
+   * côtés ne sont pas dans la même situation : `RequestsView.vue` a déjà la Request complète en
+   * main (`listRequestsByClinic`) et passer son `clinicID` ne lui coûte rien, alors que côté
+   * Owner la seule source possible serait la liste que CE composable a lui-même produite —
+   * la faire transiter par la vue pour la lui repasser ensuite serait un détour, et rendrait
+   * `submitDonationValidation` silencieusement inopérante pour tout appelant qui n'aurait pas
+   * appelé `fetchMyMissions()` au préalable (état local vide). C'est aussi la situation exacte
+   * de la Lambda `mission-validation-auto-finalizer`, qui résout de la même façon
+   * `Request.clinicID` faute de `clinicID` sur `Mission` (ADR-0016 §5).
+   *
+   * `selectionSet` réduit au strict nécessaire (un seul champ, à travers une relation) — la
+   * convention CLAUDE.md vise précisément ce cas.
+   *
+   * Best-effort, contrairement aux helpers de résolution de contexte du reste du repo
+   * (`fetchClinicId()`/`fetchClinicContext()`, qui laissent délibérément remonter leurs
+   * erreurs) : ceux-là conditionnent un flux de LECTURE dont l'échec doit devenir visible via
+   * `loadError`. Ici, le vote de l'Owner est déjà enregistré côté serveur et irréversible
+   * (write-once) au moment de l'appel — laisser remonter une erreur de cette lecture
+   * transformerait une soumission RÉUSSIE en échec affiché, sans aucun retry possible.
+   *
+   * @param {string} missionId
+   * @returns {Promise<string|null>} le `clinicID`, ou `null` (introuvable ou erreur)
+   */
+  const resolveMissionClinicId = async (missionId) => {
+    try {
+      const { data, errors } = await client.models.Mission.get(
+        { id: missionId },
+        { selectionSet: ['request.clinicID'] },
+      )
+      throwIfGraphqlError(errors, 'getMission')
+      return data?.request?.clinicID ?? null
+    } catch (e) {
+      console.error(
+        'Erreur résolution de la clinique de la mission (écritures secondaires de fin de Mission) :',
+        e,
+      )
+      return null
+    }
+  }
+
+  /**
+   * Identité de l'Owner authentifié courant, pour l'upsert `ClinicOwnerRelation`
+   * (`ClinicOwnerRelation.ownerID`). Même source que `fetchMyMissions` (`getCurrentUser()`),
+   * jamais un paramètre : c'est l'identité de l'appelant lui-même, la faire fournir par la vue
+   * n'apporterait qu'un risque de divergence. Best-effort pour la même raison que
+   * `resolveMissionClinicId` ci-dessus.
+   *
+   * @returns {Promise<string|null>}
+   */
+  const resolveCurrentOwnerId = async () => {
+    try {
+      const { userId } = await getCurrentUser()
+      return userId ?? null
+    } catch (e) {
+      console.error(
+        "Erreur résolution de l'identité du propriétaire (écritures secondaires de fin de Mission) :",
+        e,
+      )
+      return null
+    }
+  }
+
+  /**
+   * Soumet la validation CÔTÉ OWNER pour une Mission — pendant exact de `closeMission`
+   * (useMissionClosure.js) côté vétérinaire. Le rôle de l'appelant n'est JAMAIS envoyé : il
+   * est déterminé côté serveur via `ctx.identity.groups` (resolver
+   * `submit-mission-validation-write-side.js`), donc rien à passer ici pour l'indiquer.
+   *
+   * Vocabulaire : contrairement à `closeMission` (qui traduit un `MissionStatus` en
+   * `MissionValidationOutcome` pour préserver un contrat public antérieur), cette fonction
+   * est NEUVE — elle parle donc directement le vocabulaire du resolver
+   * (`MissionValidationOutcome.CONFIRMED`/`DENIED`), sans table de traduction à maintenir ni
+   * risque d'inversion.
+   *
+   * ÉCRITURES SECONDAIRES quand c'est CE vote qui fait passer la Mission en `COMPLETED`
+   * (correctif QA du 2026-08-27 — remplace un commentaire précédent qui affirmait à tort
+   * qu'AUCUNE écriture n'était nécessaire ici, et que « la Lambda planifiée ou la prochaine
+   * action côté clinique » s'en chargerait : les deux affirmations étaient fausses. La Lambda
+   * `mission-validation-auto-finalizer` ne traite QUE les Missions restées en
+   * `PENDING_VALIDATION` — celle-ci est déjà `COMPLETED` ; et le côté clinique a déjà voté,
+   * write-once, il ne peut plus rien déclencher. Le flux nominal — le vétérinaire clôture
+   * d'abord depuis RequestsView.vue — fait précisément de l'Owner le SECOND votant, donc ce
+   * chemin est le cas COURANT, pas un cas limite).
+   *
+   * Ce qui est fait ici, et ce qui ne peut PAS l'être (asymétrie `@auth`, vérifiée sur le SDL
+   * compilé — détail dans l'en-tête de `mission-completion-side-effects.js`) :
+   * - ✅ upsert `ClinicOwnerRelation` : la ligne appartient à l'Owner
+   *   (`{allow: owner, ownerField: "ownerID"}`, ADR-0009), il peut la créer. C'est ce qui
+   *   peuple l'annuaire donneurs de la clinique (`DonorsView.vue`).
+   * - ❌ `Animal.lastDonationDate` (Owner en `[read]` seul, ADR-0003) et compteurs `Clinic`
+   *   (Owner en `[read]` seul) : structurellement impossibles depuis un client Owner. Ils ne
+   *   sont donc PAS tentés (une mutation qu'on sait refusée ne ferait que du bruit de log).
+   *   `Animal.lastDonationDate` n'est PLUS un résidu : il est écrit CÔTÉ SERVEUR depuis le
+   *   commit `8c14e7d` (ADR-0019, 8e fonction du pipeline `submitMissionValidation`), sur tous
+   *   les chemins et dans un fuseau explicite — la Frequency Rule est donc bien réarmée quand
+   *   l'Owner vote en second. Reste ouvert, et assumé : les compteurs `Clinic` sur ce chemin
+   *   (indicateurs de tableau de bord, coût de fermeture disproportionné — ADR-0019 §4).
+   *
+   * Ces écritures ne peuvent jamais faire échouer la soumission (best-effort strict) : le vote
+   * est déjà enregistré côté serveur et non rejouable quand elles partent.
+   *
+   * Met à jour l'entrée correspondante de `myMissions` avec le statut retourné, pour que les
+   * computed (`activeMissions`/`awaitingValidationMissions`/`historyMissions`) reflètent
+   * immédiatement le nouvel état sans imposer un `fetchMyMissions()` complet à l'appelant —
+   * même esprit que `acceptMission`, qui retire la Request acceptée de `missions`.
+   *
+   * @param {string} missionId
+   * @param {string} outcome - `MissionValidationOutcome.CONFIRMED` (le don a bien eu lieu) ou
+   *   `MissionValidationOutcome.DENIED` (il n'a pas eu lieu). `PENDING` est refusé : c'est
+   *   l'état initial implicite, pas une soumission (le resolver le rejetterait de toute façon
+   *   avec `InvalidOutcome`, on fail-fast avant l'appel réseau).
+   * @param {string} [disputeReason] - motif de litige en texte libre, transmis UNIQUEMENT
+   *   avec `DENIED`. Décision assumée (à scruter en revue) : un `disputeReason` fourni avec
+   *   `CONFIRMED` est IGNORÉ plutôt que transmis. `Mission.ownerDisputeReason` est write-once
+   *   et sert de trace probante d'un désaccord ; l'écrire sur une Mission que l'Owner vient
+   *   de confirmer produirait une donnée qui contredit durablement son propre outcome. Le
+   *   schéma ne peut pas l'interdire (aucune contrainte conditionnelle entre deux champs,
+   *   limite `@auth` connue depuis ADR-0002) — c'est donc ici la seule garde possible.
+   * @returns {Promise<string|null>} le statut RÉEL de la Mission après cette soumission
+   *   (`PENDING_VALIDATION` tant que la clinique n'a pas répondu, ou `COMPLETED`/`NO_SHOW`/
+   *   `DISPUTED`), `null` si le serveur n'a renvoyé aucune donnée exploitable sans erreur.
+   *   Même contrat de retour que `closeMission` — permet à une future vue d'afficher « en
+   *   attente de la confirmation de la clinique » sans re-changer cette signature.
+   * @throws {Error} `INVALID_OUTCOME` (avant tout appel réseau), `ALREADY_VALIDATED` (ce
+   *   côté a déjà voté, write-once serveur) ou `MISSION_ALREADY_FINALIZED` (la Mission portait
+   *   déjà un statut terminal — typiquement finalisée automatiquement par la Lambda planifiée
+   *   faute de réponse dans le délai, docs/adr/0020) — trois codes à passer à
+   *   `mapSubmitDonationValidationError`. Toute autre erreur est propagée telle quelle.
+   */
+  const submitDonationValidation = async (missionId, outcome, disputeReason) => {
+    if (
+      outcome !== MissionValidationOutcome.CONFIRMED &&
+      outcome !== MissionValidationOutcome.DENIED
+    ) {
+      throw new Error('INVALID_OUTCOME')
+    }
+
+    isSubmittingValidation.value = true
+    try {
+      const input = { missionId, outcome }
+      // Voir le JSDoc (@param disputeReason) : jamais transmis avec CONFIRMED.
+      const trimmedReason = typeof disputeReason === 'string' ? disputeReason.trim() : ''
+      if (outcome === MissionValidationOutcome.DENIED && trimmedReason) {
+        input.disputeReason = trimmedReason
+      }
+
+      const { data, errors } = await client.mutations.submitMissionValidation(input)
+      throwIfGraphqlError(errors, 'submitMissionValidation')
+
+      const finalStatus = data?.status ?? null
+
+      if (finalStatus) {
+        myMissions.value = myMissions.value.map((m) =>
+          m.id === missionId ? { ...m, status: finalStatus } : m,
+        )
+      }
+
+      // STRICTEMENT `COMPLETED`, exactement le même garde-fou que côté vétérinaire
+      // (`useMissionClosure.closeMission`) : jamais sur `PENDING_VALIDATION` (la clinique n'a
+      // pas encore répondu), jamais sur `DISPUTED`/`NO_SHOW` (pas de don réalisé), jamais sur
+      // `COMPLETED_AUTO` (produit par la seule Lambda planifiée, qui fait déjà ces écritures
+      // de son côté — ADR-0016 §4 ; les refaire ici compterait le don deux fois).
+      if (finalStatus === MissionStatus.COMPLETED) {
+        const [clinicID, ownerID] = await Promise.all([
+          resolveMissionClinicId(missionId),
+          resolveCurrentOwnerId(),
+        ])
+        await applyOwnerCompletionSideEffects(client, { clinicID, ownerID })
+      }
+
+      return finalStatus
+    } catch (e) {
+      console.error('Erreur validation du don (côté propriétaire):', e)
+      if (isAlreadyValidatedError(e)) {
+        throw new Error('ALREADY_VALIDATED')
+      }
+      // docs/adr/0020 — normalisé comme `ALREADY_VALIDATED` juste au-dessus, et pour la même
+      // raison : sans ça, `mapSubmitDonationValidationError` (qui lit le `.message`) recevrait le
+      // message serveur brut et retomberait sur son libellé générique, rendant le code d'erreur
+      // dédié inutile côté UI.
+      if (isMissionAlreadyFinalizedError(e)) {
+        throw new Error('MISSION_ALREADY_FINALIZED')
+      }
+      throw e
+    } finally {
+      isSubmittingValidation.value = false
+    }
+  }
+
+  // `PENDING_VALIDATION` n'est délibérément PAS ajouté ici (décision de cette sous-tâche, à
+  // scruter en revue) : `activeMissions` porte la sémantique « il reste quelque chose à faire
+  // sur le terrain » (se rendre à la clinique, honorer le rendez-vous) et alimente le compteur
+  // de missions actives de MissionsView.vue. Une Mission en attente de validation n'a plus
+  // d'action de terrain, seulement une réponse à donner — la mélanger ici gonflerait ce
+  // compteur avec des missions déjà vécues. Elle a donc son propre computed
+  // (`awaitingValidationMissions`), et n'est PAS non plus dans `historyMissions` : son issue
+  // n'est pas encore décidée.
   const activeMissions = computed(() => {
     return myMissions.value.filter((m) =>
       [MissionStatus.ACCEPTED, MissionStatus.PENDING_ARRIVAL].includes(m.status),
     )
   })
 
+  /**
+   * Missions dont le don a eu lieu (ou pas) mais dont l'issue attend encore une réponse d'un
+   * des deux côtés — c'est ici que vit l'action « le don a-t-il eu lieu ? »
+   * (`submitDonationValidation`) côté Owner. Câblage UI hors périmètre de cette sous-tâche
+   * (aucune vue ne consomme encore ce computed) : exposé maintenant pour que la PR de suivi
+   * n'ait ni à modifier ce composable ni à trancher à nouveau où loger ce statut.
+   */
+  const awaitingValidationMissions = computed(() => {
+    return myMissions.value.filter((m) => m.status === MissionStatus.PENDING_VALIDATION)
+  })
+
   const historyMissions = computed(() => {
-    // 'CANCELLED' n'a pas d'équivalent dans MissionStatus (constants/enums.js) — laissé en
-    // littéral, pas touché par cette substitution mécanique (hors périmètre de ce sous-tâche).
+    // Étendu à COMPLETED_AUTO/DISPUTED (double validation, 2026-08-26) : ce sont deux issues
+    // TERMINALES au même titre que COMPLETED/NO_SHOW — `COMPLETED_AUTO` (finalisation
+    // automatique faute de réponse du second côté, Lambda planifiée ADR-0016) et `DISPUTED`
+    // (les deux côtés ont répondu, en désaccord — aucune interface de résolution admin n'est
+    // construite, ADR-0016 §6). Sans elles, une Mission finalisée par l'un de ces deux chemins
+    // disparaîtrait purement et simplement de l'écran du propriétaire.
+    // `MissionStatus.CANCELLED` remplace ici le littéral `'CANCELLED'` et son commentaire
+    // devenu faux (l'enum a gagné cette valeur depuis, R-13/Phase 7) — même expression déjà
+    // réécrite par cette sous-tâche, pas un passage de correction séparé.
     return myMissions.value.filter((m) =>
-      [MissionStatus.COMPLETED, MissionStatus.NO_SHOW, 'CANCELLED'].includes(m.status),
+      [
+        MissionStatus.COMPLETED,
+        MissionStatus.COMPLETED_AUTO,
+        MissionStatus.NO_SHOW,
+        MissionStatus.DISPUTED,
+        MissionStatus.CANCELLED,
+      ].includes(m.status),
     )
   })
 
@@ -369,12 +734,15 @@ export function useOwnerMissions() {
     missions,
     myMissions,
     activeMissions,
+    awaitingValidationMissions,
     historyMissions,
     isLoading,
     isAccepting,
+    isSubmittingValidation,
     loadError,
     fetchAvailableMissions,
     acceptMission,
+    submitDonationValidation,
     fetchMyMissions,
   }
 }

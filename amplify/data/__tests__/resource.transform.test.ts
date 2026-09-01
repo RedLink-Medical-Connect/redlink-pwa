@@ -8,7 +8,7 @@
 // (backend Gen2, jamais exécuté côté navigateur en réalité), donc `node` est le bon
 // environnement ici -- pas un contournement, juste la bonne valeur pour ce fichier précis.
 import { describe, it, expect } from 'vitest'
-import { schema } from '../resource'
+import { MISSION_STATUS_INDEX_NAME, RATING_TARGET_INDEX_NAME, schema } from '../resource'
 
 // Équivalent Gen2 de `src/graphql/__tests__/schema.test.js` (Gen1) : celui-ci lit le SDL
 // brut via `readFileSync` sur `schema.graphql` et pin par matching de texte des fragments
@@ -350,8 +350,7 @@ describe('amplify/data/resource.ts — Mission @auth (équivalent Gen2 ADR-0004,
     )
   })
 
-  it("status/requestID/animalID/appointmentDatetime n'ont AUCUN @auth au niveau champ -- createMissionSimple (Owner, à l'acceptation) doit pouvoir écrire status/requestID/animalID à la création", () => {
-    expect(missionType).toContain('status: MissionStatus!\n')
+  it("requestID/animalID/appointmentDatetime n'ont AUCUN @auth au niveau champ -- createMissionSimple (Owner, à l'acceptation) doit pouvoir écrire requestID/animalID à la création", () => {
     expect(missionType).toContain('requestID: ID!\n')
     expect(missionType).toContain('animalID: ID!\n')
     // Revue QA (sous-tâche 6, nettoyage) : le titre du test citait déjà `appointmentDatetime`
@@ -360,7 +359,34 @@ describe('amplify/data/resource.ts — Mission @auth (équivalent Gen2 ADR-0004,
     expect(missionType).toContain('appointmentDatetime: AWSDateTime\n')
   })
 
-  it("la règle de type Veterinarians garde 'update' -- rend une re-clôture (updateMission sur une Mission déjà COMPLETED/NO_SHOW) inoffensive côté serveur", () => {
+  // Correctif graphql-schema-reviewer (BLOQUANT, 2026-08-26) -- `status` portait AUPARAVANT
+  // AUCUN `@auth` de champ (assertion `status: MissionStatus!\n` dans le test précédent,
+  // retirée par ce même correctif), héritant donc en clair du `update` de niveau modèle
+  // accordé aux Veterinarians ci-dessous -- un Veterinarian pouvait écrire `status`
+  // directement via `client.models.Mission.update()`, contournant `submitMissionValidation`.
+  // Ce pin-test AURAIT ÉCHOUÉ avant ce correctif (aucune assertion `@auth(` sur `status`
+  // n'existait dans ce fichier) -- c'est précisément le trou que le reviewer a signalé comme
+  // non couvert par la suite de tests.
+  it("status porte désormais un @auth de champ dédié (missionStatusFieldAuth) -- Owner garde create+read (createMissionSimple), Veterinarians perd 'update' et ne garde que 'read', Admins lit", () => {
+    // `@index(...)` s'intercale désormais entre le champ et son `@auth` (GSI ajouté à l'étape
+    // 2/5, voir le describe dédié plus bas) -- assertion mise à jour pour pinner les deux
+    // directives DANS CET ORDRE plutôt que de relâcher la vérification.
+    expect(missionType).toContain(
+      'status: MissionStatus! @index(name: "missionsByStatus", queryField: null) @auth(',
+    )
+    const block = extractFieldAuthBlock(missionType, 'status')
+    expect(block).toContain('{allow: owner, operations: [create, read]')
+    expect(block).toContain('{allow: groups, operations: [read], groups: ["Veterinarians"]}')
+    expect(block).toContain('{allow: groups, operations: [read], groups: ["Admins"]}')
+    // Le trou fermé par ce correctif : plus aucune trace d'un `update` accordé aux
+    // Veterinarians SPÉCIFIQUEMENT sur ce champ (le `update` de niveau modèle subsiste pour
+    // d'autres champs -- validationCode/scannedAt/etc. -- vérifié séparément ci-dessous, mais
+    // `.authorization()` de champ REMPLACE la règle de modèle pour `status` précisément,
+    // ADR-0009).
+    expect(block).not.toContain('operations: [read, update]')
+  })
+
+  it("la règle de type Veterinarians garde 'update' -- reste nécessaire aux AUTRES champs Veterinarian-writable de Mission (validationCode/scannedAt/validatedByVeterinarianID/stripePaymentIntentId/stripePaymentStatus, tous via ownerReadOnlyVetReadUpdate) ; n'accorde PLUS d'update sur 'status' depuis le correctif ci-dessus, dont le @auth de champ dédié REMPLACE ce update hérité pour ce champ précis (ADR-0009)", () => {
     const typeAuthStart = compiledSdl.indexOf('type Mission @model @auth(')
     const typeAuthEnd = compiledSdl.indexOf('])\n{', typeAuthStart)
     const typeAuthBlock = compiledSdl.slice(typeAuthStart, typeAuthEnd)
@@ -445,5 +471,362 @@ describe('amplify/data/resource.ts — ConsentRecord/DonorValidationAttestation 
     expect(compiledSdl).toContain('enum AccountRole {\n  OWNER\n  VETERINARIAN\n}')
     expect(compiledSdl).toContain('enum LegalDocumentType {\n  CGU\n  PRIVACY_POLICY\n  CGV\n}')
     expect(compiledSdl).toContain('enum DonorValidationEventType {\n  ATTESTATION\n  REVOCATION\n}')
+  })
+})
+
+describe('amplify/data/resource.ts — double validation de Mission + notation (2026-08-26)', () => {
+  it('les 3 nouveaux enums (MissionValidationOutcome/RatingParticipantRole/ClinicAccountStatus) compilent avec leurs valeurs exactes', () => {
+    expect(compiledSdl).toContain('enum MissionValidationOutcome {\n  PENDING\n  CONFIRMED\n  DENIED\n}')
+    expect(compiledSdl).toContain('enum RatingParticipantRole {\n  OWNER\n  CLINIC\n}')
+    expect(compiledSdl).toContain('enum ClinicAccountStatus {\n  ACTIVE\n  UNDER_REVIEW\n}')
+  })
+
+  // ⚠️ Si ce pin casse parce qu'une 11e valeur a été ajoutée à `MissionStatus` : décider
+  // explicitement si elle est TERMINALE, et si oui l'ajouter à `TERMINAL_MISSION_STATUSES`
+  // (`amplify/data/resolvers/submit-mission-validation-write-side.js`, docs/adr/0020) — sans
+  // quoi un vote resterait acceptable sur une Mission pourtant close. Le classement des 10
+  // valeurs actuelles est verrouillé par
+  // `amplify/data/__tests__/submit-mission-validation.resolvers.test.js`.
+  it('MissionStatus conserve les 7 valeurs existantes et gagne PENDING_VALIDATION/COMPLETED_AUTO/DISPUTED', () => {
+    expect(compiledSdl).toContain(
+      'enum MissionStatus {\n  ACCEPTED\n  PENDING_ARRIVAL\n  EN_ROUTE\n  ARRIVED\n  COMPLETED\n  NO_SHOW\n  CANCELLED\n  PENDING_VALIDATION\n  COMPLETED_AUTO\n  DISPUTED\n}',
+    )
+  })
+
+  describe('Mission — 5 champs de double validation, lecture seule pour Owner ET Veterinarians (écart assumé vs. plan initial, voir resource.ts)', () => {
+    const missionType = extractType('Mission')
+
+    it('les 5 champs vivent bien dans le type Mission, tous nullable (pas de required)', () => {
+      expect(missionType).toContain('clinicValidationOutcome: MissionValidationOutcome @auth(')
+      expect(missionType).toContain('clinicValidatedAt: AWSDateTime @auth(')
+      expect(missionType).toContain('ownerValidationOutcome: MissionValidationOutcome @auth(')
+      expect(missionType).toContain('ownerValidatedAt: AWSDateTime @auth(')
+      expect(missionType).toContain('ownerDisputeReason: String @auth(')
+    })
+
+    it.each([
+      'clinicValidationOutcome',
+      'clinicValidatedAt',
+      'ownerValidationOutcome',
+      'ownerValidatedAt',
+      'ownerDisputeReason',
+    ])('%s : Owner ET Veterinarians ont "read" seul, Admins aussi (correctif graphql-schema-reviewer ÉLEVÉ, 2026-08-26) -- aucune mutation générée ne peut écrire ces champs', (fieldName) => {
+      const block = extractFieldAuthBlock(missionType, fieldName)
+      expect(block).toContain('{allow: owner, operations: [read]')
+      expect(block).toContain('{allow: groups, operations: [read], groups: ["Veterinarians"]}')
+      // Sans Admins ICI, le groupe perdait la lecture de ces 5 champs malgré son accès en
+      // lecture au niveau modèle (`.authorization()` de champ REMPLACE, ADR-0009) -- un Admin
+      // aurait pu voir `status = DISPUTED` sans jamais voir POURQUOI (ownerDisputeReason, les
+      // deux outcomes).
+      expect(block).toContain('{allow: groups, operations: [read], groups: ["Admins"]}')
+      // Aucun des trois ne doit conserver "update"/"create" hérité de la règle de niveau
+      // modèle -- c'est exactement le résidu de sécurité que ce scoping de champ ferme (voir
+      // `missionValidationFieldsReadOnly` dans resource.ts).
+      expect(block).not.toContain('update')
+      expect(block).not.toContain('create')
+    })
+
+    it('la règle de type Mission gagne allow.group("Admins").to(["read"]) -- ferme le gap Admins (docs/adr/0010)', () => {
+      const typeAuthStart = compiledSdl.indexOf('type Mission @model @auth(')
+      const typeAuthEnd = compiledSdl.indexOf('])\n{', typeAuthStart)
+      const typeAuthBlock = compiledSdl.slice(typeAuthStart, typeAuthEnd)
+      expect(typeAuthBlock).toContain('{allow: groups, operations: [read], groups: ["Admins"]}')
+    })
+
+    it('Mission.ratings compile en hasMany, contrepartie de Rating.mission (ADR-0010)', () => {
+      expect(missionType).toContain('ratings: [Rating] @hasMany(references: ["missionID"])')
+    })
+  })
+
+  describe('Rating — clé composite (missionID, raterRole), notation privée', () => {
+    it('compile en @model', () => {
+      expect(extractType('Rating')).toContain('@model')
+    })
+
+    it('missionID porte @primaryKey(sortKeyFields: ["raterRole"]) -- identifier(["missionID", "raterRole"]) confirmé comme API réelle', () => {
+      const ratingType = extractType('Rating')
+      expect(ratingType).toContain('missionID: ID! @primaryKey(sortKeyFields: ["raterRole"])')
+    })
+
+    it('mission (belongsTo) apparié à Mission.ratings (hasMany)', () => {
+      expect(extractType('Rating')).toContain('mission: Mission @belongsTo(references: ["missionID"])')
+    })
+
+    it('règle @auth de type : ownerDefinedIn("raterID") create+read, Veterinarians create seul (pas read), Admins read seul', () => {
+      const typeAuthStart = compiledSdl.indexOf('type Rating @model @auth(')
+      const typeAuthEnd = compiledSdl.indexOf('])\n{', typeAuthStart)
+      const typeAuthBlock = compiledSdl.slice(typeAuthStart, typeAuthEnd)
+      expect(typeAuthBlock).toContain('{allow: owner, operations: [create, read], ownerField: "raterID"}')
+      expect(typeAuthBlock).toContain('{allow: groups, operations: [create], groups: ["Veterinarians"]}')
+      expect(typeAuthBlock).toContain('{allow: groups, operations: [read], groups: ["Admins"]}')
+      // Le résidu documenté par docs/adr/0015 : Veterinarians n'a PAS "read" en clair dans sa
+      // propre règle de groupe (fuite cross-clinique sinon) -- seul ownerDefinedIn le donne, sur
+      // sa propre ligne.
+      expect(typeAuthBlock).not.toContain('{allow: groups, operations: [create, read], groups: ["Veterinarians"]}')
+    })
+  })
+
+  describe('Mission.status — GSI (étape 2/5, Lambda planifiée de finalisation automatique)', () => {
+    const missionType = extractType('Mission')
+
+    // Le nom PHYSIQUE de l'index est consommé hors de ce fichier (policy IAM + variable
+    // d'environnement de la Lambda, amplify/backend.ts) : un renommage silencieux casserait le
+    // `QueryCommand` du handler au runtime, jamais à la compilation. D'où ce pin sur la valeur
+    // exacte ET sur la constante exportée qui la porte.
+    it('compile en @index avec le nom exact exporté par resource.ts', () => {
+      expect(MISSION_STATUS_INDEX_NAME).toBe('missionsByStatus')
+      expect(missionType).toContain(`@index(name: "${MISSION_STATUS_INDEX_NAME}"`)
+    })
+
+    // `queryField: null` est le SEUL endroit vérifiable ici : le SDL produit par
+    // `schema.transform()` est le SDL d'ENTRÉE du transformer (directives `@model`/`@index`), les
+    // types `Query`/`Mutation` générés à partir des modèles n'y figurent pas encore (seules les
+    // opérations custom déclarées à la main y apparaissent). L'absence du nom par défaut
+    // `listMissionByStatus` dans tout le SDL confirme qu'aucune query n'est demandée.
+    it('ne demande AUCUNE query GraphQL (queryField: null) -- seul le SDK DynamoDB de la Lambda lit cet index', () => {
+      expect(missionType).toContain('queryField: null')
+      expect(compiledSdl).not.toContain('listMissionByStatus')
+    })
+
+    it("l'index porte bien sur status et sur aucun autre champ de Mission", () => {
+      const indexedFields = missionType
+        .split('\n')
+        .filter((line) => line.includes('@index('))
+        .map((line) => line.trim().split(':')[0])
+      expect(indexedFields).toEqual(['status'])
+    })
+
+    it("n'a pas altéré le type de status (a.ref('MissionStatus') indexable tel quel, contrairement à .identifier()/ADR-0015)", () => {
+      expect(missionType).toContain('status: MissionStatus! @index(')
+    })
+  })
+
+  describe('Rating — GSI (targetID, targetRole) (étape 3/5, Lambda d’agrégation des notations)', () => {
+    const ratingType = extractType('Rating')
+
+    // Le nom PHYSIQUE de l'index est consommé hors de ce fichier (policy IAM + variable
+    // d'environnement de la Lambda, amplify/backend.ts) : un renommage silencieux casserait le
+    // `QueryCommand` du handler au runtime, jamais à la compilation.
+    it('compile en @index avec le nom exact exporté par resource.ts, sur targetID', () => {
+      expect(RATING_TARGET_INDEX_NAME).toBe('ratingsByTarget')
+      expect(ratingType).toContain(`targetID: ID! @index(name: "${RATING_TARGET_INDEX_NAME}"`)
+    })
+
+    // La sort key est ce qui rend la requête EXACTE plutôt que "probablement sans collision" :
+    // `targetID` porte tantôt un Clinic.id, tantôt un Owner.id (et ce schéma fabrique déjà la
+    // collision Clinic.id === Veterinarian.id à l'inscription).
+    it('porte bien targetRole en clé de tri — un a.ref() d’enum EST accepté comme sort key', () => {
+      expect(ratingType).toContain('sortKeyFields: ["targetRole"]')
+      expect(ratingType).toContain('targetRole: RatingParticipantRole!')
+    })
+
+    it('ne demande AUCUNE query GraphQL (queryField: null) — seul le SDK DynamoDB de la Lambda lit cet index', () => {
+      const indexDirective = ratingType
+        .split('\n')
+        .find((line) => line.includes('@index('))
+      expect(indexDirective).toContain('queryField: null')
+      expect(compiledSdl).not.toContain('listRatingByTargetID')
+    })
+
+    it("l'index porte sur targetID et sur aucun autre champ de Rating", () => {
+      const indexedFields = ratingType
+        .split('\n')
+        .filter((line) => line.includes('@index('))
+        .map((line) => line.trim().split(':')[0])
+      expect(indexedFields).toEqual(['targetID'])
+    })
+
+    it("la clé primaire composite (missionID, raterRole) d'ADR-0015 est intacte", () => {
+      expect(ratingType).toContain('missionID: ID! @primaryKey(sortKeyFields: ["raterRole"])')
+    })
+  })
+
+  describe('Clinic — 5 champs d’agrégation/modération, AUCUNE écriture accordée à aucun rôle (étape 3/5)', () => {
+    const clinicType = extractType('Clinic')
+    const clinicModerationFields = [
+      'averageRatingAsClinic',
+      'ratingCountAsClinic',
+      'needsAdminReview',
+      'needsAdminReviewSince',
+      'accountStatus',
+    ]
+
+    it('les 5 champs vivent bien dans le type Clinic, tous nullable', () => {
+      expect(clinicType).toContain('averageRatingAsClinic: Float @auth(')
+      expect(clinicType).toContain('ratingCountAsClinic: Int @auth(')
+      expect(clinicType).toContain('needsAdminReview: Boolean @auth(')
+      expect(clinicType).toContain('needsAdminReviewSince: AWSDateTime @auth(')
+      expect(clinicType).toContain('accountStatus: ClinicAccountStatus @auth(')
+    })
+
+    it.each(clinicModerationFields)(
+      '%s : Veterinarians et Admins en LECTURE seule, personne en écriture — ces champs ne sont écrits que par la Lambda rating-aggregation (SDK direct, hors AppSync)',
+      (fieldName) => {
+        const block = extractFieldAuthBlock(clinicType, fieldName)
+        expect(block).toContain('{allow: groups, operations: [read], groups: ["Veterinarians"]}')
+        expect(block).toContain('{allow: groups, operations: [read], groups: ["Admins"]}')
+        // Le coeur de la garantie : sans ça, une clinique pourrait falsifier sa propre moyenne
+        // (ou saboter celle d'un tiers) via `client.models.Clinic.update()`.
+        expect(block).not.toContain('update')
+        expect(block).not.toContain('create')
+        expect(block).not.toContain('delete')
+      },
+    )
+
+    it.each(clinicModerationFields)(
+      "%s : la règle `private` (TOUT utilisateur authentifié, Owners inclus) de niveau modèle ne s'applique PAS — l'état de modération d'une clinique n'est pas public",
+      (fieldName) => {
+        const block = extractFieldAuthBlock(clinicType, fieldName)
+        expect(block).not.toContain('allow: private')
+        // `allow.owner()` non repris non plus : sans `.to([...])` il rouvrirait les 4 opérations
+        // au vétérinaire créateur de la ligne (voir la règle de niveau modèle ci-dessous).
+        expect(block).not.toContain('allow: owner')
+      },
+    )
+
+    it("la règle de NIVEAU MODÈLE de Clinic est inchangée (allow.owner() sans restriction + Veterinarians create/read/update + private read) — ce sont bien les @auth de CHAMP qui la remplacent sur ces 5 champs", () => {
+      const typeAuthStart = compiledSdl.indexOf('type Clinic @model @auth(')
+      const typeAuthEnd = compiledSdl.indexOf('])\n{', typeAuthStart)
+      const typeAuthBlock = compiledSdl.slice(typeAuthStart, typeAuthEnd)
+      expect(typeAuthBlock).toContain('{allow: owner, ownerField: "owner"}')
+      expect(typeAuthBlock).toContain(
+        '{allow: groups, operations: [create, read, update], groups: ["Veterinarians"]}',
+      )
+      expect(typeAuthBlock).toContain('{allow: private, operations: [read]}')
+    })
+
+    it("aucun AUTRE champ de Clinic ne porte de @auth au niveau champ (name, rpps, transfusionsDone, coordonnées...)", () => {
+      let restOfType = clinicType.slice(clinicType.indexOf('name: String!'))
+      for (const fieldName of clinicModerationFields) {
+        restOfType = restOfType.replace(extractFieldAuthBlock(restOfType, fieldName), '')
+      }
+      expect(restOfType).not.toContain('@auth(')
+    })
+  })
+
+  describe('Owner — 2 champs d’agrégation, trou d’écriture hérité du modèle refermé (étape 3/5)', () => {
+    const ownerType = extractType('Owner')
+    const ownerAggregateFields = ['averageRatingAsOwner', 'ratingCountAsOwner']
+
+    it('les 2 champs vivent bien dans le type Owner, tous nullable', () => {
+      expect(ownerType).toContain('averageRatingAsOwner: Float @auth(')
+      expect(ownerType).toContain('ratingCountAsOwner: Int @auth(')
+    })
+
+    // Ce test est la RAISON d'être du scoping de champ côté Owner : la règle de niveau modèle
+    // `allow.owner()` est SANS `operations`, donc les 4 opérations -- un Owner pouvait écrire
+    // n'importe quel champ de son profil via `client.models.Owner.update()`. Même trou que
+    // `Mission.status` avant le correctif de l'étape 1/5. Si cette assertion casse un jour
+    // (règle de modèle resserrée), le scoping ci-dessous reste correct mais sa justification
+    // change -- d'où le pin explicite plutôt qu'un commentaire.
+    it("la règle de NIVEAU MODÈLE d'Owner accorde bien les 4 opérations à l'owner (aucune restriction) — c'est ce qui rendait ces champs falsifiables sans scoping de champ", () => {
+      const typeAuthStart = compiledSdl.indexOf('type Owner @model @auth(')
+      const typeAuthEnd = compiledSdl.indexOf('])\n{', typeAuthStart)
+      const typeAuthBlock = compiledSdl.slice(typeAuthStart, typeAuthEnd)
+      expect(typeAuthBlock).toContain('{allow: owner, ownerField: "owner"}')
+      expect(typeAuthBlock).not.toContain('{allow: owner, operations:')
+    })
+
+    it.each(ownerAggregateFields)(
+      "%s : l'Owner VOIT sa moyenne mais ne peut plus l'écrire (read seul)",
+      (fieldName) => {
+        const block = extractFieldAuthBlock(ownerType, fieldName)
+        expect(block).toContain('{allow: owner, operations: [read]')
+        expect(block).not.toContain('update')
+        expect(block).not.toContain('create')
+        expect(block).not.toContain('delete')
+      },
+    )
+
+    it.each(ownerAggregateFields)(
+      '%s : les Veterinarians GARDENT read (même périmètre que la règle de modèle) — le retirer casserait toute lecture d’Owner sans selectionSet explicite',
+      (fieldName) => {
+        const block = extractFieldAuthBlock(ownerType, fieldName)
+        expect(block).toContain('{allow: groups, operations: [read], groups: ["Veterinarians"]}')
+      },
+    )
+
+    it("aucun AUTRE champ d'Owner ne porte de @auth au niveau champ", () => {
+      let restOfType = ownerType.slice(ownerType.indexOf('firstname: String!'))
+      for (const fieldName of ownerAggregateFields) {
+        restOfType = restOfType.replace(extractFieldAuthBlock(restOfType, fieldName), '')
+      }
+      expect(restOfType).not.toContain('@auth(')
+    })
+  })
+
+  describe('submitMissionValidation — mutation custom en pipeline (8 fonctions, voir resource.ts et les resolvers)', () => {
+    it('compile avec les bons arguments et retourne Mission', () => {
+      const mutationType = extractType('Mutation')
+      expect(mutationType).toContain(
+        'submitMissionValidation(missionId: ID!, outcome: MissionValidationOutcome!, disputeReason: String): Mission',
+      )
+    })
+
+    it('autorisation @aws_cognito_user_pools sans restriction de groupe (même niveau que linkRequestToMission)', () => {
+      const mutationType = extractType('Mutation')
+      expect(mutationType).toContain(
+        'submitMissionValidation(missionId: ID!, outcome: MissionValidationOutcome!, disputeReason: String): Mission @aws_cognito_user_pools',
+      )
+    })
+
+    // Correctif de sécurité du 2026-08-27 (docs/adr/0018) : 4 fonctions de vérification
+    // d'identité AVANT l'écriture write-once. Le SDL compilé ne dit RIEN du pipeline (une
+    // mutation custom n'expose ni ses fonctions ni leurs sources de données) — ce pin passe donc
+    // par `schema.transform().jsFunctions`, la structure que `defineData` transmet ensuite à
+    // `convertJsResolverDefinition` (`@aws-amplify/backend-data`), qui crée une
+    // `CfnFunctionConfiguration` par entrée avec son propre `dataSourceName`.
+    //
+    // Ce que ce test attrape et qu'aucun autre n'attraperait : un RÉORDONNANCEMENT du tableau
+    // `.handler([...])`. Rien dans les fichiers de resolver ne connaît sa propre position ;
+    // déplacer l'écriture (`write-side`) avant les vérifications réintroduirait exactement le
+    // trou fermé ici (côté écrit puis « annulé » — sauf qu'il est write-once, donc jamais
+    // annulable), et le pipeline continuerait de fonctionner sur le chemin nominal.
+    // Étendu le 2026-08-28 (docs/adr/0019) : une 8e fonction termine désormais le pipeline
+    // (`record-donation-date`, source `Animal`) — elle écrit `Animal.lastDonationDate` quand la
+    // 7e vient d'écrire `COMPLETED`. Sa POSITION est aussi une garantie de correction, pas un
+    // détail de style : elle lit `ctx.stash.finalMissionStatus`, posé par la 7e, et doit donc
+    // s'exécuter APRÈS elle (avant, elle n'écrirait jamais rien).
+    it('le pipeline compte 8 fonctions, dans l’ordre exact vérification -> écriture -> effet de bord, chacune sur la bonne source de données', () => {
+      const jsFunctions = (
+        schema.transform() as unknown as {
+          jsFunctions: {
+            typeName: string
+            fieldName: string
+            handlers: { dataSource: string; entry: { relativePath: string } }[]
+          }[]
+        }
+      ).jsFunctions
+
+      const pipeline = jsFunctions.find(
+        (fn) => fn.typeName === 'Mutation' && fn.fieldName === 'submitMissionValidation',
+      )
+
+      expect(
+        pipeline?.handlers.map((h) => [h.entry.relativePath, h.dataSource]),
+      ).toEqual([
+        ['./resolvers/submit-mission-validation-resolve-parties.js', 'MissionTable'],
+        ['./resolvers/submit-mission-validation-verify-owner-party.js', 'AnimalTable'],
+        ['./resolvers/submit-mission-validation-load-vet-clinic.js', 'VeterinarianTable'],
+        ['./resolvers/submit-mission-validation-verify-clinic-party.js', 'RequestTable'],
+        ['./resolvers/submit-mission-validation-write-side.js', 'MissionTable'],
+        ['./resolvers/submit-mission-validation-read-mission.js', 'MissionTable'],
+        ['./resolvers/submit-mission-validation-finalize-status.js', 'MissionTable'],
+        ['./resolvers/submit-mission-validation-record-donation-date.js', 'AnimalTable'],
+      ])
+    })
+
+    // AppSync plafonne un resolver de pipeline à 10 fonctions : ce pipeline en consomme 8. Le
+    // pin sert d'alerte précoce si une future sous-tâche s'en approche sans le savoir.
+    it('reste sous le plafond AppSync de 10 fonctions par resolver de pipeline', () => {
+      const jsFunctions = (
+        schema.transform() as unknown as {
+          jsFunctions: { fieldName: string; handlers: unknown[] }[]
+        }
+      ).jsFunctions
+      const pipeline = jsFunctions.find((fn) => fn.fieldName === 'submitMissionValidation')
+
+      expect(pipeline!.handlers.length).toBeLessThanOrEqual(10)
+    })
   })
 })

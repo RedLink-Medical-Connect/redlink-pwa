@@ -70,11 +70,14 @@ composables violate this — don't copy that pattern into new code.)
 - Pass an explicit `selectionSet` on any call that needs a nested relation or that
   doesn't need every scalar field on the model — posed by each caller for the
   fields it actually consumes, not copy-pasted from another composable's query.
-- `client.mutations.linkRequestToMission({ id, activeMissionID })` is the one
-  custom mutation in this schema (atomic conditional write on `Request.status`,
-  ADR-0001/ADR-0011) — reach for a custom mutation + AppSync JS resolver only when
-  a write genuinely needs a DynamoDB `condition` that `client.models.X.update()`
-  can't express.
+- Two custom mutations exist in this schema: `client.mutations.linkRequestToMission({
+  id, activeMissionID })` (atomic conditional write on `Request.status`, ADR-0001/
+  ADR-0011, single-function resolver) and `client.mutations.submitMissionValidation(...)`
+  (mission dual-validation, ADR-0018/0019/0020 — a multi-function AppSync JS **pipeline**
+  resolver, one data source per function, up to 10 functions per pipeline). Reach for a
+  custom mutation + AppSync JS resolver only when a write genuinely needs a DynamoDB
+  `condition` that `client.models.X.update()` can't express, or when the caller's
+  identity must be checked against a related record before the write is allowed.
 - Log failures via `console.error('<French, contextual message>:', error)` before
   rethrowing or resetting state — match the existing French error-message style used
   throughout the composables.

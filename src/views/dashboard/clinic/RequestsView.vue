@@ -1,12 +1,21 @@
 <script setup>
-import { onMounted, ref } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useToast } from 'primevue/usetoast'
 import DashboardSidebar from '@/components/dashboard/DashboardSidebar.vue'
+import StarRating from '@/components/common/StarRating.vue'
 import { useClinicRequests } from '@/composables/useClinicRequest.js'
 import { useMissionClosure } from '@/composables/useMissionClosure.js'
 import { useClinicStats } from '@/composables/useClinicStats.js'
-import { MissionStatus, RequestStatus, RequestType, Species } from '@/constants/enums'
+import { useRatings, mapSubmitRatingError } from '@/composables/useRatings.js'
+import {
+  MissionStatus,
+  MissionValidationOutcome,
+  RatingParticipantRole,
+  RequestStatus,
+  RequestType,
+  Species,
+} from '@/constants/enums'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -22,6 +31,7 @@ const {
   cancelRequest,
 } = useClinicRequests()
 const { closeMission } = useMissionClosure()
+const { isSubmitting: isSubmittingOwnerRating, submitRating } = useRatings()
 // Phase 6.7 (CdC §2.4) : indicateurs tableau de bord vétérinaire, chargés indépendamment de
 // la liste des Requests (échec de l'un n'affecte pas l'autre — même esprit que les lectures
 // secondaires non-exclusives ailleurs dans ce repo, voir CLAUDE.md).
@@ -56,10 +66,87 @@ const pendingAction = ref(null)
 // second appel concurrent sur la même Mission.
 const closingOutcome = ref(null)
 
+// ── Notation du propriétaire (COMPLETED/COMPLETED_AUTO) ────────────────────────────────────
+// Asymétrie `@auth` documentée dans useRatings.js : une clinique ne peut PAS relire les
+// `Rating` qu'elle a créées (`raterID` y vaut `clinicID`, qui ne matche l'identité d'AUCUN
+// Veterinarian individuel -- aucun `allow.group('Veterinarians').to(['read'])` sur ce
+// modèle, volontairement, pour ne pas exposer les notations individuelles à toute la
+// clinique). PAS de pré-check possible ici (contrairement à MissionsView.vue côté Owner) :
+// le widget est TOUJOURS affiché sur une Mission COMPLETED/COMPLETED_AUTO, et
+// `RATING_ALREADY_SUBMITTED` (renvoyé par le serveur si déjà noté) est traité comme un état
+// normal -- bascule silencieuse vers "Déjà noté", pas un toast d'erreur. `ratedMissionIds`
+// ne fait donc que mémoriser, POUR CETTE SESSION, les Missions déjà notées avec succès (ou
+// déjà en échec `RATING_ALREADY_SUBMITTED`) -- ce n'est pas une source de vérité persistée :
+// une clinique qui aurait noté une Mission lors d'une session précédente reverrait le widget
+// au prochain chargement, jusqu'à sa prochaine tentative de soumission.
+const ratedMissionIds = reactive(new Set())
+const ownerRatingForm = ref({ stars: 0, comment: '' })
+
 onMounted(() => {
   fetchRequests()
   fetchClinicStats()
 })
+
+/**
+ * Une clinique peut encore voter sur une Mission si elle est dans un état d'ouverture
+ * (ACCEPTED/PENDING_ARRIVAL, comme avant la double validation) OU si elle est
+ * `PENDING_VALIDATION` mais que la clinique n'a pas encore soumis SON vote
+ * (`clinicValidationOutcome` absent -- l'Owner a alors voté en premier).
+ */
+const canVoteOnMission = (mission) =>
+  mission.status === MissionStatus.ACCEPTED ||
+  mission.status === MissionStatus.PENDING_ARRIVAL ||
+  (mission.status === MissionStatus.PENDING_VALIDATION && !mission.clinicValidationOutcome)
+
+/**
+ * Détecte l'erreur `MISSION_ALREADY_FINALIZED` (docs/adr/0020) directement dans la vue :
+ * `closeMission()` (useMissionClosure.js) n'a délibérément aucune table de mapping de codes
+ * (contrat historique Phase 2.1, voir sa JSDoc) -- cette détection, optionnelle, vit donc ici
+ * plutôt que dans le composable, pour un message plus clair que le toast générique existant.
+ * Même forme défensive que `isAlreadyValidatedError`/`isMissionAlreadyFinalizedError`
+ * (useOwnerMissions.js) : lit `errorType` en priorité, `message` en repli.
+ */
+const isMissionAlreadyFinalizedError = (error) => {
+  const graphQLErrors = error?.errors
+  if (!Array.isArray(graphQLErrors)) return false
+
+  return graphQLErrors.some((e) => {
+    const errorType = e?.errorType || ''
+    const message = (e?.message || '').toLowerCase()
+    return errorType === 'MISSION_ALREADY_FINALIZED' || message.includes('déjà clôturée')
+  })
+}
+
+const handleSubmitOwnerRating = async (mission) => {
+  try {
+    await submitRating({
+      missionId: mission.id,
+      targetRole: RatingParticipantRole.OWNER,
+      targetID: mission.animal.ownerID,
+      stars: ownerRatingForm.value.stars,
+      comment: ownerRatingForm.value.comment,
+    })
+    ratedMissionIds.add(mission.id)
+    toast.add({
+      severity: 'success',
+      summary: t('common.success'),
+      detail: t('dashboard.requests.rating.toasts.success'),
+      life: 3000,
+    })
+  } catch (e) {
+    if (e.message === 'RATING_ALREADY_SUBMITTED') {
+      // Voir le commentaire sur `ratedMissionIds` ci-dessus : état normal, pas une erreur.
+      ratedMissionIds.add(mission.id)
+      return
+    }
+    toast.add({
+      severity: 'error',
+      summary: t('common.error'),
+      detail: mapSubmitRatingError(e.message),
+      life: 5000,
+    })
+  }
+}
 
 const getSeverity = (status) => {
   switch (status) {
@@ -144,6 +231,11 @@ const confirmPendingAction = async () => {
 const openDetails = (request) => {
   selectedRequest.value = request
   selectedMission.value = request.mission
+  // Réinitialise le formulaire de notation à chaque ouverture -- la dialog n'affiche jamais
+  // qu'UNE Mission à la fois (contrairement à MissionsView.vue, qui a une carte par Mission de
+  // l'historique et donc un formulaire par Mission) : un seul `ownerRatingForm` suffit, à
+  // condition de ne pas laisser les étoiles/commentaire d'une Mission fuiter vers la suivante.
+  ownerRatingForm.value = { stars: 0, comment: '' }
   showDetails.value = true
 }
 
@@ -226,6 +318,22 @@ const handleCloseMission = async (outcome) => {
         severity: 'warn',
         summary: t('common.error'),
         detail: t('dashboard.requests.toasts.mission_closed_request_still_open'),
+        life: 6000,
+      })
+    } else if (isMissionAlreadyFinalizedError(e)) {
+      // docs/adr/0020 §5 : "laissé à la PR d'UI qui câblera l'affichage des deux côtés" --
+      // cette sous-tâche EST cette PR. Message dédié plutôt que le générique ci-dessous :
+      // l'Owner a déjà voté ET le délai de réponse a expiré, la Lambda planifiée a déjà
+      // tranché (COMPLETED_AUTO/DISPUTED) avant que ce clic n'arrive au serveur -- ce n'est
+      // ni une erreur réseau ni une double-clôture accidentelle par CE vétérinaire.
+      await fetchRequests()
+      const refreshed = requests.value.find((r) => r.id === selectedRequest.value.id)
+      if (refreshed) selectedRequest.value = refreshed
+
+      toast.add({
+        severity: 'warn',
+        summary: t('common.error'),
+        detail: t('dashboard.requests.toasts.mission_already_finalized'),
         life: 6000,
       })
     } else {
@@ -353,10 +461,7 @@ const handleCloseMission = async (outcome) => {
             </div>
 
             <div
-              v-if="
-                selectedRequest.mission.status === MissionStatus.ACCEPTED ||
-                selectedRequest.mission.status === MissionStatus.PENDING_ARRIVAL
-              "
+              v-if="canVoteOnMission(selectedRequest.mission)"
               class="border-t border-green-200 dark:border-green-800 pt-3 mt-2 flex gap-2"
             >
               <Button
@@ -378,6 +483,104 @@ const handleCloseMission = async (outcome) => {
                 :disabled="closingOutcome !== null && closingOutcome !== MissionStatus.NO_SHOW"
                 @click="handleCloseMission(MissionStatus.NO_SHOW)"
               />
+            </div>
+
+            <!-- La clinique a déjà voté, l'Owner pas encore (double validation, ADR-0018). -->
+            <div
+              v-else-if="selectedRequest.mission.status === MissionStatus.PENDING_VALIDATION"
+              class="border-t border-green-200 dark:border-green-800 pt-3 mt-2 flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400"
+            >
+              <i class="pi pi-clock"></i>
+              {{ $t('dashboard.requests.validation.awaiting_owner') }}
+            </div>
+
+            <!-- Litige : les deux ont voté, en désaccord -- aucune UI admin de résolution
+                 n'existe ni n'est construite ici (ADR-0016 §6), juste l'affichage en lecture
+                 seule des deux issues et du motif de l'Owner. -->
+            <div
+              v-else-if="selectedRequest.mission.status === MissionStatus.DISPUTED"
+              class="border-t border-red-200 dark:border-red-800 pt-3 mt-2"
+            >
+              <div class="flex items-center gap-2 mb-2">
+                <i class="pi pi-exclamation-triangle text-red-600"></i>
+                <p class="font-bold text-red-700 dark:text-red-400">
+                  {{ $t('dashboard.requests.validation.disputed_title') }}
+                </p>
+              </div>
+              <p class="text-xs text-zinc-500 dark:text-zinc-400">
+                {{
+                  selectedRequest.mission.clinicValidationOutcome === MissionValidationOutcome.CONFIRMED
+                    ? $t('dashboard.requests.validation.your_answer_confirmed')
+                    : $t('dashboard.requests.validation.your_answer_denied')
+                }}
+              </p>
+              <p class="text-xs text-zinc-500 dark:text-zinc-400">
+                {{
+                  selectedRequest.mission.ownerValidationOutcome === MissionValidationOutcome.CONFIRMED
+                    ? $t('dashboard.requests.validation.owner_answer_confirmed')
+                    : $t('dashboard.requests.validation.owner_answer_denied')
+                }}
+              </p>
+              <p
+                v-if="selectedRequest.mission.ownerDisputeReason"
+                class="text-xs text-zinc-500 dark:text-zinc-400 italic mt-2"
+              >
+                {{ $t('dashboard.requests.validation.dispute_reason_label') }}
+                {{ selectedRequest.mission.ownerDisputeReason }}
+              </p>
+            </div>
+
+            <!-- Finalisation automatique (Lambda planifiée, ADR-0016) : même bloc visuel de
+                 succès que COMPLETED, libellé distinct pour ne pas laisser croire que la
+                 clinique a elle-même clôturé la Mission. -->
+            <div
+              v-else-if="selectedRequest.mission.status === MissionStatus.COMPLETED_AUTO"
+              class="border-t border-green-200 dark:border-green-800 pt-3 mt-2"
+            >
+              <Tag :value="$t('dashboard.requests.validation.completed_auto_label')" severity="success" />
+            </div>
+
+            <!-- Notation du propriétaire -- flux totalement indépendant de la double
+                 validation ci-dessus (CdC : "la notation ne bloque jamais la validation de
+                 mission et inversement"). Pas de pré-check "déjà noté" possible ici (asymétrie
+                 `@auth`, voir le commentaire sur `ratedMissionIds` en tête de script) --
+                 `RATING_ALREADY_SUBMITTED` bascule silencieusement l'UI plutôt qu'un toast
+                 d'erreur. -->
+            <div
+              v-if="[MissionStatus.COMPLETED, MissionStatus.COMPLETED_AUTO].includes(selectedRequest.mission.status)"
+              class="border-t border-green-200 dark:border-green-800 pt-3 mt-2"
+            >
+              <div
+                v-if="ratedMissionIds.has(selectedRequest.mission.id)"
+                class="text-xs text-zinc-500 dark:text-zinc-400 flex items-center gap-2"
+              >
+                <i class="pi pi-check-circle text-emerald-500"></i>
+                {{ $t('dashboard.requests.rating.already_rated') }}
+              </div>
+              <div v-else class="flex flex-col gap-2">
+                <p class="text-xs font-bold text-zinc-500 uppercase">
+                  {{ $t('dashboard.requests.rating.prompt') }}
+                </p>
+                <StarRating
+                  v-model="ownerRatingForm.stars"
+                  :aria-label="$t('dashboard.requests.rating.stars_aria')"
+                />
+                <Textarea
+                  v-model="ownerRatingForm.comment"
+                  rows="2"
+                  :placeholder="$t('dashboard.requests.rating.comment_placeholder')"
+                  :aria-label="$t('dashboard.requests.rating.comment_aria')"
+                  class="!bg-white dark:!bg-zinc-950 !border-zinc-300 dark:!border-zinc-800 !text-xs !p-2"
+                />
+                <Button
+                  size="small"
+                  :label="$t('dashboard.requests.rating.submit_btn')"
+                  class="!bg-[#ff3b4e] !border-[#ff3b4e] self-end"
+                  :loading="isSubmittingOwnerRating"
+                  :disabled="!ownerRatingForm.stars"
+                  @click="handleSubmitOwnerRating(selectedRequest.mission)"
+                />
+              </div>
             </div>
           </div>
         </div>

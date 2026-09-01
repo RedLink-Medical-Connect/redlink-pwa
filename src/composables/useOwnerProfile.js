@@ -47,6 +47,17 @@ export function useOwnerProfile() {
     maxTravelDistance: 5,
   })
 
+  // Notation par étoiles (sous-tâche suivante, PR de suivi, ADR-0015/0017) : agrégat serveur
+  // lu ici plutôt qu'ajouté à `form` -- `form` est le modèle du formulaire d'édition
+  // (`updateProfile()` l'envoie tel quel dans `input`), ces deux champs ne sont JAMAIS
+  // écrits par l'Owner (`ownerRatingAggregateFieldsReadOnly`, amplify/data/resource.ts :
+  // `allow.owner().to(['read'])`) -- les mélanger à `form` risquerait de les faire un jour
+  // partir dans un `client.models.Owner.update()`. Pas de `selectionSet` dédié à ajouter :
+  // `client.models.Owner.get({ id: userId })` ci-dessous n'a déjà aucun `selectionSet`
+  // explicite (sélection scalaire par défaut), ces deux champs y sont donc déjà inclus.
+  const averageRatingAsOwner = ref(null)
+  const ratingCountAsOwner = ref(0)
+
   /**
    * Charge le profil Owner courant (résolu via `getCurrentUser()`). `form` a des valeurs
    * par défaut non-nulles (voir plus haut), donc on ne peut pas se fier à sa nullité pour
@@ -92,6 +103,8 @@ export function useOwnerProfile() {
           longitude: profile.longitude,
           maxTravelDistance: profile.maxTravelDistance,
         }
+        averageRatingAsOwner.value = profile.averageRatingAsOwner ?? null
+        ratingCountAsOwner.value = profile.ratingCountAsOwner ?? 0
       }
 
       isLoaded.value = true
@@ -186,6 +199,8 @@ export function useOwnerProfile() {
     form,
     isLoading,
     isSaving,
+    averageRatingAsOwner,
+    ratingCountAsOwner,
     fetchProfile,
     updateProfile,
     deleteAccount,

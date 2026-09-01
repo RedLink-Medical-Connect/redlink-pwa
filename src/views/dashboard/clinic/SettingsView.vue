@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import DashboardSidebar from '@/components/dashboard/DashboardSidebar.vue'
 import AddressAutocomplete from '@/components/common/AddressAutocomplete.vue'
 import PhoneInput from '@/components/common/PhoneInput.vue'
+import StarRating from '@/components/common/StarRating.vue'
 import { useToast } from 'primevue/usetoast'
 import { useClinicSettings } from '@/composables/useClinicSettings'
 import Dialog from 'primevue/dialog'
@@ -19,6 +20,10 @@ const {
   vetForm,
   isLoading,
   isSaving,
+  averageRatingAsClinic,
+  ratingCountAsClinic,
+  needsAdminReview,
+  showProactiveRatingAlert,
   fetchSettings,
   updateClinicDetails,
   updateVetDetails,
@@ -28,6 +33,7 @@ const {
 const tabs = [
   { id: 'general', label: 'dashboard.settings.tabs.general' },
   { id: 'vet_ref', label: 'dashboard.settings.tabs.vet_ref' },
+  { id: 'reputation', label: 'dashboard.settings.tabs.reputation' },
 ]
 
 onMounted(() => {
@@ -316,6 +322,78 @@ const onDelete = async () => {
               />
             </div>
           </form>
+
+          <div v-else-if="activeTab === 'reputation'" class="flex flex-col gap-6 max-w-3xl">
+            <h2
+              class="text-xl font-bold text-zinc-900 dark:text-white mb-4 border-l-4 border-[#ff3b4e] pl-3"
+            >
+              {{ $t('dashboard.settings.tabs.reputation') }}
+            </h2>
+
+            <!-- Flag serveur `Clinic.needsAdminReview` (ADR-0017 §4, irréversible côté @auth :
+                 personne ne peut le lever, pas même un Admin) -- ton informatif/sérieux, pas
+                 alarmiste : un examen humain est en cours, ce n'est pas une sanction. -->
+            <div
+              v-if="needsAdminReview"
+              role="status"
+              aria-live="polite"
+              class="p-4 rounded-lg border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 flex items-start gap-3"
+            >
+              <i class="pi pi-info-circle text-amber-600 dark:text-amber-400 text-xl mt-0.5"></i>
+              <div>
+                <p class="font-bold text-amber-800 dark:text-amber-300">
+                  {{ $t('dashboard.settings.reputation.under_review_title') }}
+                </p>
+                <p class="text-sm text-amber-700 dark:text-amber-400">
+                  {{ $t('dashboard.settings.reputation.under_review_message') }}
+                </p>
+              </div>
+            </div>
+
+            <!-- Seuil proactif calculé EN LECTURE côté client (`hasProactiveRatingAlert`,
+                 useClinicSettings.js) -- masqué si `needsAdminReview` est déjà posé, pour ne
+                 pas superposer les deux bannières : le seuil serveur est déjà plus sérieux, et
+                 avertir deux fois de la même tendance serait redondant. Ton volontairement plus
+                 léger (zinc neutre plutôt qu'ambre, réservé aux avertissements plus sérieux
+                 ailleurs dans ce repo). -->
+            <div
+              v-else-if="showProactiveRatingAlert"
+              role="status"
+              aria-live="polite"
+              class="p-4 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950/50 flex items-start gap-3"
+            >
+              <i class="pi pi-chart-line text-zinc-500 text-xl mt-0.5"></i>
+              <div>
+                <p class="font-bold text-zinc-700 dark:text-zinc-300">
+                  {{ $t('dashboard.settings.reputation.proactive_alert_title') }}
+                </p>
+                <p class="text-sm text-zinc-500 dark:text-zinc-400">
+                  {{ $t('dashboard.settings.reputation.proactive_alert_message') }}
+                </p>
+              </div>
+            </div>
+
+            <div
+              class="p-6 bg-zinc-50 dark:bg-zinc-950/50 rounded-lg border border-zinc-200 dark:border-zinc-800 flex flex-col items-center gap-3"
+            >
+              <StarRating
+                readonly
+                :model-value="averageRatingAsClinic || 0"
+                :aria-label="$t('dashboard.settings.reputation.stars_aria')"
+              />
+              <p v-if="ratingCountAsClinic > 0" class="text-sm text-zinc-500 dark:text-zinc-400">
+                {{
+                  $t('dashboard.settings.reputation.count_label', {
+                    average: averageRatingAsClinic?.toFixed(1),
+                    count: ratingCountAsClinic,
+                  })
+                }}
+              </p>
+              <p v-else class="text-sm text-zinc-400 dark:text-zinc-500">
+                {{ $t('dashboard.settings.reputation.no_reviews') }}
+              </p>
+            </div>
+          </div>
 
           <div
             v-else
