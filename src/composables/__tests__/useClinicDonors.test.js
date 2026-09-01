@@ -175,6 +175,40 @@ describe('useClinicDonors.fetchDonors', () => {
     expect(milo.animalName).toBe('Milo')
   })
 
+  // Correctif UX (2026-09) : isValidatedDonor/validationExpiresAt étaient déjà chargés par le
+  // `selectionSet` mais jamais recopiés dans la ligne poussée dans `donors`/`filteredDonors` --
+  // DonorsView.vue en a besoin pour son dialog de détail au clic. `ownerAnimals` (liste
+  // complète, aucun aller-retour réseau supplémentaire) permet d'afficher "les autres
+  // animaux de ce propriétaire", l'animal courant inclus (filtré côté vue).
+  it("chaque ligne porte isValidatedDonor/validationExpiresAt de SON animal ET la liste complète des animaux du propriétaire (ownerAnimals)", async () => {
+    const rexAnimal = buildAnimal({ id: 'animal-1', name: 'Rex' })
+    const miloAnimal = buildAnimal({
+      id: 'animal-2',
+      name: 'Milo',
+      isValidatedDonor: false,
+      validationExpiresAt: null,
+    })
+    mockClient({
+      relations: [
+        {
+          ownerID: 'owner-1',
+          ownerProfile: buildOwner({ animals: [rexAnimal, miloAnimal] }),
+        },
+      ],
+    })
+
+    const { fetchDonors, donors } = useClinicDonors()
+    await fetchDonors()
+
+    // Milo n'est pas Validated Donor (isValidatedDonor(animal) le filtre) : une seule ligne.
+    expect(donors.value).toHaveLength(1)
+    const row = donors.value[0]
+    expect(row.animalId).toBe('animal-1')
+    expect(row.isValidatedDonor).toBe(true)
+    expect(row.validationExpiresAt).toBe(rexAnimal.validationExpiresAt)
+    expect(row.ownerAnimals).toEqual([rexAnimal, miloAnimal])
+  })
+
   it('flattening sur un batch réaliste : 2 relations, un Owner avec 3 Animals (2 Validated Donor, 1 non), un Owner sans aucun Animal — exactement 2 lignes, du bon Owner, avec les bons Animals (vérification indépendante de la logique d’aplatissement, pas juste un cas trivial à 1 item)', async () => {
     mockClient({
       relations: [
