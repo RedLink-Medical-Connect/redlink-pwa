@@ -285,6 +285,7 @@ const handleSaveCorrection = async () => {
             :options="speciesOptions"
             option-label="label"
             option-value="value"
+            class="w-full"
             :aria-label="$t('dashboard.owner.animals.form.species')"
           />
           <InputNumber
@@ -292,6 +293,8 @@ const handleSaveCorrection = async () => {
             suffix=" kg"
             :placeholder="$t('dashboard.owner.animals.form.weight')"
             :min-fraction-digits="1"
+            class="w-full"
+            input-class="w-full"
             :aria-label="$t('dashboard.owner.animals.form.weight')"
           />
         </div>
