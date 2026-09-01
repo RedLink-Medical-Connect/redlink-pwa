@@ -13,6 +13,7 @@ import {
   MissionStatus,
   MissionValidationOutcome,
   RatingParticipantRole,
+  RequestType,
   Species,
 } from '@/constants/enums'
 
@@ -159,6 +160,20 @@ const handleSubmitPostValidationRating = async () => {
 
 const skipPostValidationRating = () => {
   showPostValidationRatingDialog.value = false
+}
+
+// ── Détail d'une mission de l'historique (correctif UX, 2026-09) ─────────────────────────
+// Toutes les données affichées (animal/espèce, statut, appointmentDatetime,
+// request.requestType, request.clinic.{name,address,phone,latitude,longitude}, l'issue de
+// validation de l'Owner et le motif de litige) sont déjà chargées par `fetchMyMissions()`
+// (useOwnerMissions.js) -- aucun nouveau champ de `selectionSet`, aucun nouvel aller-retour
+// réseau pour ouvrir ce dialog.
+const showHistoryDetails = ref(false)
+const selectedHistoryMission = ref(null)
+
+const openHistoryMissionDetails = (mission) => {
+  selectedHistoryMission.value = mission
+  showHistoryDetails.value = true
 }
 
 // ── Notation de la clinique (COMPLETED/COMPLETED_AUTO, historique) ────────────────────────
@@ -516,7 +531,24 @@ const getAnimalEmoji = (species) => (species === Species.DOG ? '🐶' : '🐱')
               :key="mission.id"
               class="p-4 bg-zinc-50 dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800"
             >
-              <div class="flex items-center justify-between">
+              <!-- Détail au clic/clavier (correctif UX, 2026-09) : seul cet en-tête (pas toute
+                   la carte) porte le geste, pour ne jamais intercepter les clics du widget de
+                   notation juste en dessous (StarRating/Textarea/bouton "Envoyer"). Toutes les
+                   données affichées dans le dialog de détail sont déjà chargées par
+                   `fetchMyMissions()` -- aucun nouvel aller-retour réseau. -->
+              <div
+                role="button"
+                tabindex="0"
+                :aria-label="
+                  $t('dashboard.owner.missions_list.history_details_aria', {
+                    name: mission.animalName,
+                  })
+                "
+                class="flex items-center justify-between cursor-pointer rounded focus:outline-none focus:ring-2 focus:ring-[#ff3b4e]"
+                @click="openHistoryMissionDetails(mission)"
+                @keydown.enter="openHistoryMissionDetails(mission)"
+                @keydown.space.prevent="openHistoryMissionDetails(mission)"
+              >
                 <div>
                   <p class="font-bold text-zinc-700 dark:text-zinc-300">
                     {{ mission.animalName }}
@@ -751,6 +783,111 @@ const getAnimalEmoji = (species) => (species === Species.DOG ? '🐶' : '🐱')
             />
           </div>
         </div>
+      </Dialog>
+
+      <!-- Détail d'une mission de l'historique (correctif UX, 2026-09) -- lecture seule,
+           aucune action de validation/notation ici (ces flux vivent respectivement dans le
+           dialog de validation ci-dessus et dans le widget de la carte historique). -->
+      <Dialog
+        v-model:visible="showHistoryDetails"
+        modal
+        :header="$t('dashboard.owner.missions_list.history_details.dialog_title')"
+        :style="{ width: '460px' }"
+      >
+        <div v-if="selectedHistoryMission" class="flex flex-col gap-4">
+          <div class="p-4 bg-zinc-50 dark:bg-zinc-800 rounded-lg">
+            <h3 class="font-bold text-zinc-900 dark:text-white mb-2 flex items-center gap-2">
+              <span>{{ getAnimalEmoji(selectedHistoryMission.animalSpecies) }}</span>
+              {{ selectedHistoryMission.animalName }}
+            </h3>
+            <div class="grid grid-cols-2 gap-2 text-sm">
+              <span class="text-zinc-500">{{ $t('dashboard.owner.missions_list.history_details.species') }}</span>
+              <span class="font-medium">{{
+                selectedHistoryMission.animalSpecies === Species.DOG
+                  ? $t('request.species.dog')
+                  : $t('request.species.cat')
+              }}</span>
+              <span class="text-zinc-500">{{ $t('dashboard.owner.missions_list.history_details.type') }}</span>
+              <span class="font-medium">{{
+                selectedHistoryMission.request?.requestType === RequestType.EMERGENCY
+                  ? $t('dashboard.requests.dialog.type_emergency')
+                  : $t('dashboard.requests.dialog.type_appointment')
+              }}</span>
+              <span class="text-zinc-500">{{ $t('dashboard.owner.missions_list.history_details.status') }}</span>
+              <span class="font-medium">
+                <Tag
+                  :value="getStatusLabel(selectedHistoryMission.status)"
+                  :severity="getStatusSeverity(selectedHistoryMission.status)"
+                />
+              </span>
+              <template v-if="selectedHistoryMission.appointmentDatetime">
+                <span class="text-zinc-500">{{ $t('dashboard.owner.missions_list.history_details.appointment_datetime') }}</span>
+                <span class="font-medium">{{ formatDate(selectedHistoryMission.appointmentDatetime) }}</span>
+              </template>
+            </div>
+          </div>
+
+          <div class="p-4 bg-zinc-50 dark:bg-zinc-800 rounded-lg">
+            <h3 class="font-bold text-zinc-900 dark:text-white mb-2">
+              {{ $t('dashboard.owner.missions_list.history_details.clinic_section') }}
+            </h3>
+            <p class="font-medium text-zinc-900 dark:text-white">
+              {{
+                selectedHistoryMission.request?.clinic?.name
+                  || $t('dashboard.owner.missions_list.unknown_clinic')
+              }}
+            </p>
+            <p class="text-zinc-500 text-sm">{{ selectedHistoryMission.request?.clinic?.address }}</p>
+            <div class="flex gap-3 mt-2">
+              <a
+                v-if="selectedHistoryMission.request?.clinic?.phone"
+                :href="`tel:${selectedHistoryMission.request.clinic.phone}`"
+                class="inline-flex items-center gap-2 text-blue-600 hover:underline font-bold text-sm"
+              >
+                <i class="pi pi-phone"></i> {{ selectedHistoryMission.request.clinic.phone }}
+              </a>
+              <button
+                type="button"
+                class="inline-flex items-center gap-2 text-blue-600 hover:underline font-bold text-sm"
+                @click="openMaps(selectedHistoryMission.request?.clinic)"
+              >
+                <i class="pi pi-map-marker"></i>
+                {{ $t('dashboard.owner.missions_list.actions.go') }}
+              </button>
+            </div>
+          </div>
+
+          <div
+            v-if="selectedHistoryMission.status === MissionStatus.DISPUTED"
+            class="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg"
+          >
+            <p class="font-bold text-red-700 dark:text-red-400 mb-1">
+              {{ $t('dashboard.owner.missions_list.history_details.validation_section') }}
+            </p>
+            <p class="text-xs text-zinc-600 dark:text-zinc-300">
+              {{
+                selectedHistoryMission.ownerValidationOutcome === MissionValidationOutcome.CONFIRMED
+                  ? $t('dashboard.requests.validation.your_answer_confirmed')
+                  : $t('dashboard.requests.validation.your_answer_denied')
+              }}
+            </p>
+            <p
+              v-if="selectedHistoryMission.ownerDisputeReason"
+              class="text-xs text-zinc-500 dark:text-zinc-400 italic mt-2"
+            >
+              {{ $t('dashboard.owner.missions_list.dispute_reason_label') }}
+              {{ selectedHistoryMission.ownerDisputeReason }}
+            </p>
+          </div>
+        </div>
+        <template #footer>
+          <Button
+            :label="$t('common.close')"
+            icon="pi pi-times"
+            text
+            @click="showHistoryDetails = false"
+          />
+        </template>
       </Dialog>
     </div>
   </div>
