@@ -1,6 +1,8 @@
 <script setup>
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { MissionStatus, MissionValidationOutcome, RequestType, Species } from '@/constants/enums'
+import { breedLabel } from '@/constants/breeds.js'
 
 // Bloc de détail d'une Request (type/espèce/groupe/quantité + RDV, et si une Mission existe :
 // donneur/propriétaire/états de validation), extrait de RequestsView.vue (dialog de détail
@@ -26,6 +28,8 @@ const props = defineProps({
     required: true,
   },
 })
+
+const { t, te } = useI18n()
 
 const canVote = computed(() => {
   const mission = props.request?.mission
@@ -112,7 +116,7 @@ const formatDateTime = (dateString) => {
               {{ request.mission.animal.name }}
             </p>
             <p class="text-xs text-zinc-500">
-              {{ request.mission.animal.breed }} •
+              {{ breedLabel(request.mission.animal.breed, t, te) }} •
               {{ request.mission.animal.weight }}kg
             </p>
           </div>

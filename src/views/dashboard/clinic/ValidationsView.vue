@@ -9,8 +9,9 @@ import {
   mapCriticalFieldsCorrectionErrorKey,
 } from '@/composables/useAnimalValidation.js'
 import { Species, BloodGroupsBySpecies } from '@/constants/enums'
+import { breedLabel } from '@/constants/breeds.js'
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const toast = useToast()
 
 const {
@@ -213,10 +214,13 @@ const handleSaveCorrection = async () => {
             </Column>
 
             <Column
-              field="breed"
               :header="$t('dashboard.validations.columns.breed')"
               class="!text-zinc-600 dark:!text-zinc-300"
-            />
+            >
+              <template #body="slotProps">
+                {{ breedLabel(slotProps.data.breed, t, te) }}
+              </template>
+            </Column>
 
             <Column :header="$t('dashboard.validations.columns.blood_group')">
               <template #body="slotProps">

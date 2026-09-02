@@ -4,8 +4,9 @@ import { useI18n } from 'vue-i18n'
 import DashboardSidebar from '@/components/dashboard/DashboardSidebar.vue'
 import { useClinicDonors } from '@/composables/useClinicDonors.js'
 import { Species } from '@/constants/enums.js'
+import { breedLabel } from '@/constants/breeds.js'
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const { donors, filteredDonors, searchQuery, isLoading, loadError, fetchDonors } = useClinicDonors()
 
 // Détail au clic/clavier (correctif UX, 2026-09) : `selectionMode="single"` +
@@ -208,7 +209,7 @@ const formatDate = (dateString) => {
             <span class="text-zinc-500">{{ $t('dashboard.donors.dialog.species') }}</span>
             <span class="font-medium">{{ speciesLabel(selectedDonor.species) }}</span>
             <span class="text-zinc-500">{{ $t('dashboard.donors.dialog.breed') }}</span>
-            <span class="font-medium">{{ selectedDonor.breed || '—' }}</span>
+            <span class="font-medium">{{ breedLabel(selectedDonor.breed, t, te) || '—' }}</span>
             <span class="text-zinc-500">{{ $t('dashboard.donors.dialog.blood') }}</span>
             <span class="font-medium">{{ selectedDonor.bloodGroup }}</span>
             <span class="text-zinc-500">{{ $t('dashboard.donors.dialog.validation_status') }}</span>
@@ -270,7 +271,8 @@ const formatDate = (dateString) => {
               <span class="font-medium text-zinc-800 dark:text-zinc-200">
                 {{ animal.name }}
                 <span class="text-xs text-zinc-500 font-normal">
-                  ({{ speciesLabel(animal.species) }}{{ animal.breed ? ` • ${animal.breed}` : '' }})
+                  ({{ speciesLabel(animal.species)
+                  }}{{ animal.breed ? ` • ${breedLabel(animal.breed, t, te)}` : '' }})
                 </span>
               </span>
               <Tag
