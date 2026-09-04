@@ -845,6 +845,7 @@
     "mfa": {
       "title": "Double authentification",
       "description": "Protégez votre compte avec un code à usage unique généré par une application d'authentification (Google Authenticator, Authy...).",
+      "qr_alt": "QR code d'enrôlement de la double authentification",
       "manual_key_label": "Clé de configuration manuelle",
       "manual_key_hint": "Si vous ne pouvez pas scanner de QR code, saisissez cette clé dans votre application d'authentification.",
       "code_label": "Code de vérification",

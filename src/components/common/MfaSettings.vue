@@ -1,6 +1,7 @@
 <script setup>
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import QRCode from 'qrcode'
 import { useMfa } from '@/composables/useMfa'
 
 // Section "Double authentification" partagée SettingsView.vue (clinic)/ProfileView.vue
@@ -27,10 +28,20 @@ const {
 } = useMfa()
 
 const verificationCode = ref('')
+const qrDataUrl = ref('')
 
 onMounted(() => {
   fetchStatus()
 })
+
+// `setupDetails.uri` (otpauth://) est déjà généré par useMfa.js (getSetupUri()) -- le rendu
+// visuel en QR code manquait, seule la clé manuelle était affichée jusqu'ici.
+watch(
+  () => setupDetails.value?.uri,
+  async (uri) => {
+    qrDataUrl.value = uri ? await QRCode.toDataURL(uri) : ''
+  },
+)
 
 const onStartEnrollment = () => {
   verificationCode.value = ''
@@ -67,6 +78,16 @@ const onCancel = () => {
     </div>
 
     <template v-else-if="setupDetails">
+      <div v-if="qrDataUrl" class="flex justify-center p-4">
+        <img
+          :src="qrDataUrl"
+          :alt="t('dashboard.mfa.qr_alt')"
+          width="200"
+          height="200"
+          class="rounded-lg border border-zinc-200 dark:border-zinc-800"
+        />
+      </div>
+
       <div
         class="p-4 bg-zinc-50 dark:bg-zinc-950/50 rounded-lg border border-zinc-200 dark:border-zinc-800 flex flex-col gap-2"
       >
