@@ -753,6 +753,20 @@ describe('amplify/data/resource.ts — double validation de Mission + notation (
       }
       expect(restOfType).not.toContain('@auth(')
     })
+
+    // Correctif `createOwner` "Unauthorized on [id]" (bug réel, 2026-09-03, voir le commentaire
+    // sur le champ `id` dans resource.ts) : une première tentative (déclarer `id` explicitement
+    // SANS `.authorization()`) ne produisait AUCUN diff CloudFormation en déploiement réel --
+    // la clé primaire suit un chemin de compilation dédié, identique déclarée ou non, tant
+    // qu'elle ne porte pas sa PROPRE règle de champ. Ce test pin le correctif qui fonctionne
+    // réellement (vérifié par déploiement `ampx sandbox`) : `id` porte désormais un `@auth` de
+    // champ dédié, même règle que la règle de modèle -- ce qui le fait transiter par le même
+    // chemin d'enregistrement ACM que `averageRatingAsOwner`/`ratingCountAsOwner` ci-dessus.
+    it("id porte désormais un @auth de champ dédié (même règle que la règle de modèle) -- le fix réel de 'Unauthorized on [id]' sur createOwner", () => {
+      const block = extractFieldAuthBlock(ownerType, 'id')
+      expect(block).toContain('{allow: owner, ownerField: "owner"}')
+      expect(block).toContain('{allow: groups, operations: [read], groups: ["Veterinarians"]}')
+    })
   })
 
   describe('submitMissionValidation — mutation custom en pipeline (10 fonctions, voir resource.ts et les resolvers)', () => {

@@ -5,6 +5,7 @@ import DashboardSidebar from '@/components/dashboard/DashboardSidebar.vue'
 import AddressAutocomplete from '@/components/common/AddressAutocomplete.vue'
 import PhoneInput from '@/components/common/PhoneInput.vue'
 import StarRating from '@/components/common/StarRating.vue'
+import MfaSettings from '@/components/common/MfaSettings.vue'
 import { useToast } from 'primevue/usetoast'
 import { useClinicSettings } from '@/composables/useClinicSettings'
 import Dialog from 'primevue/dialog'
@@ -34,6 +35,7 @@ const tabs = [
   { id: 'general', label: 'dashboard.settings.tabs.general' },
   { id: 'vet_ref', label: 'dashboard.settings.tabs.vet_ref' },
   { id: 'reputation', label: 'dashboard.settings.tabs.reputation' },
+  { id: 'security', label: 'dashboard.settings.tabs.security' },
 ]
 
 onMounted(() => {
@@ -180,8 +182,8 @@ const onDelete = async () => {
 
           <form
             v-if="activeTab === 'general'"
-            @submit.prevent="onSaveClinic"
             class="flex flex-col gap-6 max-w-3xl"
+            @submit.prevent="onSaveClinic"
           >
             <h2
               class="text-xl font-bold text-zinc-900 dark:text-white mb-4 border-l-4 border-[#ff3b4e] pl-3"
@@ -247,7 +249,7 @@ const onDelete = async () => {
               <Checkbox
                 v-model="clinicForm.hasEmergencyService"
                 :binary="true"
-                inputId="emergency"
+                input-id="emergency"
               />
               <label for="emergency" class="text-sm font-medium cursor-pointer">{{
                 $t('dashboard.settings.emergency')
@@ -266,8 +268,8 @@ const onDelete = async () => {
 
           <form
             v-else-if="activeTab === 'vet_ref'"
-            @submit.prevent="onSaveVet"
             class="flex flex-col gap-6 max-w-3xl"
+            @submit.prevent="onSaveVet"
           >
             <h2
               class="text-xl font-bold text-zinc-900 dark:text-white mb-4 border-l-4 border-[#ff3b4e] pl-3"
@@ -393,6 +395,10 @@ const onDelete = async () => {
                 {{ $t('dashboard.settings.reputation.no_reviews') }}
               </p>
             </div>
+          </div>
+
+          <div v-else-if="activeTab === 'security'" class="flex flex-col gap-6 max-w-3xl">
+            <MfaSettings :account-name="vetForm.email" />
           </div>
 
           <div

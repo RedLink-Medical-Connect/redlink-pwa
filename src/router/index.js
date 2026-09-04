@@ -82,6 +82,12 @@ const router = createRouter({
       meta: { layout: 'AuthLayout' },
     },
     {
+      path: '/verify-mfa',
+      name: 'verify-mfa',
+      component: () => import('@/views/auth/VerifyMfaView.vue'),
+      meta: { layout: 'AuthLayout' },
+    },
+    {
       path: '/forgot-password',
       name: 'forgot-password',
       component: () => import('@/views/auth/ForgotPasswordView.vue'),

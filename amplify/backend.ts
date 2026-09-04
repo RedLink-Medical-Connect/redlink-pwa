@@ -4,6 +4,7 @@ import { Policy, PolicyStatement } from 'aws-cdk-lib/aws-iam'
 import { FilterCriteria, FilterRule, StartingPosition } from 'aws-cdk-lib/aws-lambda'
 import { DynamoEventSource } from 'aws-cdk-lib/aws-lambda-event-sources'
 import { AwsCustomResource, AwsCustomResourcePolicy, PhysicalResourceId } from 'aws-cdk-lib/custom-resources'
+import { CfnWebACL, CfnWebACLAssociation } from 'aws-cdk-lib/aws-wafv2'
 import { auth } from './auth/resource'
 import { data, MISSION_STATUS_INDEX_NAME, RATING_TARGET_INDEX_NAME } from './data/resource'
 import { postConfirmation } from './functions/post-confirmation/resource'
@@ -33,20 +34,65 @@ const backend = defineBackend({
 // paresseuse des groupes -- devenues inutiles en Gen2 (groupes statiques).
 
 /**
- * Politique de mot de passe reproduite à l'identique de Gen1 (voir ADR-0008,
- * section "Politique de mot de passe"), via l'échappatoire CDK sur le
- * `CfnUserPool` L1 généré par `defineAuth` -- pas d'équivalent déclaratif
- * dans l'API de `defineAuth` pour ce réglage à ce jour.
+ * Durcissement sécurité Cognito (2026-09-02, audit sécurité -- voir plan
+ * "Durcissement sécurité Cognito / Auth", Groupe 1), via l'échappatoire CDK sur
+ * les L1 `CfnUserPool`/`CfnUserPoolClient` générés par `defineAuth` -- pas
+ * d'équivalent déclaratif dans l'API de `defineAuth` pour ces réglages à ce
+ * jour, même famille de pattern que le `passwordPolicy` déjà en place.
  */
-const { cfnUserPool } = backend.auth.resources.cfnResources
+const { cfnUserPool, cfnUserPoolClient } = backend.auth.resources.cfnResources
+
+/**
+ * Politique de mot de passe (remplace le réglage hérité de Gen1, ADR-0008,
+ * qui n'imposait que 8 caractères sans complexité) : 12 caractères minimum,
+ * les 4 classes de caractères exigées. Synchronisé avec la validation
+ * cliente dans `src/composables/usePassword.js` -- un mot de passe accepté
+ * par le formulaire ne doit jamais être rejeté par Cognito.
+ */
 cfnUserPool.policies = {
   passwordPolicy: {
-    minimumLength: 8,
-    requireLowercase: false,
-    requireNumbers: false,
-    requireSymbols: false,
-    requireUppercase: false,
+    minimumLength: 12,
+    requireLowercase: true,
+    requireNumbers: true,
+    requireSymbols: true,
+    requireUppercase: true,
   },
+}
+
+/**
+ * Advanced Security Features (Threat Protection) -- DÉLIBÉRÉMENT NON activée ici.
+ * Revue DevSecOps (2026-09-02) : `cfnUserPool.userPoolAddOns.advancedSecurityMode`
+ * ne fonctionne QUE si `userPoolTier` vaut `PLUS` (confirmé dans les types installés,
+ * `node_modules/aws-cdk-lib/aws-cognito/lib/user-pool.d.ts`, note explicite sur
+ * `standardThreatProtectionMode` -- même contrainte sous-jacente pour la propriété
+ * dépréciée `advancedSecurityMode` posée directement sur le L1, les deux exposant la
+ * même propriété CloudFormation `UserPoolAddOns.AdvancedSecurityMode`). Un pool
+ * nouvellement créé est en tier `ESSENTIALS` par défaut (`CfnUserPoolProps.userPoolTier`),
+ * qui n'inclut PAS le Threat Protection -- l'activer sans passer `userPoolTier: 'PLUS'`
+ * aurait donc échoué au déploiement ou, pire, réussi silencieusement sans jamais
+ * journaliser le moindre signal de risque. `PLUS` est facturé au MAU (contrairement à
+ * `ESSENTIALS`/`LITE`) -- décision budget refusée pour l'instant (repo owner,
+ * 2026-09-02). Reporté dans le Backlog différé du plan de durcissement
+ * (`/home/abbate-titouan/.claude/plans/cozy-dazzling-lagoon.md`) : à ressortir si/quand
+ * le budget `PLUS` est validé.
+ */
+
+/**
+ * TTL des tokens posés explicitement plutôt que de laisser le défaut
+ * implicite du `UserPoolClient` généré par `defineAuth` (1h Access/ID, 30j
+ * Refresh) -- Access/ID token courts (fenêtre d'exploitation réduite en cas
+ * de vol), Refresh token raisonnable (pas de re-connexion trop fréquente).
+ * Propriétés confirmées dans les types installés
+ * (`CfnUserPoolClient.accessTokenValidity`/`idTokenValidity`/
+ * `refreshTokenValidity`/`tokenValidityUnits`).
+ */
+cfnUserPoolClient.accessTokenValidity = 15
+cfnUserPoolClient.idTokenValidity = 15
+cfnUserPoolClient.refreshTokenValidity = 7
+cfnUserPoolClient.tokenValidityUnits = {
+  accessToken: 'minutes',
+  idToken: 'minutes',
+  refreshToken: 'days',
 }
 
 /**
@@ -426,6 +472,99 @@ backend.addOutput({
       default: indexName,
     },
   },
+})
+
+/**
+ * WAF devant AppSync (2026-09-02, audit sécurité -- plan "Durcissement
+ * sécurité Cognito / Auth", Groupe 1) : ce projet n'a pas d'API Gateway (voir
+ * CLAUDE.md) -- AppSync est le seul point d'entrée réseau, et n'a pas de rate
+ * limiting de première classe. Une `CfnWebACLAssociation` (`aws-cdk-lib/
+ * aws-wafv2`) est le seul chemin CDK pour associer un Web ACL à une API
+ * AppSync -- même famille d'échappatoire CDK que Geo/passwordPolicy ci-dessus.
+ *
+ * Stack séparée SANS override de région (contrairement à `geoStack` ci-dessus,
+ * volontairement forcé en `eu-west-1`) : une association WAF `REGIONAL`
+ * (seule portée valide pour AppSync -- `CLOUDFRONT` est réservé à CloudFront
+ * et exige `us-east-1`) doit être dans la MÊME région que la ressource
+ * associée, donc la région de déploiement par défaut du projet (où AppSync
+ * est réellement créé), pas `eu-west-1`.
+ */
+const wafStack = backend.createStack('waf-stack')
+
+const { cfnGraphqlApi } = backend.data.resources.cfnResources
+
+/**
+ * Une seule règle managée AWS (`AWSManagedRulesCommonRuleSet`, protections
+ * génériques OWASP) + une règle de rate-limiting basée sur l'IP source (seul
+ * point de la checklist sécurité sans mécanisme dédié dans ce projet, faute
+ * d'API Gateway). `limit: 2000` sur une fenêtre de 5 min (défaut
+ * `evaluationWindowSec`, minimum WAF autorisé 100) : marge large au-dessus
+ * d'un usage normal (formulaires, dashboard), pensée pour absorber un usage
+ * légitime en rafale (ex. chargement du dashboard clinique avec plusieurs
+ * requêtes parallèles) sans faux positif, tout en coupant un scraping/
+ * credential-stuffing soutenu.
+ *
+ * `AWSManagedRulesCommonRuleSet` posée en `overrideAction: { count: {} }`, pas en
+ * blocage réel (revue DevSecOps, 2026-09-02) : ce jeu de règles inspecte le corps des
+ * requêtes (`CrossSiteScripting_BODY`, `GenericRFI_BODY`, etc.), et ce projet manipule
+ * des champs texte libre (notes médicales animales, descriptions) susceptibles de
+ * déclencher un faux positif -- une mutation légitime bloquée renverrait un 403 HTTP
+ * brut, pas une réponse `{ data, errors }` GraphQL (absorbé sans crash par les
+ * `try/catch` déjà en place, mais avec un message d'erreur générique et aucune
+ * visibilité sur la cause réelle, faute d'outil de suivi d'erreurs). Même philosophie
+ * que le mode `AUDIT` déjà utilisé ailleurs dans ce projet : observer les métriques
+ * CloudWatch (`redlink-appsync-common-rule-set`) avant de passer en blocage réel --
+ * `RateLimitPerIp` reste en blocage direct (`action: { block: {} }`), son mode de
+ * détection (comptage de requêtes) n'ayant pas ce risque de faux positif sur du
+ * contenu métier légitime.
+ */
+const webAcl = new CfnWebACL(wafStack, 'AppSyncWebAcl', {
+  defaultAction: { allow: {} },
+  scope: 'REGIONAL',
+  visibilityConfig: {
+    sampledRequestsEnabled: true,
+    cloudWatchMetricsEnabled: true,
+    metricName: 'redlink-appsync-webacl',
+  },
+  rules: [
+    {
+      name: 'AWSManagedRulesCommonRuleSet',
+      priority: 0,
+      overrideAction: { count: {} },
+      statement: {
+        managedRuleGroupStatement: {
+          vendorName: 'AWS',
+          name: 'AWSManagedRulesCommonRuleSet',
+        },
+      },
+      visibilityConfig: {
+        sampledRequestsEnabled: true,
+        cloudWatchMetricsEnabled: true,
+        metricName: 'redlink-appsync-common-rule-set',
+      },
+    },
+    {
+      name: 'RateLimitPerIp',
+      priority: 1,
+      action: { block: {} },
+      statement: {
+        rateBasedStatement: {
+          aggregateKeyType: 'IP',
+          limit: 2000,
+        },
+      },
+      visibilityConfig: {
+        sampledRequestsEnabled: true,
+        cloudWatchMetricsEnabled: true,
+        metricName: 'redlink-appsync-rate-limit',
+      },
+    },
+  ],
+})
+
+new CfnWebACLAssociation(wafStack, 'AppSyncWebAclAssociation', {
+  resourceArn: cfnGraphqlApi.attrArn,
+  webAclArn: webAcl.attrArn,
 })
 
 export default backend
