@@ -94,7 +94,7 @@ const handleRegister = async () => {
 
     auth.setTempRegistrationData({ ...payload, password: password.value })
 
-    const safePayload = { ...payload }
+    const safePayload = { data: { ...payload }, savedAt: Date.now() }
     localStorage.setItem('temp_register_safe_data', JSON.stringify(safePayload))
 
     await router.push({ name: 'verify-email', query: { email: form.value.email } })

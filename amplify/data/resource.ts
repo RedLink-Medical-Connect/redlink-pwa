@@ -458,6 +458,34 @@ export const schema = a.schema({
 
   Owner: a
     .model({
+      // Bug réel trouvé en test manuel (2026-09-03) : `createOwner` échouait avec
+      // `Unauthorized on [id]` malgré `allow.owner()` au niveau modèle. Cause structurelle,
+      // confirmée en lisant `@aws-amplify/graphql-auth-transformer/lib/graphql-auth-
+      // transformer.js` (`node_modules`) : dès qu'UN SEUL champ du modèle porte une
+      // `.authorization()` de champ (ici `averageRatingAsOwner`/`ratingCountAsOwner`
+      // ci-dessous, ADR-0017), le rôle owner cesse d'être "areAllFieldsAllowed" (accès large)
+      // et passe à une liste explicite de champs autorisés par opération, calculée à partir de
+      // `acm.getResources()` (`AccessControlMatrix`, peuplée quand le visiteur `@auth` du
+      // transformer traite le type/les champs) -- PAS à partir de la liste finale des champs du
+      // type au moment de la génération du resolver. Premier correctif tenté (déclarer
+      // `id: a.id().required()` comme un champ explicite, SANS `.authorization()`) : validé par
+      // `tsc`/les tests pin, mais un déploiement réel (`ampx sandbox`, 2026-09-03) a produit un
+      // diff CloudFormation NUL -- le compilateur Gen2 traite la clé primaire par un chemin dédié
+      // qui produit un SDL identique, déclarée explicitement ou non ; l'erreur a persisté
+      // exactement à l'identique en production. Correctif réel : donner à `id` sa PROPRE
+      // `.authorization()` de champ, même règle que la règle de modèle (owner sans restriction
+      // d'opérations + Veterinarians en lecture) -- ça force le compilateur à émettre un
+      // `@auth(...)` dédié sur ce champ dans le SDL (vérifiable : diff réel cette fois, voir
+      // `resource.transform.test.ts`), le faisant transiter par le même chemin d'enregistrement
+      // ACM que `averageRatingAsOwner`/`ratingCountAsOwner` -- qui, eux, fonctionnent
+      // correctement en création. `Veterinarian` (ci-dessus, même convention `id =
+      // cognitoUserId`) n'a AUCUNE `.authorization()` de champ -- son rôle owner reste
+      // "areAllFieldsAllowed", donc non affecté par ce gap ; ne pas copier ce correctif là où il
+      // n'y a pas de champ à `.authorization()` restreinte, ce serait un no-op.
+      id: a
+        .id()
+        .required()
+        .authorization((allow) => [allow.owner(), allow.group('Veterinarians').to(['read'])]),
       firstname: a.string().required(),
       lastname: a.string().required(),
       email: a.string().required(),

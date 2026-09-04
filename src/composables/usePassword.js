@@ -7,9 +7,18 @@ export function usePassword() {
   const password = ref('')
   const confirmPassword = ref('')
 
+  // Synchronisé avec `cfnUserPool.policies.passwordPolicy` (amplify/backend.ts) : un mot
+  // de passe accepté ici ne doit jamais être rejeté par Cognito. 12 caractères minimum,
+  // au moins une minuscule/majuscule/chiffre/symbole.
   const isValid = computed(() => {
     if (!password.value) return true
-    return password.value.length >= 8
+    return (
+      password.value.length >= 12 &&
+      /[a-z]/.test(password.value) &&
+      /[A-Z]/.test(password.value) &&
+      /[0-9]/.test(password.value) &&
+      /[^a-zA-Z0-9]/.test(password.value)
+    )
   })
 
   const doMatch = computed(() => {

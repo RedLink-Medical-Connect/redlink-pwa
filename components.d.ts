@@ -38,6 +38,7 @@ declare module 'vue' {
     LegalDocumentPage: typeof import('./src/components/legal/LegalDocumentPage.vue')['default']
     Menu: typeof import('primevue/menu')['default']
     Message: typeof import('primevue/message')['default']
+    MfaSettings: typeof import('./src/components/common/MfaSettings.vue')['default']
     Password: typeof import('primevue/password')['default']
     PhoneInput: typeof import('./src/components/common/PhoneInput.vue')['default']
     RequestDetailsPanel: typeof import('./src/components/dashboard/RequestDetailsPanel.vue')['default']

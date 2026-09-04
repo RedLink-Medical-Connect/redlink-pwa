@@ -5,6 +5,7 @@ import {
   signUp,
   signOut,
   confirmSignUp,
+  confirmSignIn,
   getCurrentUser,
   fetchUserAttributes,
   resetPassword,
@@ -71,24 +72,65 @@ export const useAuthStore = defineStore('auth', () => {
   // `signIn()` une seule fois avec les identifiants fournis, plutôt que de
   // laisser un message d'erreur sans issue (l'utilisateur ne peut pas "vider
   // le localStorage" lui-même en usage normal).
+  // Bug réel trouvé en test manuel (2026-09-02, indépendant de la Phase 8 et du
+  // Groupe 1 sécurité -- ce fichier n'avait jamais géré ce cas) : `signIn()` ne lève
+  // PAS d'exception pour un compte existant mais jamais confirmé -- il résout
+  // normalement `{ isSignedIn: false, nextStep: { signInStep: 'CONFIRM_SIGN_UP' } }`
+  // (vérifié dans `node_modules/aws-amplify/.../auth/src/providers/cognito/utils/
+  // signInHelpers.ts`, `getSignInResultFromError`). Avant ce correctif, `login()`
+  // ignorait silencieusement ce cas (`if (isSignedIn)` seul, rien dans le `else`) --
+  // l'utilisateur voyait juste le bouton arrêter de charger, sans message d'erreur ET
+  // sans aucun moyen de revenir saisir son code de confirmation déjà reçu par email.
+  // Redirige vers `/verify-email` (déjà équipée d'un bouton "renvoyer le code" et d'un
+  // repli de saisie du mot de passe si `temp_register_safe_data` est encore en
+  // `localStorage`) plutôt que de laisser echouer un `signIn()` sans issue.
+  async function redirectIfUnconfirmed(nextStep, email) {
+    if (nextStep?.signInStep === 'CONFIRM_SIGN_UP') {
+      await router.push({ name: 'verify-email', query: { email } })
+      return true
+    }
+    return false
+  }
+
+  // Durcissement sécurité (audit Cognito/API, 2026-09-02, Groupe 4) : un compte ayant
+  // activé le TOTP (enrôlement depuis MfaSettings.vue/useMfa.js, `mode: 'OPTIONAL'` côté
+  // `defineAuth` -- jamais imposé) reçoit ce nextStep après `signIn()` au lieu de
+  // `isSignedIn: true` -- redirige vers l'écran de saisie du code plutôt que de laisser
+  // `signIn()` sans issue, même principe que `redirectIfUnconfirmed()` ci-dessus.
+  async function redirectIfMfaRequired(nextStep, email) {
+    if (nextStep?.signInStep === 'CONFIRM_SIGN_IN_WITH_TOTP_CODE') {
+      await router.push({ name: 'verify-mfa', query: { email } })
+      return true
+    }
+    return false
+  }
+
   async function login(email, password) {
     isLoading.value = true
     error.value = null
     try {
-      const { isSignedIn } = await signIn({ username: email, password })
+      const { isSignedIn, nextStep } = await signIn({ username: email, password })
       if (isSignedIn) {
         await init()
         await redirectAfterLogin()
+      } else if (await redirectIfUnconfirmed(nextStep, email)) {
+        return
+      } else if (await redirectIfMfaRequired(nextStep, email)) {
+        return
       }
     } catch (err) {
       console.error(err)
       if (err.name === 'UserAlreadyAuthenticatedException') {
         try {
-          await signOut()
-          const { isSignedIn } = await signIn({ username: email, password })
+          await signOut({ global: true })
+          const { isSignedIn, nextStep } = await signIn({ username: email, password })
           if (isSignedIn) {
             await init()
             await redirectAfterLogin()
+            return
+          } else if (await redirectIfUnconfirmed(nextStep, email)) {
+            return
+          } else if (await redirectIfMfaRequired(nextStep, email)) {
             return
           }
         } catch (retryErr) {
@@ -96,6 +138,30 @@ export const useAuthStore = defineStore('auth', () => {
         }
       }
       error.value = `errors.login_failed`
+    } finally {
+      isLoading.value = false
+    }
+  }
+
+  // Écran de challenge MFA (VerifyMfaView.vue) : contrat booléen (même famille que
+  // `forgotPass`/`deleteAccount` ci-dessous), pas un `throw` -- la vue n'a besoin que de
+  // savoir si la connexion a abouti, `auth.error` porte déjà le message d'échec.
+  async function confirmMfaChallenge(code) {
+    isLoading.value = true
+    error.value = null
+    try {
+      const { isSignedIn } = await confirmSignIn({ challengeResponse: code })
+      if (isSignedIn) {
+        await init()
+        await redirectAfterLogin()
+        return true
+      }
+      error.value = `errors.mfa_challenge_failed`
+      return false
+    } catch (err) {
+      console.error(err)
+      error.value = `errors.mfa_challenge_failed`
+      return false
     } finally {
       isLoading.value = false
     }
@@ -217,7 +283,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function logout() {
     try {
-      await signOut()
+      await signOut({ global: true })
     } catch (err) {
       console.error(err)
     }
@@ -261,6 +327,7 @@ export const useAuthStore = defineStore('auth', () => {
     login,
     register,
     confirmRegistration,
+    confirmMfaChallenge,
     logout,
     forgotPass,
     resetPassSubmit,

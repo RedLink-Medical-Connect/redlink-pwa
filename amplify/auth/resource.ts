@@ -55,6 +55,17 @@ export const auth = defineAuth({
   // résolution des Missions DISPUTED n'est pas construite dans cette sous-tâche non
   // plus (voir amplify/data/resource.ts, section Mission).
   groups: ['Veterinarians', 'Owners', 'Admins'],
+  // Durcissement sécurité (audit Cognito/API, 2026-09-02, Groupe 4) : MFA TOTP
+  // disponible pour tous les rôles, jamais imposé (`mode: 'OPTIONAL'`, scope
+  // confirmé -- pas de garde de navigation ni de blocage dashboard côté frontend).
+  // `sms: false` : pas d'expéditeur SNS configuré dans ce projet, TOTP seul suffit
+  // (`MFATotpSettings` est un simple booléen, confirmé via `@aws-amplify/backend`
+  // -- pas de config supplémentaire nécessaire côté `defineAuth`).
+  multifactor: {
+    mode: 'OPTIONAL',
+    totp: true,
+    sms: false,
+  },
   triggers: {
     postConfirmation,
   },

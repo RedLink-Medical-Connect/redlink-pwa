@@ -44,23 +44,32 @@ describe('usePassword.isValid', () => {
     unmount()
   })
 
-  it('est false pour un mot de passe non vide de moins de 8 caractères', () => {
+  it('est false pour un mot de passe non vide trop court, même complexe', () => {
     const { result, unmount } = withSetup(usePassword)
-    result.password.value = 'abc123'
+    result.password.value = 'Abc123!'
     expect(result.isValid.value).toBe(false)
     unmount()
   })
 
-  it('est true à partir de 8 caractères (limite incluse)', () => {
+  // Synchronisé avec `cfnUserPool.policies.passwordPolicy` (amplify/backend.ts) : 12
+  // caractères minimum + les 4 classes de caractères.
+  it('est true à partir de 12 caractères avec les 4 classes de caractères (limite incluse)', () => {
     const { result, unmount } = withSetup(usePassword)
-    result.password.value = '12345678'
+    result.password.value = 'Abcdefgh123!'
     expect(result.isValid.value).toBe(true)
     unmount()
   })
 
-  it('est false juste en dessous de la limite (7 caractères)', () => {
+  it('est false juste en dessous de la limite de longueur (11 caractères), même complexe', () => {
     const { result, unmount } = withSetup(usePassword)
-    result.password.value = '1234567'
+    result.password.value = 'Abcdefgh12!'
+    expect(result.isValid.value).toBe(false)
+    unmount()
+  })
+
+  it('est false quand la longueur est suffisante mais qu’une classe de caractères manque (pas de symbole)', () => {
+    const { result, unmount } = withSetup(usePassword)
+    result.password.value = 'Abcdefgh1234'
     expect(result.isValid.value).toBe(false)
     unmount()
   })
@@ -93,16 +102,16 @@ describe('usePassword.doMatch', () => {
 describe('usePassword.validate', () => {
   it('renvoie null (aucune erreur) quand le mot de passe est valide et les deux champs correspondent', () => {
     const { result, unmount } = withSetup(usePassword)
-    result.password.value = 'motdepasse1'
-    result.confirmPassword.value = 'motdepasse1'
+    result.password.value = 'Motdepasse1!'
+    result.confirmPassword.value = 'Motdepasse1!'
     expect(result.validate()).toBeNull()
     unmount()
   })
 
-  it('priorise l’erreur de longueur sur l’erreur de correspondance quand les deux gates échouent à la fois', () => {
+  it('priorise l’erreur de longueur/complexité sur l’erreur de correspondance quand les deux gates échouent à la fois', () => {
     // password trop court ET différent de confirmPassword : `validate()` teste isValid
-    // avant doMatch (voir l'implémentation), donc l'erreur de longueur doit sortir en
-    // premier, pas celle de correspondance.
+    // avant doMatch (voir l'implémentation), donc l'erreur de longueur/complexité doit
+    // sortir en premier, pas celle de correspondance.
     const { result, unmount } = withSetup(usePassword)
     result.password.value = 'abc'
     result.confirmPassword.value = 'xyz'
@@ -111,10 +120,10 @@ describe('usePassword.validate', () => {
     unmount()
   })
 
-  it('renvoie l’erreur de correspondance quand le mot de passe est valide (>= 8) mais ne correspond pas à confirmPassword', () => {
+  it('renvoie l’erreur de correspondance quand le mot de passe est valide (>= 12, complexe) mais ne correspond pas à confirmPassword', () => {
     const { result, unmount } = withSetup(usePassword)
-    result.password.value = 'motdepasse1'
-    result.confirmPassword.value = 'autrechose1'
+    result.password.value = 'Motdepasse1!'
+    result.confirmPassword.value = 'Autrechose1!'
 
     expect(result.validate()).toBe(i18n.global.t('errors.passwords_not_match'))
     unmount()

@@ -5,6 +5,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useI18n } from 'vue-i18n'
 import { resendSignUpCode, getCurrentUser, signIn } from 'aws-amplify/auth'
 import { useRegistrationCompletion } from '@/composables/useRegistrationCompletion'
+import { TEMP_REGISTRATION_TTL_MS } from '@/constants/auth-constants'
 
 const route = useRoute()
 const router = useRouter()
@@ -25,13 +26,24 @@ onMounted(() => {
   email.value = route.query.email || ''
 
   if (auth.tempRegistrationData && auth.tempRegistrationData.password) {
+    // Flux normal (pas de rechargement de page depuis le signUp) : le mot de passe
+    // reste en mémoire Pinia (jamais persisté sur disque), pas de resaisie nécessaire.
     registrationData = auth.tempRegistrationData
   } else {
     const local = localStorage.getItem('temp_register_safe_data')
-    if (local) {
-      registrationData = JSON.parse(local)
+    const parsed = local ? JSON.parse(local) : null
+    // TTL applicatif (Groupe 3) : purge une entrée trop ancienne plutôt que de laisser
+    // des PII (adresse, téléphone, données santé animale) traîner indéfiniment en
+    // localStorage après un flow abandonné.
+    const isExpired = parsed && Date.now() - parsed.savedAt > TEMP_REGISTRATION_TTL_MS
+    if (parsed && !isExpired) {
+      // Page rechargée entre le signUp initial et la confirmation : `tempRegistrationData`
+      // (Pinia, en mémoire) ne survit pas au rechargement -- repli sur la copie
+      // `localStorage` (mot de passe non inclus, toujours redemandé ci-dessous).
+      registrationData = parsed.data
       showPasswordInput.value = true
     } else {
+      if (isExpired) localStorage.removeItem('temp_register_safe_data')
       auth.setError(t('errors.session_expired'))
       // La route s'appelle '/register' (nom 'register-selection') — '/register/selection'
       // n'existe pas dans router/index.js et menait à un cul-de-sac (page 404). Phase 6.4.
@@ -94,6 +106,12 @@ const handleVerify = async () => {
     await router.push('/dashboard')
   } catch (err) {
     console.error('Erreur Inscription:', err)
+    // Nettoyage PII (Groupe 3, en plus du TTL posé plus haut) : même un échec de
+    // vérification (code invalide, signIn en échec...) ne doit pas laisser
+    // `temp_register_safe_data` traîner indéfiniment -- sans risque pour une
+    // nouvelle tentative dans la même page, `registrationData` reste en mémoire
+    // (variable module) tant que la page n'est pas rechargée.
+    localStorage.removeItem('temp_register_safe_data')
     if (err.errors && err.errors.length > 0) {
       auth.setError(t('errors.technical_with_message', { message: err.errors[0].message }))
     } else {

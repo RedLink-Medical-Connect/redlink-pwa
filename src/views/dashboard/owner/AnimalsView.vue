@@ -17,8 +17,9 @@ import {
   formatBloodGroupLabel,
 } from '@/constants/enums.js'
 import { getDonorStatus } from '@/services/eligibility-service.js'
+import { breedLabel } from '@/constants/breeds.js'
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const router = useRouter()
 const toast = useToast()
 
@@ -330,7 +331,7 @@ const onDelete = async () => {
                     {{ animal.name }}
                   </h3>
                   <span class="text-xs font-bold uppercase text-zinc-400 tracking-wider">{{
-                    animal.breed || $t('dashboard.owner.animals.unknown_breed')
+                    breedLabel(animal.breed, t, te) || $t('dashboard.owner.animals.unknown_breed')
                   }}</span>
                   <span
                     v-if="sexLabel(animal.sex)"
