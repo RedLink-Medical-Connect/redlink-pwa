@@ -258,6 +258,7 @@
     "request_sent": "Request sent successfully!",
     "login_failed": "Incorrect email or password.",
     "email_exists": "This email already has an account.",
+    "registration_resumed": "A registration was already in progress with this email — we've just sent you a new verification code.",
     "registration_failed": "Error during registration.",
     "invalid_code": "Invalid or expired code.",
     "send_code_failed": "Unable to send code (Unknown email?)",

@@ -10,7 +10,8 @@ import {
   fetchUserAttributes,
   resetPassword,
   confirmResetPassword,
-  deleteUser
+  deleteUser,
+  resendSignUpCode
 } from 'aws-amplify/auth'
 import router from '@/router'
 
@@ -200,14 +201,39 @@ export const useAuthStore = defineStore('auth', () => {
     } catch (err) {
       console.error(err)
       if (err.name === 'UsernameExistsException') {
-        error.value = `errors.email_exists`
-        // Comportement demandé (retour utilisateur, hors migration Phase 8 -- ce
-        // fichier n'a jamais été touché par elle) : un email déjà utilisé redirige
-        // vers /login (email pré-rempli) plutôt que de laisser l'Owner/Vet bloqué
-        // sur le formulaire d'inscription avec un message d'erreur seul. `error`
-        // reste posé dans le store (pas réinitialisé par la navigation elle-même) :
-        // LoginView.vue l'affiche déjà via son propre `<Message v-if="auth.error">`.
-        await router.push(`/login?email=${encodeURIComponent(email)}`)
+        // Correctif (2026-09-06) : ce pool Cognito utilise l'email directement comme
+        // username (`usernameAttributes: ['email']`, amplify/auth/resource.ts) --
+        // `signUp()` renvoie `UsernameExistsException` pour un username déjà pris,
+        // CONFIRMÉ OU NON. Avant ce correctif, ce cas redirigeait toujours vers
+        // /login -- correct pour un compte déjà confirmé, mais un piège pour une
+        // inscription abandonnée (utilisateur qui ferme VerifyEmailView.vue avant
+        // d'entrer son code) : /login exige alors un mot de passe que l'utilisateur
+        // n'a tapé qu'une seule fois et n'a jamais utilisé, et `forgotPassword()` ne
+        // sauve pas la mise -- Cognito refuse un reset tant que l'email n'est pas
+        // vérifié (`InvalidParameterException`), un vrai catch-22 documenté. Un compte
+        // non confirmé peut se voir renvoyer un code SANS mot de passe
+        // (`resendSignUpCode`, déjà utilisé sans auth dans VerifyEmailView.vue) --
+        // s'il réussit, l'inscription était bien non confirmée : on reprend le flux de
+        // vérification directement plutôt que d'exiger une connexion impossible. S'il
+        // échoue (compte déjà confirmé -- Cognito renvoie une erreur, ex.
+        // `InvalidParameterException`, plutôt que de renvoyer un nouveau code), on
+        // retombe sur le comportement d'origine : /login est alors le bon endroit.
+        try {
+          await resendSignUpCode({ username: email })
+          error.value = `errors.registration_resumed`
+          await router.push({ name: 'verify-email', query: { email } })
+        } catch (resendErr) {
+          console.error(resendErr)
+          error.value = `errors.email_exists`
+          // Comportement d'origine (retour utilisateur, hors migration Phase 8 -- ce
+          // fichier n'a jamais été touché par elle) : un email déjà utilisé et déjà
+          // confirmé redirige vers /login (email pré-rempli) plutôt que de laisser
+          // l'Owner/Vet bloqué sur le formulaire d'inscription avec un message
+          // d'erreur seul. `error` reste posé dans le store (pas réinitialisé par la
+          // navigation elle-même) : LoginView.vue l'affiche déjà via son propre
+          // `<Message v-if="auth.error">`.
+          await router.push(`/login?email=${encodeURIComponent(email)}`)
+        }
       } else {
         error.value = `errors.registration_failed`
       }
