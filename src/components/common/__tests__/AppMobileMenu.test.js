@@ -11,17 +11,10 @@ import { createPinia, setActivePinia } from 'pinia'
 // composable de faire de la navigation, donc il n'existe pas de seam
 // composable/service équivalent pour cette régression précise.
 
-vi.mock('aws-amplify/auth', () => ({
-  getCurrentUser: vi.fn(),
-  fetchUserAttributes: vi.fn(),
-  signIn: vi.fn(),
-  signUp: vi.fn(),
-  signOut: vi.fn(),
-  confirmSignUp: vi.fn(),
-  resetPassword: vi.fn(),
-  confirmResetPassword: vi.fn(),
-  deleteUser: vi.fn(),
-}))
+// BFF Cognito (2026-09-06, docs/adr/0021-bff-cognito-session-cloudfront.md) : `stores/auth.js`
+// n'importe plus `aws-amplify/auth` du tout (fetch() vers le BFF) -- le mock qui vivait ici
+// n'a plus rien à intercepter, retiré. Ce test pose `auth.user` directement (jamais
+// `login()`/`logout()`/`init()`), donc aucun appel réseau n'est déclenché de toute façon.
 
 // useAuthStore() (src/stores/auth.js) importe le vrai singleton `@/router`
 // uniquement pour ses helpers login/logout -- stubbé pour ne pas entraîner tout
