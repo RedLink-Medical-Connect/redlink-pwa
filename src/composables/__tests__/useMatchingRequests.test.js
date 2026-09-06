@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { getCurrentUser } from 'aws-amplify/auth'
+import { getCurrentUser } from '@/services/bff-auth-session'
 
 // Regression / integration coverage for the "matching engine silently finds
 // nothing" bug fixed on this branch (commit 82c8d44). Three independent breaks
@@ -72,11 +72,11 @@ const { ownerGetMock, animalListMock, availabilityListMock, relationListMock, re
     }
   })
 
-vi.mock('aws-amplify/data', () => ({
+vi.mock('@/services/bff-graphql-client', () => ({
   generateClient: mockGenerateClient,
 }))
 
-vi.mock('aws-amplify/auth', () => ({
+vi.mock('@/services/bff-auth-session', () => ({
   getCurrentUser: vi.fn(async () => ({ userId: 'owner-1' })),
 }))
 

@@ -2,7 +2,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { getCurrentUser } from 'aws-amplify/auth'
+import { getCurrentUser } from '@/services/bff-auth-session'
 import { useAnimals } from '@/composables/useAnimals'
 import BreedAutocomplete from '@/components/common/BreedAutocomplete.vue'
 import {

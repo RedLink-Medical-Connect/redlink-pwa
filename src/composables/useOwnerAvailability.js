@@ -1,6 +1,6 @@
 import { ref } from 'vue'
-import { generateClient } from 'aws-amplify/data'
-import { getCurrentUser } from 'aws-amplify/auth'
+import { generateClient } from '@/services/bff-graphql-client'
+import { getCurrentUser } from '@/services/bff-auth-session'
 import { throwIfGraphqlError } from '@/services/graphql-error-service'
 
 // Phase 8, sous-tâche 5 (lot 1/3) : migré sur le client Gen2 (`aws-amplify/data`,

@@ -1,6 +1,6 @@
 import { ref } from 'vue'
-import { generateClient } from 'aws-amplify/data'
-import { deleteUser, getCurrentUser } from 'aws-amplify/auth'
+import { generateClient } from '@/services/bff-graphql-client'
+import { deleteUser, getCurrentUser } from '@/services/bff-auth-session'
 import { useAuthStore } from '@/stores/auth'
 import { useRouter } from 'vue-router'
 import { throwIfGraphqlError } from '@/services/graphql-error-service'

@@ -1,6 +1,6 @@
 import { computed, ref } from 'vue'
-import { generateClient } from 'aws-amplify/data'
-import { getCurrentUser } from 'aws-amplify/auth'
+import { generateClient } from '@/services/bff-graphql-client'
+import { getCurrentUser } from '@/services/bff-auth-session'
 import { isValidatedDonor, calculateDistance } from '@/services/eligibility-service'
 import { throwIfGraphqlError } from '@/services/graphql-error-service'
 

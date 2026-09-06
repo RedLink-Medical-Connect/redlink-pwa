@@ -22,7 +22,7 @@ const clinicCreateMock = vi.fn()
 const vetCreateMock = vi.fn()
 const consentRecordCreateMock = vi.fn()
 
-vi.mock('aws-amplify/data', () => ({
+vi.mock('@/services/bff-graphql-client', () => ({
   generateClient: () => ({
     models: {
       Owner: { create: (...args) => ownerCreateMock(...args) },

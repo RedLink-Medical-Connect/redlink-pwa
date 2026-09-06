@@ -20,7 +20,7 @@ const availabilityListMock = vi.fn()
 const availabilityCreateMock = vi.fn()
 const availabilityDeleteMock = vi.fn()
 
-vi.mock('aws-amplify/data', () => ({
+vi.mock('@/services/bff-graphql-client', () => ({
   generateClient: () => ({
     models: {
       OwnerAvailability: {
@@ -32,7 +32,7 @@ vi.mock('aws-amplify/data', () => ({
   }),
 }))
 
-vi.mock('aws-amplify/auth', () => ({
+vi.mock('@/services/bff-auth-session', () => ({
   getCurrentUser: vi.fn(async () => ({ userId: 'owner-1' })),
 }))
 
@@ -155,7 +155,7 @@ describe('useOwnerAvailability.addAvailabilityForDays', () => {
   })
 
   it("relance (propage) l'erreur si getCurrentUser() échoue, sans appeler la mutation de création", async () => {
-    const { getCurrentUser } = await import('aws-amplify/auth')
+    const { getCurrentUser } = await import('@/services/bff-auth-session')
     getCurrentUser.mockRejectedValueOnce(new Error('session expirée'))
 
     const { addAvailabilityForDays } = useOwnerAvailability()

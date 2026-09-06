@@ -19,7 +19,7 @@ const ratingGetMock = vi.fn()
 const veterinarianGetMock = vi.fn()
 const getCurrentUserMock = vi.fn()
 
-vi.mock('aws-amplify/data', () => ({
+vi.mock('@/services/bff-graphql-client', () => ({
   generateClient: () => ({
     models: {
       Rating: {
@@ -31,7 +31,7 @@ vi.mock('aws-amplify/data', () => ({
   }),
 }))
 
-vi.mock('aws-amplify/auth', () => ({
+vi.mock('@/services/bff-auth-session', () => ({
   getCurrentUser: (...args) => getCurrentUserMock(...args),
 }))
 

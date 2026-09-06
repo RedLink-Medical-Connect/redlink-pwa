@@ -35,7 +35,7 @@ const missionDeleteMock = vi.fn()
 const linkRequestToMissionMock = vi.fn()
 const requestListMock = vi.fn()
 
-vi.mock('aws-amplify/data', () => ({
+vi.mock('@/services/bff-graphql-client', () => ({
   generateClient: () => ({
     models: {
       Request: {
@@ -54,7 +54,7 @@ vi.mock('aws-amplify/data', () => ({
   }),
 }))
 
-vi.mock('aws-amplify/auth', () => ({
+vi.mock('@/services/bff-auth-session', () => ({
   getCurrentUser: vi.fn().mockResolvedValue({ userId: 'owner-cognito-id' }),
 }))
 

@@ -1,5 +1,5 @@
 import { ref } from 'vue'
-import { generateClient } from 'aws-amplify/data'
+import { generateClient } from '@/services/bff-graphql-client'
 import { MissionStatus, MissionValidationOutcome } from '@/constants/enums'
 import { throwIfGraphqlError } from '@/services/graphql-error-service'
 import { applyVeterinarianCompletionSideEffects } from '@/composables/mission-completion-side-effects'

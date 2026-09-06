@@ -1,15 +1,28 @@
 import { defineBackend } from '@aws-amplify/backend'
-import { Duration, Names } from 'aws-cdk-lib'
-import { Policy, PolicyStatement } from 'aws-cdk-lib/aws-iam'
-import { FilterCriteria, FilterRule, StartingPosition } from 'aws-cdk-lib/aws-lambda'
+import { Duration, Names, Stack } from 'aws-cdk-lib'
+import { Policy, PolicyStatement, ServicePrincipal } from 'aws-cdk-lib/aws-iam'
+import { FilterCriteria, FilterRule, FunctionUrlAuthType, StartingPosition } from 'aws-cdk-lib/aws-lambda'
 import { DynamoEventSource } from 'aws-cdk-lib/aws-lambda-event-sources'
 import { AwsCustomResource, AwsCustomResourcePolicy, PhysicalResourceId } from 'aws-cdk-lib/custom-resources'
 import { CfnWebACL, CfnWebACLAssociation } from 'aws-cdk-lib/aws-wafv2'
+import {
+  AllowedMethods,
+  CacheCookieBehavior,
+  CachedMethods,
+  CachePolicy,
+  Distribution,
+  OriginRequestCookieBehavior,
+  OriginRequestHeaderBehavior,
+  OriginRequestPolicy,
+  ViewerProtocolPolicy,
+} from 'aws-cdk-lib/aws-cloudfront'
+import { FunctionUrlOrigin, HttpOrigin } from 'aws-cdk-lib/aws-cloudfront-origins'
 import { auth } from './auth/resource'
 import { data, MISSION_STATUS_INDEX_NAME, RATING_TARGET_INDEX_NAME } from './data/resource'
 import { postConfirmation } from './functions/post-confirmation/resource'
 import { missionValidationAutoFinalizer } from './functions/mission-validation-auto-finalizer/resource'
 import { ratingAggregation } from './functions/rating-aggregation/resource'
+import { bff } from './functions/bff/resource'
 
 /**
  * Phase 8, sous-tâche 4 (migration Gen1 -> Gen2) : `data` (defineData,
@@ -23,6 +36,7 @@ const backend = defineBackend({
   data,
   missionValidationAutoFinalizer,
   ratingAggregation,
+  bff,
 })
 
 // Permission IAM de la Lambda PostConfirmation (scopée à `cognito-idp:AdminAddUserToGroup`
@@ -94,6 +108,22 @@ cfnUserPoolClient.tokenValidityUnits = {
   idToken: 'minutes',
   refreshToken: 'days',
 }
+
+/**
+ * BFF Cognito (2026-09-06, docs/adr/0021-bff-cognito-session-cloudfront.md §4) : le Lambda
+ * `bff` authentifie via `InitiateAuth(USER_PASSWORD_AUTH)` (mot de passe transmis directement
+ * sous TLS -- pas de réimplémentation SRP côté serveur, voir ADR-0021 §4 pour le raisonnement
+ * complet). Ce flux n'est PAS activé par défaut sur l'App Client généré par `defineAuth`
+ * (Gen2 privilégie `ALLOW_USER_SRP_AUTH`, comme le SDK navigateur Amplify) -- activé
+ * explicitement ici, `ALLOW_USER_SRP_AUTH` conservé (aucune raison de le retirer) et
+ * `ALLOW_REFRESH_TOKEN_AUTH` ajouté (nécessaire au rafraîchissement de session côté BFF,
+ * `auth-routes.ts`, `tryRefresh()`).
+ */
+cfnUserPoolClient.explicitAuthFlows = [
+  'ALLOW_USER_PASSWORD_AUTH',
+  'ALLOW_USER_SRP_AUTH',
+  'ALLOW_REFRESH_TOKEN_AUTH',
+]
 
 /**
  * Lambda planifiée `mission-validation-auto-finalizer` (2026-08-26, étape 2/5 de la double
@@ -566,5 +596,96 @@ new CfnWebACLAssociation(wafStack, 'AppSyncWebAclAssociation', {
   resourceArn: cfnGraphqlApi.attrArn,
   webAclArn: webAcl.attrArn,
 })
+
+/**
+ * BFF Cognito (session cookie HttpOnly) -- voir docs/adr/0021-bff-cognito-session-cloudfront.md
+ * pour le design complet. Le Lambda `bff` n'a besoin d'AUCUNE permission IAM sur les tables
+ * `data` (il parle à Cognito et AppSync par HTTPS avec un vrai JWT userPool, jamais par accès
+ * DynamoDB direct) -- juste des identifiants Cognito (App Client ID) et de l'URL AppSync,
+ * injectés en variables d'environnement ci-dessous.
+ */
+backend.bff.addEnvironment('COGNITO_USER_POOL_CLIENT_ID', backend.auth.resources.userPoolClient.userPoolClientId)
+backend.bff.addEnvironment('APPSYNC_GRAPHQL_URL', cfnGraphqlApi.attrGraphQlUrl)
+
+/**
+ * Function URL en `authType: AWS_IAM` -- PAS `NONE` : `FunctionUrlOrigin.withOriginAccessControl()`
+ * ci-dessous (vérifié dans les types installés, `aws-cdk-lib/aws-cloudfront-origins` 2.265.0,
+ * `FunctionUrlOrigin.withOriginAccessControl` existe bel et bien -- contrairement à une première
+ * hypothèse non vérifiée de cette sous-tâche) ne protège RIEN si `authType` reste `NONE` : OAC
+ * fait signer les requêtes par CloudFront (SigV4), mais seul `AWS_IAM` fait que le Lambda exige
+ * cette signature. Le grant explicite ci-dessous (`addPermission`, scopé à l'ARN de CETTE
+ * distribution) est nécessaire en plus : le L2 `withOriginAccessControl` crée l'OAC côté
+ * CloudFront mais n'ajoute PAS lui-même la policy de ressource côté Lambda qui l'autorise.
+ */
+const bffFunctionUrl = backend.bff.resources.lambda.addFunctionUrl({
+  authType: FunctionUrlAuthType.AWS_IAM,
+})
+
+/**
+ * Domaine Amplify Hosting par défaut de CE projet -- PAS un domaine personnalisé (confirmé,
+ * `amplify/team-provider-info.json`, aucune config `customDomain` trouvée dans le repo,
+ * 2026-09-06). `$AWS_APP_ID`/`$AWS_BRANCH` sont DÉJÀ des variables d'environnement du build
+ * backend en CI (voir `amplify.yml`, `npx ampx pipeline-deploy --branch $AWS_BRANCH --app-id
+ * $AWS_APP_ID`) -- réutilisées ici pour reconstruire le domaine par défaut Amplify Hosting
+ * (convention AWS documentée : `<branche>.<appId>.amplifyapp.com`), plutôt que de le deviner ou
+ * de le laisser en dur (l'App ID Gen1 dans `team-provider-info.json`, `d20qrsdkzeugxd`, est un
+ * artefact d'une ressource `auth`/`function`/`api`/`geo` Gen1 -- PAS nécessairement le même
+ * App ID Amplify Hosting Gen2 connecté à ce repo aujourd'hui, jamais vérifié faute d'accès à un
+ * environnement réel). En LOCAL (`ampx sandbox`, ces deux variables absentes), la distribution
+ * CloudFront n'est PAS créée -- le Lambda `bff` déploie quand même (utile pour tester le
+ * handler indépendamment), seul le same-origin CloudFront manque. **Non vérifié par un
+ * déploiement réel** (aucun agent ne déploie) : à confirmer au premier `ampx pipeline-deploy`
+ * du repo owner -- voir ADR-0021 §6.
+ */
+const hostingAppId = process.env.AWS_APP_ID
+const hostingBranch = process.env.AWS_BRANCH
+
+if (hostingAppId && hostingBranch) {
+  const hostingDomain = `${hostingBranch}.${hostingAppId}.amplifyapp.com`
+
+  const bffOriginRequestPolicy = new OriginRequestPolicy(backend.bff.stack, 'BffOriginRequestPolicy', {
+    // Cookies ET header Authorization transmis à l'origine Lambda -- CloudFront ne relaie AUCUN
+    // cookie/header à une origine par défaut, contrairement à un serveur HTTP classique.
+    cookieBehavior: OriginRequestCookieBehavior.all(),
+    headerBehavior: OriginRequestHeaderBehavior.allowList('Content-Type'),
+  })
+
+  const distribution = new Distribution(backend.bff.stack, 'BffDistribution', {
+    comment: 'redlink-pwa : SPA (Amplify Hosting) + BFF Cognito (Lambda), same-origin pour les cookies SameSite=Strict',
+    defaultBehavior: {
+      origin: new HttpOrigin(hostingDomain),
+      viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+      cachePolicy: CachePolicy.CACHING_OPTIMIZED,
+    },
+    additionalBehaviors: {
+      '/api/*': {
+        origin: FunctionUrlOrigin.withOriginAccessControl(bffFunctionUrl),
+        viewerProtocolPolicy: ViewerProtocolPolicy.HTTPS_ONLY,
+        // JAMAIS de cache sur les routes d'auth/session -- une réponse mise en cache
+        // servirait la session d'un autre visiteur.
+        cachePolicy: CachePolicy.CACHING_DISABLED,
+        originRequestPolicy: bffOriginRequestPolicy,
+        allowedMethods: AllowedMethods.ALLOW_ALL,
+        cachedMethods: CachedMethods.CACHE_GET_HEAD,
+      },
+    },
+  })
+
+  // Grant explicite (voir commentaire sur `bffFunctionUrl` ci-dessus) : `withOriginAccessControl`
+  // crée l'OAC côté CloudFront mais n'ajoute pas la policy de ressource côté Lambda -- scopé à
+  // l'ARN de CETTE distribution précisément (jamais un wildcard, même discipline IAM que le
+  // reste de ce fichier, voir ADR-0008/0012/0013/0016).
+  backend.bff.resources.lambda.addPermission('AllowCloudFrontInvoke', {
+    principal: new ServicePrincipal('cloudfront.amazonaws.com'),
+    action: 'lambda:InvokeFunctionUrl',
+    sourceArn: `arn:aws:cloudfront::${Stack.of(distribution).account}:distribution/${distribution.distributionId}`,
+  })
+
+  backend.addOutput({
+    custom: {
+      bffDistributionDomain: distribution.distributionDomainName,
+    },
+  })
+}
 
 export default backend

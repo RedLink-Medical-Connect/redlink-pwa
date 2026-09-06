@@ -23,9 +23,9 @@ const vetListMock = vi.fn()
 const vetDeleteMock = vi.fn()
 const clinicDeleteMock = vi.fn()
 const deleteUserMock = vi.fn()
-const signOutMock = vi.fn()
+const fetchMock = vi.fn()
 
-vi.mock('aws-amplify/data', () => ({
+vi.mock('@/services/bff-graphql-client', () => ({
   generateClient: () => ({
     models: {
       Veterinarian: {
@@ -42,15 +42,17 @@ vi.mock('aws-amplify/data', () => ({
   }),
 }))
 
-vi.mock('aws-amplify/auth', () => ({
+// BFF Cognito (2026-09-06, docs/adr/0021-bff-cognito-session-cloudfront.md) : `signOut`/
+// `fetchUserAttributes` (`aws-amplify/auth`) n'existent plus comme dépendances de ce composable
+// NI de `useAuthStore().logout()` (réécrit pour appeler le BFF par `fetch()`, voir
+// `stores/auth.js`) -- vérifié via `fetchMock` plus bas plutôt qu'un mock `signOut` dédié.
+vi.mock('@/services/bff-auth-session', () => ({
   getCurrentUser: vi.fn(async () => ({ userId: 'vet-1' })),
-  // Références indirectes (pas `deleteUser: deleteUserMock`) : le factory de `vi.mock` est
+  // Référence indirecte (pas `deleteUser: deleteUserMock`) : le factory de `vi.mock` est
   // hoisté au-dessus des `const deleteUserMock = vi.fn()` ci-dessus -- un accès direct lève
   // "Cannot access before initialization". Une closure appelée plus tard (au premier
   // `deleteUser()` réel dans le composable) contourne le TDZ.
   deleteUser: (...args) => deleteUserMock(...args),
-  signOut: (...args) => signOutMock(...args),
-  fetchUserAttributes: vi.fn(async () => ({})),
 }))
 
 // useClinicSettings() calls useRouter() directly (deleteAccount's redirect) — stub it out
@@ -108,9 +110,11 @@ describe('useClinicSettings.deleteAccount', () => {
     vetDeleteMock.mockReset()
     clinicDeleteMock.mockReset()
     deleteUserMock.mockReset()
-    signOutMock.mockReset()
+    fetchMock.mockReset()
+    vi.stubGlobal('fetch', fetchMock)
     deleteUserMock.mockResolvedValue(undefined)
-    signOutMock.mockResolvedValue(undefined)
+    // `auth.logout()` (stores/auth.js) appelle désormais `fetch('/api/auth/signout', ...)`.
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ status: 'SIGNED_OUT' }) })
   })
 
   it('supprime le Veterinarian ET la Clinic, puis le compte Cognito (dernier vétérinaire de la Clinic)', async () => {
@@ -132,7 +136,7 @@ describe('useClinicSettings.deleteAccount', () => {
     expect(vetDeleteMock).toHaveBeenCalledWith({ id: 'vet-1' })
     expect(clinicDeleteMock).toHaveBeenCalledWith({ id: 'clinic-1' })
     expect(deleteUserMock).toHaveBeenCalledTimes(1)
-    expect(signOutMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledWith('/api/auth/signout', expect.objectContaining({ method: 'POST' }))
   })
 
   it("garde-fou multi-vétérinaire : un autre Veterinarian reste rattaché -> seul le compte courant est supprimé, la Clinic survit", async () => {
@@ -162,7 +166,7 @@ describe('useClinicSettings.deleteAccount', () => {
     await expect(deleteAccount()).resolves.toBeUndefined()
 
     expect(deleteUserMock).toHaveBeenCalledTimes(1)
-    expect(signOutMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledWith('/api/auth/signout', expect.objectContaining({ method: 'POST' }))
     expect(isSaving.value).toBe(false)
   })
 
