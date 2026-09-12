@@ -1,5 +1,6 @@
 import { defineAuth } from '@aws-amplify/backend'
 import { postConfirmation } from '../functions/post-confirmation/resource'
+import { customMessage } from '../functions/custom-message/resource'
 
 /**
  * Migration Gen1 -> Gen2 de la ressource Cognito (Phase 8, sous-tâche 3).
@@ -66,8 +67,12 @@ export const auth = defineAuth({
     totp: true,
     sms: false,
   },
+  // `customMessage` (2026-09-12, docs/adr/0022-branded-transactional-emails.md) : email de
+  // marque + i18n pour le code de confirmation et le mot de passe oublié, à la place du
+  // template texte brut par défaut de Cognito.
   triggers: {
     postConfirmation,
+    customMessage,
   },
   // Revue Lead Dev (cycle Phase 8 sous-tâche 3) : préférer l'API déclarative `access`
   // de defineAuth à l'échappatoire CDK manuel (`addToRolePolicy` dans backend.ts, tel

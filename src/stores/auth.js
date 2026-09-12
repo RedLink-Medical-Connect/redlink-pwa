@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import router from '@/router'
+import i18n from '@/i18n'
 import { bffFetch } from '@/services/bff-fetch'
 
 /**
@@ -155,7 +156,7 @@ export const useAuthStore = defineStore('auth', () => {
     error.value = null
     try {
       const { status, data } = await bffFetch('/api/auth/signup', {
-        body: { email, password, name, role: roleType },
+        body: { email, password, name, role: roleType, locale: i18n.global.locale.value },
       })
 
       if (data.status === 'CONFIRM_SIGN_UP' || data.status === 'CONFIRM_SIGN_UP_RESUMED') {
@@ -197,7 +198,9 @@ export const useAuthStore = defineStore('auth', () => {
     isLoading.value = true
     error.value = null
     try {
-      const { ok } = await bffFetch('/api/auth/forgot-password', { body: { email } })
+      const { ok } = await bffFetch('/api/auth/forgot-password', {
+        body: { email, locale: i18n.global.locale.value },
+      })
       if (!ok) {
         error.value = `errors.send_code_failed`
         return false

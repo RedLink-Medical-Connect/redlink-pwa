@@ -10,7 +10,7 @@ import { TEMP_REGISTRATION_TTL_MS } from '@/constants/auth-constants'
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const { completeRegistration } = useRegistrationCompletion()
 
 const email = ref('')
@@ -129,7 +129,9 @@ const handleResend = async () => {
   resendSuccess.value = false
   auth.clearError()
   try {
-    const { ok } = await bffFetch('/api/auth/resend-code', { body: { email: email.value } })
+    const { ok } = await bffFetch('/api/auth/resend-code', {
+      body: { email: email.value, locale: locale.value },
+    })
     if (!ok) throw new Error('RESEND_FAILED')
     resendSuccess.value = true
     setTimeout(() => (resendSuccess.value = false), 5000)

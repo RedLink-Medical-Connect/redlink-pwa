@@ -10,6 +10,7 @@ import { createPinia, setActivePinia } from 'pinia'
 vi.mock('@/router', () => ({ default: { push: vi.fn() } }))
 
 import router from '@/router'
+import i18n from '@/i18n'
 import { useAuthStore } from '@/stores/auth'
 
 const fetchMock = vi.fn()
@@ -23,6 +24,11 @@ beforeEach(() => {
   vi.stubGlobal('fetch', fetchMock)
   fetchMock.mockReset()
   vi.mocked(router.push).mockReset()
+  // Locale déterministe pour les assertions de body qui incluent `locale` (register/forgotPass,
+  // docs/adr/0022-branded-transactional-emails.md) : jsdom expose `navigator.language` en
+  // 'en-US' par défaut, ce qui ferait retomber `src/i18n.js` sur 'en' sans ce reset explicite --
+  // même idiome que `StarRating.test.js`/`useLegalDocument.test.js`.
+  i18n.global.locale.value = 'fr'
 })
 
 describe('login', () => {
@@ -115,7 +121,13 @@ describe('register', () => {
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/auth/signup',
       expect.objectContaining({
-        body: JSON.stringify({ email: 'a@b.com', password: 'Password123!', name: 'Jean', role: 'owner' }),
+        body: JSON.stringify({
+          email: 'a@b.com',
+          password: 'Password123!',
+          name: 'Jean',
+          role: 'owner',
+          locale: 'fr',
+        }),
       }),
     )
   })
@@ -136,6 +148,29 @@ describe('register', () => {
     expect(result).toBe(false)
     expect(auth.error).toBe('errors.email_exists')
     expect(router.push).toHaveBeenCalledWith('/login?email=a%40b.com')
+  })
+})
+
+describe('forgotPass', () => {
+  it('transmet la locale courante au BFF (docs/adr/0022-branded-transactional-emails.md)', async () => {
+    fetchMock.mockResolvedValue(jsonResponse(200, { status: 'CODE_SENT' }))
+
+    const auth = useAuthStore()
+    await expect(auth.forgotPass('a@b.com')).resolves.toBe(true)
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/auth/forgot-password',
+      expect.objectContaining({
+        body: JSON.stringify({ email: 'a@b.com', locale: 'fr' }),
+      }),
+    )
+  })
+
+  it('échec : error posé, renvoie false', async () => {
+    fetchMock.mockResolvedValue(jsonResponse(400, { error: 'SEND_CODE_FAILED' }))
+
+    const auth = useAuthStore()
+    await expect(auth.forgotPass('a@b.com')).resolves.toBe(false)
+    expect(auth.error).toBe('errors.send_code_failed')
   })
 })
 
