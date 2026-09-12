@@ -258,7 +258,6 @@
     "request_sent": "Demande envoyée avec succès !",
     "login_failed": "Email ou mot de passe incorrect.",
     "email_exists": "Cet email possède déjà un compte.",
-    "registration_resumed": "Une inscription était déjà en cours avec cet email — nous venons de vous renvoyer un code de vérification.",
     "registration_failed": "Erreur lors de l'inscription.",
     "invalid_code": "Code invalide ou expiré.",
     "send_code_failed": "Impossible d'envoyer le code.",

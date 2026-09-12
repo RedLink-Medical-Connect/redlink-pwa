@@ -88,7 +88,7 @@ import { resolveClinicOwnerRelationUpsert } from '@/services/clinic-owner-relati
  *
  * Si `clinicID`/`ownerID` sont absents : no-op silencieux + log, mêmes raisons.
  *
- * @param {object} client - client Gen2 (`generateClient()`, `aws-amplify/data`)
+ * @param {object} client - client Gen2 (`generateClient()`, `@/services/bff-graphql-client`)
  * @param {string} clinicID
  * @param {string} ownerID
  * @returns {Promise<boolean>} `true` si une NOUVELLE `ClinicOwnerRelation` a été créée (donc un
@@ -145,7 +145,7 @@ export async function upsertClinicOwnerRelation(client, clinicID, ownerID) {
  * (`if_not_exists(x, :zero) + :one`) parce qu'elle écrit en SDK direct dans la table — écart de
  * MÉCANISME assumé et documenté (ADR-0016 §4), pas d'effet observable différent.
  *
- * @param {object} client - client Gen2 (`generateClient()`, `aws-amplify/data`)
+ * @param {object} client - client Gen2 (`generateClient()`, `@/services/bff-graphql-client`)
  * @param {string} clinicID
  * @param {boolean} isNewDonorOwner
  */
@@ -201,7 +201,7 @@ export async function incrementClinicStats(client, clinicID, isNewDonorOwner) {
  * ont enfin le même contrat d'erreur, pour la même raison (le vote est déjà enregistré côté
  * serveur, irréversible, quand ces écritures partent).
  *
- * @param {object} client - client Gen2 (`generateClient()`, `aws-amplify/data`)
+ * @param {object} client - client Gen2 (`generateClient()`, `@/services/bff-graphql-client`)
  * @param {{clinicID?: string, ownerID?: string}} params
  * @returns {Promise<void>} ne lève jamais (les deux écritures sont best-effort)
  */
@@ -232,7 +232,7 @@ export async function applyVeterinarianCompletionSideEffects(client, { clinicID,
  * réponse n'a pas été prise en compte, et le retry n'existe pas (le second appel échouerait
  * avec `ALREADY_VALIDATED`).
  *
- * @param {object} client - client Gen2 (`generateClient()`, `aws-amplify/data`)
+ * @param {object} client - client Gen2 (`generateClient()`, `@/services/bff-graphql-client`)
  * @param {{clinicID?: string, ownerID?: string}} params
  * @returns {Promise<boolean>} `true` si une nouvelle `ClinicOwnerRelation` a été créée
  */

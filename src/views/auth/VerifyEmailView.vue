@@ -3,7 +3,7 @@ import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useI18n } from 'vue-i18n'
-import { resendSignUpCode, getCurrentUser, signIn } from 'aws-amplify/auth'
+import { bffFetch } from '@/services/bff-fetch'
 import { useRegistrationCompletion } from '@/composables/useRegistrationCompletion'
 import { TEMP_REGISTRATION_TTL_MS } from '@/constants/auth-constants'
 
@@ -70,26 +70,28 @@ const handleVerify = async () => {
     }
 
     const pwd = showPasswordInput.value ? confirmPassword.value : registrationData.password
-    let currentUser
-    try {
-      currentUser = await getCurrentUser()
-    } catch {
-      // Bug réel préexistant (pas introduit par la Phase 8, ni ce fichier ni
-      // src/stores/auth.js n'ont été touchés par la migration Gen1->Gen2) :
-      // `auth.login()` (le store) navigue lui-même vers /dashboard/... en cas de
-      // succès -- utilisé ici juste pour établir une session Cognito après la
-      // confirmation du code, ça redirigeait PRÉMATURÉMENT vers le dashboard avant
-      // que `completeRegistration()` ci-dessous n'ait eu la moindre chance de créer
-      // l'Owner/Veterinarian -- donnant l'impression que rien ne persiste (le
-      // dashboard se charge sur un profil qui n'existe pas encore, ou l'erreur de
-      // complétion d'inscription reste invisible sur un composant déjà démonté).
-      // `signIn()` brut établit la session sans navigation ; la redirection reste
-      // gérée explicitement plus bas, une fois `completeRegistration()` terminée.
-      await signIn({ username: email.value, password: pwd })
-      currentUser = await getCurrentUser()
+
+    // BFF Cognito (2026-09-06, docs/adr/0021-bff-cognito-session-cloudfront.md) : établit la
+    // session SANS naviguer -- même raison que l'ancien appel direct `signIn()`
+    // (`aws-amplify/auth`) qu'il remplace : `auth.login()` (le store) navigue lui-même vers
+    // /dashboard/... en cas de succès, ce qui redirigerait PRÉMATURÉMENT avant que
+    // `completeRegistration()` ci-dessous n'ait eu la moindre chance de créer l'Owner/
+    // Veterinarian -- donnant l'impression que rien ne persiste (le dashboard se charge sur
+    // un profil qui n'existe pas encore, ou l'erreur de complétion d'inscription reste
+    // invisible sur un composant déjà démonté). Plus besoin du repli "session déjà établie"
+    // de l'ancienne version (`getCurrentUser()` d'abord, `signIn()` seulement si ça échoue) :
+    // ce pool Cognito n'a plus aucune notion de session côté navigateur avant ce point (BFF
+    // uniquement), et un `signIn` rejoué (retry après un échec de `completeRegistration()`
+    // ci-dessous) est sans risque -- `InitiateAuthCommand` ne connaît pas de notion "déjà
+    // signé" côté serveur, contrairement à l'ancien SDK Amplify client-side.
+    const { ok, data: signInData } = await bffFetch('/api/auth/signin', {
+      body: { email: email.value, password: pwd },
+    })
+    if (!ok || signInData.status !== 'SIGNED_IN') {
+      throw new Error(signInData.error ?? 'SIGN_IN_FAILED')
     }
 
-    const cognitoUserId = currentUser.userId
+    const cognitoUserId = signInData.user.sub
 
     await completeRegistration(registrationData, cognitoUserId)
 
@@ -127,7 +129,8 @@ const handleResend = async () => {
   resendSuccess.value = false
   auth.clearError()
   try {
-    await resendSignUpCode({ username: email.value })
+    const { ok } = await bffFetch('/api/auth/resend-code', { body: { email: email.value } })
+    if (!ok) throw new Error('RESEND_FAILED')
     resendSuccess.value = true
     setTimeout(() => (resendSuccess.value = false), 5000)
   } catch {

@@ -7,9 +7,13 @@ import VueI18nPlugin from '@intlify/unplugin-vue-i18n/vite'
 import tailwindcss from '@tailwindcss/vite'
 import { PrimeVueResolver } from '@primevue/auto-import-resolver'
 import Components from 'unplugin-vue-components/vite'
+import { bffDevMiddleware } from './vite-plugins/bff-dev-middleware'
 
 export default defineConfig({
   plugins: [
+    // Sert /api/* avec le VRAI handler BFF pendant `npm run dev` uniquement -- sans lui, toute
+    // l'authentification renvoie 404 en local depuis la migration BFF (ADR-0021 §6bis).
+    bffDevMiddleware(),
     vue(),
     tailwindcss(),
     Components({

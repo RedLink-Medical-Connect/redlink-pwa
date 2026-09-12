@@ -43,7 +43,7 @@ const relationCreateMock = vi.fn()
 const clinicGetMock = vi.fn()
 const clinicUpdateMock = vi.fn()
 
-vi.mock('aws-amplify/data', () => ({
+vi.mock('@/services/bff-graphql-client', () => ({
   generateClient: () => ({
     models: {
       Mission: { update: (...args) => missionUpdateMock(...args) },

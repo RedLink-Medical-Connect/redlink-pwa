@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { getCurrentUser } from 'aws-amplify/auth'
+import { getCurrentUser } from '@/services/bff-auth-session'
 import { Species } from '@/constants/enums'
 import { useClinicRequests } from '@/composables/useClinicRequest'
 
@@ -19,7 +19,7 @@ const vetGetMock = vi.fn()
 const requestCreateMock = vi.fn()
 const requestListMock = vi.fn()
 
-vi.mock('aws-amplify/data', () => ({
+vi.mock('@/services/bff-graphql-client', () => ({
   generateClient: () => ({
     models: {
       Veterinarian: { get: (...args) => vetGetMock(...args) },
@@ -32,7 +32,7 @@ vi.mock('aws-amplify/data', () => ({
   }),
 }))
 
-vi.mock('aws-amplify/auth', () => ({
+vi.mock('@/services/bff-auth-session', () => ({
   getCurrentUser: vi.fn(),
 }))
 

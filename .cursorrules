@@ -58,7 +58,10 @@ composables violate this — don't copy that pattern into new code.)
 
 ## GraphQL calls (Amplify Gen2)
 
-- Always go through `generateClient<Schema>()` from `aws-amplify/data`
+- Always go through `generateClient<Schema>()` from `@/services/bff-graphql-client`
+  (NOT `aws-amplify/data` directly — see ADR-0021: the browser holds no Cognito
+  session at all since the BFF migration, a client built straight from
+  `aws-amplify/data` with `authMode: 'userPool'` throws immediately)
   (`client.models.X.create()/get()/list()/update()/delete()`, `client.mutations.X()`
   for custom operations). Schema declared in `amplify/data/resource.ts` — never a
   hand-written `.graphql` document (Gen1 pattern, removed Phase 8).

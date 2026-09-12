@@ -42,7 +42,7 @@ const animalUpdateMock = vi.fn()
 const clinicGetMock = vi.fn()
 const clinicUpdateMock = vi.fn()
 
-vi.mock('aws-amplify/data', () => ({
+vi.mock('@/services/bff-graphql-client', () => ({
   generateClient: () => ({
     models: {
       Request: { get: (...args) => requestGetMock(...args) },
@@ -71,11 +71,11 @@ vi.mock('aws-amplify/data', () => ({
   }),
 }))
 
-vi.mock('aws-amplify/auth', () => ({
+vi.mock('@/services/bff-auth-session', () => ({
   getCurrentUser: vi.fn(async () => ({ userId: 'owner-1' })),
 }))
 
-import { getCurrentUser } from 'aws-amplify/auth'
+import { getCurrentUser } from '@/services/bff-auth-session'
 import {
   useOwnerMissions,
   mapSubmitDonationValidationError,

@@ -88,6 +88,18 @@ architecturales) et `.cursorrules` (conventions détaillées pour l'éditeur).
   `Veterinarians`/`Owners` déclarés statiquement (`groups: [...]`),
   contrairement à Gen1 où ils étaient créés paresseusement au premier signup —
   voir ADR-0008.
+- **BFF Cognito (`amplify/functions/bff/`)** : la session Cognito entière (ID/Access/
+  Refresh token) vit exclusivement côté serveur, dans des cookies `HttpOnly`/`Secure`/
+  `SameSite=Strict` — le navigateur ne détient jamais un JWT en JS, même en mémoire. SDK
+  Cognito Identity Provider direct pour `/api/auth/*` (`signIn`/`signUp`/MFA/mot de passe
+  oublié/MFA TOTP — `USER_PASSWORD_AUTH`, pas de réimplémentation SRP), relais GraphQL
+  BRUT pour `/api/graphql` (le client `.models.X` construit le document GraphQL exactement
+  comme avant, seul le header `Authorization` est substitué en vol). CloudFront devant SPA
+  (Amplify Hosting) et BFF (Lambda Function URL + OAC) pour rester same-origin — nécessaire
+  pour que `SameSite=Strict` fonctionne sans domaine personnalisé. Voir ADR-0021 pour le
+  design complet, en particulier le piège vérifié dans le code source installé (`endpoint`
+  passé à `generateClient()` désactive le chargement du schéma `.models`) qui a fait
+  changer d'approche en cours d'implémentation.
 - Geo (Amazon Location Service, place index) : pas de première-classe Gen2
   (pas de `defineGeo()`) — échappatoire CDK dans `amplify/backend.ts`
   (`backend.createStack('geo-stack')`, policy IAM scopée à l'ARN de l'index sur
@@ -107,6 +119,16 @@ architecturales) et `.cursorrules` (conventions détaillées pour l'éditeur).
 - Lambda : trigger PostConfirmation sur le modèle de fonctions Gen2
   (`amplify/functions/post-confirmation/`, TypeScript, `defineFunction`),
   référencé depuis `amplify/auth/resource.ts` — voir ADR-0008.
+- **`resourceGroupName` sur `defineFunction` — critère complet** : une Lambda sans
+  `resourceGroupName` rejoint par défaut la stack imbriquée partagée avec
+  `post-confirmation` (trigger Cognito, dont `auth` dépend). Le critère pour lui en poser
+  un n'est **pas** seulement "ai-je besoin d'une permission IAM sur `data`" (angle initial
+  documenté ci-dessous pour les deux Lambdas à accès DynamoDB direct) — `backend.ts` posant
+  un `addEnvironment()` référençant une ressource `auth`/`data` cross-stack suffit, À LUI
+  SEUL, à fermer un cycle (`bff/resource.ts`, ADR-0021 §6ter — zéro permission DynamoDB,
+  mais deux `addEnvironment()` cross-stack ont suffi à provoquer
+  `CloudformationStackCircularDependencyError` en déploiement réel). Vérifier les DEUX
+  angles avant de conclure qu'un `resourceGroupName` n'est pas nécessaire.
 - **Lambda planifiée + accès DynamoDB direct** : `defineFunction({ schedule: { cron,
   timezone } })` (`amplify/functions/mission-validation-auto-finalizer/`, EventBridge
   Scheduler ; cron EventBridge à 5-6 champs, `day-of-month` OU `day-of-week` à `?`).
@@ -160,7 +182,9 @@ architecturales) et `.cursorrules` (conventions détaillées pour l'éditeur).
   (`src/services/legal-content-service.js`) — version en vigueur centralisée dans
   `src/constants/legal.js`, séparée du contenu lui-même. Voir ADR-0014.
 - Les 13 composables applicatifs qui parlent GraphQL sont sur
-  `client.models.X` (`aws-amplify/data`) : `useAnimals.js`,
+  `client.models.X` (`generateClient()` importé de `@/services/bff-graphql-client`, pas
+  directement `aws-amplify/data` depuis le BFF, voir plus haut/ADR-0021 — l'appel
+  `client.models.X.*()` lui-même est identique à l'octet près) : `useAnimals.js`,
   `useOwnerProfile.js`, `useOwnerAvailability.js`,
   `useRegistrationCompletion.js`, `useClinicDonors.js`, `useClinicRequest.js`,
   `useClinicSettings.js`, `useClinicStats.js`, `useAnimalValidation.js`,
@@ -283,8 +307,14 @@ touchés, en parallèle du reviewer principal).
   indistinguables pour l'utilisateur.
 - **Services (deep modules)** : `src/services/xxx-service.js` — fonctions pures
   exportées, aucune réactivité Vue, aucun appel GraphQL, aucun accès DOM (voir
-  `eligibility-service.js`).
-- **GraphQL (Gen2)** : `generateClient()` (`aws-amplify/data`),
+  `eligibility-service.js`). Exceptions documentées (remplacements directs
+  d'infrastructure, pas de la logique métier, même famille que
+  `mission-completion-side-effects.js`) : `bff-graphql-client.js` (remplace
+  `generateClient()` d'`aws-amplify/data`), `bff-auth-session.js` (remplace
+  `getCurrentUser()`/`deleteUser()` d'`aws-amplify/auth`), `bff-fetch.js` (helper
+  `fetch()` partagé vers `/api/auth/*`) — voir ADR-0021.
+- **GraphQL (Gen2)** : `generateClient()` (`@/services/bff-graphql-client`, pas
+  `aws-amplify/data` directement depuis un composable, voir ADR-0021),
   `client.models.X.create()/get()/list()/update()/delete()` pour le CRUD
   standard, `client.mutations.X()` pour une opération custom déclarée dans
   `amplify/data/resource.ts` (une seule à ce jour, `linkRequestToMission`,

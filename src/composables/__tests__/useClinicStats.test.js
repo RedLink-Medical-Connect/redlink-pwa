@@ -16,7 +16,7 @@ const vetGetMock = vi.fn()
 const clinicGetMock = vi.fn()
 const getCurrentUserMock = vi.fn()
 
-vi.mock('aws-amplify/data', () => ({
+vi.mock('@/services/bff-graphql-client', () => ({
   generateClient: () => ({
     models: {
       Veterinarian: { get: (...args) => vetGetMock(...args) },
@@ -25,7 +25,7 @@ vi.mock('aws-amplify/data', () => ({
   }),
 }))
 
-vi.mock('aws-amplify/auth', () => ({
+vi.mock('@/services/bff-auth-session', () => ({
   getCurrentUser: () => getCurrentUserMock(),
 }))
 

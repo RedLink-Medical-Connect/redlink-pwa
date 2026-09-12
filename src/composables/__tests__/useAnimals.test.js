@@ -28,7 +28,7 @@ const animalCreateMock = vi.fn()
 const animalUpdateMock = vi.fn()
 const animalDeleteMock = vi.fn()
 
-vi.mock('aws-amplify/data', () => ({
+vi.mock('@/services/bff-graphql-client', () => ({
   generateClient: () => ({
     models: {
       Animal: {
@@ -41,7 +41,7 @@ vi.mock('aws-amplify/data', () => ({
   }),
 }))
 
-vi.mock('aws-amplify/auth', () => ({
+vi.mock('@/services/bff-auth-session', () => ({
   getCurrentUser: vi.fn(async () => ({ userId: 'owner-1' })),
 }))
 

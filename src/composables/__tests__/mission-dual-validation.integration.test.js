@@ -56,7 +56,7 @@ const missionGetMock = vi.fn()
 const ratingCreateMock = vi.fn()
 const veterinarianGetMock = vi.fn()
 
-vi.mock('aws-amplify/data', () => ({
+vi.mock('@/services/bff-graphql-client', () => ({
   generateClient: () => ({
     models: {
       Mission: {
@@ -83,7 +83,7 @@ vi.mock('aws-amplify/data', () => ({
   }),
 }))
 
-vi.mock('aws-amplify/auth', () => ({
+vi.mock('@/services/bff-auth-session', () => ({
   getCurrentUser: vi.fn(async () => ({ userId: 'owner-1' })),
 }))
 

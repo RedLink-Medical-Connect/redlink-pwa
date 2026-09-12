@@ -1,7 +1,7 @@
 import { ref } from 'vue'
-import { generateClient } from 'aws-amplify/data'
+import { generateClient } from '@/services/bff-graphql-client'
 import { useRouter } from 'vue-router'
-import { getCurrentUser } from 'aws-amplify/auth'
+import { getCurrentUser } from '@/services/bff-auth-session'
 import { Species, RequestStatus, RequestType } from '@/constants/enums'
 import { throwIfGraphqlError } from '@/services/graphql-error-service'
 

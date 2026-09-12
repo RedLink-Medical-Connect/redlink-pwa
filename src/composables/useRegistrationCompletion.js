@@ -1,5 +1,5 @@
 import { ref } from 'vue'
-import { generateClient } from 'aws-amplify/data'
+import { generateClient } from '@/services/bff-graphql-client'
 import { Species, DonationFrequency, AccountRole, LegalDocumentType } from '@/constants/enums'
 import { LEGAL_DOCUMENT_VERSIONS } from '@/constants/legal.js'
 import { throwIfGraphqlError } from '@/services/graphql-error-service'

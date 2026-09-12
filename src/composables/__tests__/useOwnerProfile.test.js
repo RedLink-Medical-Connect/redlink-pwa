@@ -25,9 +25,8 @@ const ownerDeleteMock = vi.fn()
 const animalListMock = vi.fn()
 const animalDeleteMock = vi.fn()
 const deleteUserMock = vi.fn()
-const signOutMock = vi.fn()
 
-vi.mock('aws-amplify/data', () => ({
+vi.mock('@/services/bff-graphql-client', () => ({
   generateClient: () => ({
     models: {
       Owner: {
@@ -43,15 +42,18 @@ vi.mock('aws-amplify/data', () => ({
   }),
 }))
 
-vi.mock('aws-amplify/auth', () => ({
+// BFF Cognito (2026-09-06, docs/adr/0021-bff-cognito-session-cloudfront.md) : `signOut`/
+// `fetchUserAttributes` (`aws-amplify/auth`) n'existent plus comme dépendances de ce composable
+// NI de `useAuthStore().logout()` (réécrit pour appeler le BFF par `fetch()`, voir
+// `stores/auth.js`) -- `signOutMock` ci-dessous est remplacé par une assertion sur `fetch`
+// directement, voir `fetchMock` plus bas.
+vi.mock('@/services/bff-auth-session', () => ({
   getCurrentUser: vi.fn(async () => ({ userId: 'owner-1' })),
-  // Références indirectes (pas `deleteUser: deleteUserMock`) : le factory de `vi.mock` est
+  // Référence indirecte (pas `deleteUser: deleteUserMock`) : le factory de `vi.mock` est
   // hoisté au-dessus des `const deleteUserMock = vi.fn()` ci-dessus -- un accès direct lève
   // "Cannot access before initialization". Une closure appelée plus tard (au premier
   // `deleteUser()` réel dans le composable) contourne le TDZ.
   deleteUser: (...args) => deleteUserMock(...args),
-  signOut: (...args) => signOutMock(...args),
-  fetchUserAttributes: vi.fn(async () => ({})),
 }))
 
 // useOwnerProfile() calls useRouter() directly (deleteAccount's redirect) — stub it out so
@@ -84,6 +86,8 @@ const buildProfile = (overrides = {}) => ({
   ...overrides,
 })
 
+const fetchMock = vi.fn()
+
 const resetAllMocks = () => {
   ownerGetMock.mockReset()
   ownerUpdateMock.mockReset()
@@ -91,7 +95,8 @@ const resetAllMocks = () => {
   animalListMock.mockReset()
   animalDeleteMock.mockReset()
   deleteUserMock.mockReset()
-  signOutMock.mockReset()
+  fetchMock.mockReset()
+  vi.stubGlobal('fetch', fetchMock)
 }
 
 describe('useOwnerProfile.fetchProfile (R-19 : cache par session)', () => {
@@ -154,7 +159,11 @@ describe('useOwnerProfile.deleteAccount', () => {
     setActivePinia(createPinia())
     resetAllMocks()
     deleteUserMock.mockResolvedValue(undefined)
-    signOutMock.mockResolvedValue(undefined)
+    // `auth.logout()` (stores/auth.js) appelle désormais `fetch('/api/auth/signout', ...)` --
+    // réponse par défaut suffisante pour ce fichier, qui ne teste pas `logout()` lui-même
+    // (couvert par `stores/__tests__/auth.test.js`), seulement qu'il est bien invoqué après
+    // `deleteUser()`.
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ status: 'SIGNED_OUT' }) })
   })
 
   /**
@@ -185,7 +194,7 @@ describe('useOwnerProfile.deleteAccount', () => {
     expect(animalDeleteMock).toHaveBeenCalledTimes(2)
     expect(ownerDeleteMock).toHaveBeenCalledTimes(1)
     expect(deleteUserMock).toHaveBeenCalledTimes(1)
-    expect(signOutMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledWith('/api/auth/signout', expect.objectContaining({ method: 'POST' }))
   })
 
   it("n'échoue PAS si le nettoyage DB best-effort échoue -- deleteUser() Cognito est quand même appelé", async () => {
@@ -196,7 +205,7 @@ describe('useOwnerProfile.deleteAccount', () => {
     await expect(deleteAccount()).resolves.toBeUndefined()
 
     expect(deleteUserMock).toHaveBeenCalledTimes(1)
-    expect(signOutMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledWith('/api/auth/signout', expect.objectContaining({ method: 'POST' }))
     // `isSaving` doit être redescendu même sur ce chemin (le `finally` s'exécute toujours).
     expect(isSaving.value).toBe(false)
   })
@@ -213,7 +222,7 @@ describe('useOwnerProfile.deleteAccount', () => {
     await expect(deleteAccount()).resolves.toBeUndefined()
 
     expect(deleteUserMock).toHaveBeenCalledTimes(1)
-    expect(signOutMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledWith('/api/auth/signout', expect.objectContaining({ method: 'POST' }))
   })
 
   it('relance (propage) une erreur de deleteUser() (Cognito) -- contrairement au nettoyage DB', async () => {
