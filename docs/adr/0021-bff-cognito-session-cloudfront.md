@@ -231,16 +231,45 @@ Deux points absents de la conception initiale (§0-§4), trouvés en écrivant l
    (`getTOTPSetupDetails`, vérifié dans le paquet installé) pour ne rien changer à
    l'expérience d'enrôlement. Fait, testé (`auth-routes.test.ts` + `useMfa.test.js`).
 
-## 6bis. Développement local (`npm run dev`)
+## 6bis. Développement local (`npm run dev`) — RÉSOLU (2026-09-12)
 
-Pas encore traité. `bff-graphql-client.js`/`bff-fetch.js` pointent vers des chemins
-relatifs (`/api/graphql`, `/api/auth/*`) -- en local (Vite dev server, `localhost:5173`),
-rien n'écoute sur ces chemins tant qu'un proxy Vite (`vite.config.js`, `server.proxy`)
-n'est pas configuré vers un environnement BFF réellement déployé (sandbox ou pre-prod).
-Avant ce chantier, le développement local parlait directement à AppSync/Cognito avec une
-session locale (`ampx sandbox`) -- ce n'est plus possible pour AUCUN flux authentifié
-(données ET auth) une fois ces modules en place partout. À trancher avec le repo owner
-avant que quiconque développe localement une fonctionnalité touchant l'un de ces flux.
+**Symptôme réel remonté par le repo owner** : `POST http://localhost:5173/api/auth/signup
+404 Not Found` à l'inscription, idem sur le mot de passe oublié. `bff-graphql-client.js`/
+`bff-fetch.js` pointent vers des chemins relatifs (`/api/graphql`, `/api/auth/*`) -- en
+local, rien n'écoutait sur ces chemins. Toute l'authentification était donc cassée en
+`npm run dev` (pas seulement dégradée) : trou connu et documenté ici avant d'être
+rencontré, mais jamais refermé au moment de livrer le chantier.
+
+**Solution retenue : exécuter le VRAI handler dans Vite**, pas un proxy vers un BFF
+déployé (qui aurait exigé un déploiement pour tout développement local) ni un mock (qui
+aurait dupliqué la logique d'auth et divergé silencieusement). `vite-plugins/
+bff-dev-middleware.js` intercepte `/api/*`, reconstruit un `APIGatewayProxyEventV2` depuis
+la requête Node (`rawPath`, méthode, `cookies` en TABLEAU, `body`) et charge
+`amplify/functions/bff/handler.ts` via `server.ssrLoadModule()` (transpilation TS à la
+volée, HMR inclus). Les variables d'environnement injectées en prod par `backend.ts`
+(`COGNITO_USER_POOL_CLIENT_ID`/`APPSYNC_GRAPHQL_URL`/`AWS_REGION`) sont reconstruites
+depuis `amplify_outputs.json`, la même source de vérité que le frontend. `apply: 'serve'` :
+inerte en production.
+
+Deux points vérifiés (pas supposés), qui rendent cette approche viable sans concession :
+- **Les cookies `Secure` fonctionnent sur `http://localhost`** : Chrome et Firefox traitent
+  localhost comme une origine « potentiellement sûre » (Secure Contexts ; Firefox depuis la
+  v75, bug 1618113). Les `Set-Cookie` du handler sont donc transmis TELS QUELS,
+  `HttpOnly`/`Secure`/`SameSite=Strict`/`Path=/api` compris — le comportement de session
+  testé en local est celui de la production, pas une version assouplie.
+- **Les opérations Cognito utilisées par le BFF ne sont pas signées** : aucun credential IAM
+  n'est nécessaire en local, confirmé par un appel réel (`requestId` Cognito retourné sur
+  une machine sans rôle AWS assumé).
+
+**Limite restante, attendue et non contournable en local** : `signIn` échoue avec
+`InvalidParameterException: USER_PASSWORD_AUTH flow not enabled for this client` tant que
+`amplify/backend.ts` n'est pas déployé. `defineAuth` n'active QUE `userSrp`/`custom` par
+défaut (`AUTH_FLOWS` dans `@aws-amplify/auth-construct/lib/defaults.js`, vérifié dans le
+paquet installé) ; le `cfnUserPoolClient.explicitAuthFlows` de ce chantier ajoute
+`ALLOW_USER_PASSWORD_AUTH`, mais il ne prend effet qu'au déploiement. **Signup, confirmation
+de code, renvoi de code et mot de passe oublié fonctionnent en local dès maintenant** (ils
+n'empruntent aucun flux d'authentification) ; seule la connexion attend un
+`ampx sandbox`/`pipeline-deploy` du repo owner.
 
 ## 6. Ce que ce document ne tranche pas encore
 
@@ -253,7 +282,8 @@ avant que quiconque développe localement une fonctionnalité touchant l'un de c
   owner — en particulier la reconstruction du domaine Hosting par défaut à partir de
   `$AWS_APP_ID`/`$AWS_BRANCH` (`amplify/backend.ts`), jamais vérifiée contre un vrai build
   CI.
-- Développement local (`npm run dev`) — voir §6bis.
+- ~~Développement local (`npm run dev`)~~ — RÉSOLU le 2026-09-12, voir §6bis. Reste
+  dépendant d'un déploiement pour la seule route `signIn` (`USER_PASSWORD_AUTH`).
 
 ## 7. Ce que ça NE règle PAS
 
