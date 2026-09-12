@@ -57,6 +57,19 @@ function getClientId() {
 }
 
 /**
+ * `ClientMetadata` transite jusqu'au trigger `CustomMessage`
+ * (`amplify/functions/custom-message/handler.ts`, docs/adr/0022-branded-transactional-emails.md)
+ * en tant que `event.request.clientMetadata.locale` -- ce BFF ne valide ni ne résout cette
+ * valeur (une locale absente ou invalide y retombe sur `fr` par défaut, seule source de
+ * vérité pour ce repli). `undefined` plutôt qu'un objet à clé vide quand `locale` n'est pas
+ * une string : `ClientMetadata` du SDK Cognito est `Record<string, string>`, une valeur
+ * `undefined` n'y est pas assignable.
+ */
+function localeMetadata(locale: unknown): Record<string, string> | undefined {
+  return typeof locale === 'string' ? { locale } : undefined
+}
+
+/**
  * Lecture de claims sur un JWT qu'on vient de RECEVOIR DIRECTEMENT de Cognito dans cette même
  * requête (jamais un cookie relu plus tard -- voir `readUserFromAccessToken` ci-dessous pour ce
  * cas) : pas de vérification de signature nécessaire, la confiance vient du canal (réponse
@@ -196,6 +209,7 @@ export async function signUp(body: {
   password?: string
   name?: string
   role?: string
+  locale?: string
 }): Promise<RouteResult> {
   if (!body.email || !body.password) {
     return { statusCode: 400, body: { error: 'MISSING_CREDENTIALS' } }
@@ -212,6 +226,7 @@ export async function signUp(body: {
           { Name: 'name', Value: body.name ?? '' },
           { Name: 'profile', Value: body.role ?? '' },
         ],
+        ClientMetadata: localeMetadata(body.locale),
       }),
     )
     return { statusCode: 200, body: { status: 'CONFIRM_SIGN_UP' } }
@@ -222,7 +237,13 @@ export async function signUp(body: {
       // un compte déjà confirmé (redirection /login côté frontend) d'une inscription abandonnée
       // (reprise directe -- resendConfirmationCode ne demande aucun mot de passe).
       try {
-        await getClient().send(new ResendConfirmationCodeCommand({ ClientId: getClientId(), Username: body.email }))
+        await getClient().send(
+          new ResendConfirmationCodeCommand({
+            ClientId: getClientId(),
+            Username: body.email,
+            ClientMetadata: localeMetadata(body.locale),
+          }),
+        )
         return { statusCode: 200, body: { status: 'CONFIRM_SIGN_UP_RESUMED' } }
       } catch (resendErr) {
         console.error('signUp resend on existing user failed:', resendErr)
@@ -255,10 +276,16 @@ export async function confirmSignUp(body: { email?: string; code?: string }): Pr
   }
 }
 
-export async function resendCode(body: { email?: string }): Promise<RouteResult> {
+export async function resendCode(body: { email?: string; locale?: string }): Promise<RouteResult> {
   if (!body.email) return { statusCode: 400, body: { error: 'MISSING_EMAIL' } }
   try {
-    await getClient().send(new ResendConfirmationCodeCommand({ ClientId: getClientId(), Username: body.email }))
+    await getClient().send(
+      new ResendConfirmationCodeCommand({
+        ClientId: getClientId(),
+        Username: body.email,
+        ClientMetadata: localeMetadata(body.locale),
+      }),
+    )
     return { statusCode: 200, body: { status: 'CODE_SENT' } }
   } catch (err) {
     console.error('resendCode error:', err)
@@ -266,10 +293,16 @@ export async function resendCode(body: { email?: string }): Promise<RouteResult>
   }
 }
 
-export async function forgotPassword(body: { email?: string }): Promise<RouteResult> {
+export async function forgotPassword(body: { email?: string; locale?: string }): Promise<RouteResult> {
   if (!body.email) return { statusCode: 400, body: { error: 'MISSING_EMAIL' } }
   try {
-    await getClient().send(new ForgotPasswordCommand({ ClientId: getClientId(), Username: body.email }))
+    await getClient().send(
+      new ForgotPasswordCommand({
+        ClientId: getClientId(),
+        Username: body.email,
+        ClientMetadata: localeMetadata(body.locale),
+      }),
+    )
     return { statusCode: 200, body: { status: 'CODE_SENT' } }
   } catch (err) {
     console.error('forgotPassword error:', err)

@@ -119,6 +119,18 @@ architecturales) et `.cursorrules` (conventions détaillées pour l'éditeur).
 - Lambda : trigger PostConfirmation sur le modèle de fonctions Gen2
   (`amplify/functions/post-confirmation/`, TypeScript, `defineFunction`),
   référencé depuis `amplify/auth/resource.ts` — voir ADR-0008.
+- **Emails transactionnels de marque, avec i18n** : trigger Cognito `CustomMessage`
+  (`amplify/functions/custom-message/`), même famille que PostConfirmation ci-dessus
+  (référencé depuis `amplify/auth/resource.ts`, pas de `resourceGroupName`). Un template
+  global (`templates/layout.ts`, `renderLayout()`) dont héritent les emails spécifiques
+  (`templates/verification-email.ts` — couvre SignUp ET ResendCode,
+  `templates/forgot-password-email.ts`) : fonctions TS pures qui renvoient des strings HTML
+  (tables + CSS inline, compatibilité Outlook/Gmail), pas de moteur de templates. Locale
+  transmise par `clientMetadata` (posée par le BFF sur `SignUpCommand`/
+  `ResendConfirmationCodeCommand`/`ForgotPasswordCommand`), résolue avec repli sur `fr`
+  uniquement côté `custom-message` (`i18n/messages.ts`, `resolveEmailLocale`) — jamais côté
+  BFF. Référence pour tout futur email transactionnel (notification de match, etc.) : ajouter
+  un fichier dans `templates/`, pas un nouveau système. Voir ADR-0022.
 - **`resourceGroupName` sur `defineFunction` — critère complet** : une Lambda sans
   `resourceGroupName` rejoint par défaut la stack imbriquée partagée avec
   `post-confirmation` (trigger Cognito, dont `auth` dépend). Le critère pour lui en poser

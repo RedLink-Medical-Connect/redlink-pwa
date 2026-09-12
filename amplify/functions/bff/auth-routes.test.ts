@@ -5,6 +5,7 @@ import {
   RespondToAuthChallengeCommand,
   SignUpCommand,
   ResendConfirmationCodeCommand,
+  ForgotPasswordCommand,
   GetUserCommand,
   GlobalSignOutCommand,
   AssociateSoftwareTokenCommand,
@@ -151,6 +152,51 @@ describe('signUp', () => {
     const result = await authRoutes.signUp({ email: 'a@b.com', password: 'Password123!' })
 
     expect(result).toEqual({ statusCode: 409, body: { error: 'USERNAME_EXISTS' } })
+  })
+
+  it('transmet la locale du client au trigger CustomMessage via ClientMetadata (docs/adr/0022)', async () => {
+    sendSpy.mockResolvedValue({} as never)
+
+    await authRoutes.signUp({ email: 'a@b.com', password: 'Password123!', locale: 'en' })
+
+    const [command] = sendSpy.mock.calls[0]
+    expect(command).toBeInstanceOf(SignUpCommand)
+    expect(command.input).toMatchObject({ ClientMetadata: { locale: 'en' } })
+  })
+
+  it("n'envoie pas de ClientMetadata quand la locale est absente (plutôt qu'un objet { locale: undefined })", async () => {
+    sendSpy.mockResolvedValue({} as never)
+
+    await authRoutes.signUp({ email: 'a@b.com', password: 'Password123!' })
+
+    const [command] = sendSpy.mock.calls[0]
+    expect(command.input).toMatchObject({ ClientMetadata: undefined })
+  })
+})
+
+describe('resendCode', () => {
+  it('transmet la locale au trigger CustomMessage via ClientMetadata', async () => {
+    sendSpy.mockResolvedValue({} as never)
+
+    const result = await authRoutes.resendCode({ email: 'a@b.com', locale: 'en' })
+
+    expect(result).toEqual({ statusCode: 200, body: { status: 'CODE_SENT' } })
+    const [command] = sendSpy.mock.calls[0]
+    expect(command).toBeInstanceOf(ResendConfirmationCodeCommand)
+    expect(command.input).toMatchObject({ ClientMetadata: { locale: 'en' } })
+  })
+})
+
+describe('forgotPassword', () => {
+  it('transmet la locale au trigger CustomMessage via ClientMetadata', async () => {
+    sendSpy.mockResolvedValue({} as never)
+
+    const result = await authRoutes.forgotPassword({ email: 'a@b.com', locale: 'fr' })
+
+    expect(result).toEqual({ statusCode: 200, body: { status: 'CODE_SENT' } })
+    const [command] = sendSpy.mock.calls[0]
+    expect(command).toBeInstanceOf(ForgotPasswordCommand)
+    expect(command.input).toMatchObject({ ClientMetadata: { locale: 'fr' } })
   })
 })
 
