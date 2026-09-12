@@ -109,6 +109,28 @@ describe('useOwnerMissions > acceptMission', () => {
     expect(linkRequestToMissionMock).toHaveBeenCalledWith({ id: 'request-1', activeMissionID: 'mission-1' })
   })
 
+  // Regression: bug d'affichage "prévu le" (2026-09-12) — `appointmentDatetime` était posé à
+  // `new Date().toISOString()` ici (l'heure du clic de l'Owner), puis affiché tel quel par
+  // MissionsView.vue sous le libellé "Prévu le", laissant croire que c'était la date du RDV.
+  // La vraie date de RDV vit sur `Request.appointmentDatetime` (choisie par la clinique) —
+  // rien à poser sur la Mission elle-même à la création.
+  it('does not send appointmentDatetime when creating the Mission (that field must come from Request.appointmentDatetime, not the accept-click time)', async () => {
+    requestGetMock.mockResolvedValue({ data: request, errors: undefined })
+    animalListMock.mockResolvedValue({ data: [matchingAnimal], errors: undefined })
+    missionCreateMock.mockResolvedValue({ data: { id: 'mission-1', status: 'ACCEPTED' }, errors: undefined })
+    linkRequestToMissionMock.mockResolvedValue({
+      data: { id: 'request-1', status: 'IN_PROGRESS', activeMissionID: 'mission-1' },
+      errors: undefined,
+    })
+
+    const { acceptMission } = useOwnerMissions()
+    await acceptMission('request-1', 'animal-1')
+
+    const [missionInput] = missionCreateMock.mock.calls[0]
+    expect(missionInput).not.toHaveProperty('appointmentDatetime')
+    expect(missionInput).toEqual({ requestID: 'request-1', animalID: 'animal-1', status: 'ACCEPTED' })
+  })
+
   it('propagates (does not swallow) an auth failure resolved as `{ errors }` from linkRequestToMission, so a missing @auth rule would surface as a thrown error, not a silently-lost accept', async () => {
     requestGetMock.mockResolvedValue({ data: request, errors: undefined })
     animalListMock.mockResolvedValue({ data: [matchingAnimal], errors: undefined })
@@ -265,6 +287,39 @@ describe('useOwnerMissions > loadError (fetchAvailableMissions / fetchMyMissions
       animalName: 'Minou',
       animalSpecies: 'CAT',
     })
+  })
+
+  // Regression: bug d'affichage "prévu le" (2026-09-12) — `fetchMyMissions()` sélectionnait
+  // `missions.appointmentDatetime` (jamais la vraie date de RDV, voir le test d'acceptMission
+  // ci-dessus) au lieu de `missions.request.appointmentDatetime`. MissionsView.vue lit
+  // désormais ce dernier ; le selectionSet doit le fournir, et ne plus sur-sélectionner le
+  // premier (convention CLAUDE.md contre la sur-sélection — plus aucune vue ne le consomme).
+  it('fetchMyMissions: selects missions.request.appointmentDatetime (the real RDV date), not missions.appointmentDatetime', async () => {
+    animalListMock.mockResolvedValueOnce({
+      data: [
+        {
+          id: 'animal-1',
+          name: 'Minou',
+          species: 'CAT',
+          missions: [
+            {
+              id: 'mission-1',
+              status: 'ACCEPTED',
+              request: { id: 'request-1', appointmentDatetime: '2026-10-01T14:00:00.000Z' },
+            },
+          ],
+        },
+      ],
+      errors: undefined,
+    })
+
+    const { fetchMyMissions, myMissions } = useOwnerMissions()
+    await fetchMyMissions()
+
+    const [{ selectionSet }] = animalListMock.mock.calls[0]
+    expect(selectionSet).toContain('missions.request.appointmentDatetime')
+    expect(selectionSet).not.toContain('missions.appointmentDatetime')
+    expect(myMissions.value[0].request.appointmentDatetime).toBe('2026-10-01T14:00:00.000Z')
   })
 
   // Regression guard for the best-effort / secondary-write distinction documented in

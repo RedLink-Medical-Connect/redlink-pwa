@@ -163,7 +163,7 @@ const skipPostValidationRating = () => {
 }
 
 // ── Détail d'une mission de l'historique (correctif UX, 2026-09) ─────────────────────────
-// Toutes les données affichées (animal/espèce, statut, appointmentDatetime,
+// Toutes les données affichées (animal/espèce, statut, request.appointmentDatetime,
 // request.requestType, request.clinic.{name,address,phone,latitude,longitude}, l'issue de
 // validation de l'Owner et le motif de litige) sont déjà chargées par `fetchMyMissions()`
 // (useOwnerMissions.js) -- aucun nouveau champ de `selectionSet`, aucun nouvel aller-retour
@@ -488,12 +488,15 @@ const getAnimalEmoji = (species) => (species === Species.DOG ? '🐶' : '🐱')
                       </div>
                     </div>
 
-                    <div class="flex items-center gap-3">
+                    <div
+                      v-if="mission.request?.appointmentDatetime"
+                      class="flex items-center gap-3"
+                    >
                       <i class="pi pi-clock text-zinc-400"></i>
                       <p class="text-zinc-600 dark:text-zinc-300 text-sm">
                         {{ $t('dashboard.owner.missions_list.planned_on') }}
                         <span class="font-semibold">{{
-                          formatDate(mission.appointmentDatetime)
+                          formatDate(mission.request.appointmentDatetime)
                         }}</span>
                       </p>
                     </div>
@@ -820,9 +823,9 @@ const getAnimalEmoji = (species) => (species === Species.DOG ? '🐶' : '🐱')
                   :severity="getStatusSeverity(selectedHistoryMission.status)"
                 />
               </span>
-              <template v-if="selectedHistoryMission.appointmentDatetime">
+              <template v-if="selectedHistoryMission.request?.appointmentDatetime">
                 <span class="text-zinc-500">{{ $t('dashboard.owner.missions_list.history_details.appointment_datetime') }}</span>
-                <span class="font-medium">{{ formatDate(selectedHistoryMission.appointmentDatetime) }}</span>
+                <span class="font-medium">{{ formatDate(selectedHistoryMission.request.appointmentDatetime) }}</span>
               </template>
             </div>
           </div>

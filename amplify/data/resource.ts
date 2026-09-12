@@ -633,10 +633,12 @@ export const schema = a.schema({
         .authorization(authenticatedReadOnlyVetCreateRead),
       // Phase 6.5 (ADR-0005) : date/heure de RDV souhaitée par la clinique pour une Request
       // APPOINTMENT (null/absent pour EMERGENCY). Même `.authorization()` que ses voisins
-      // ci-dessus. ⚠️ Nommage identique à Mission.appointmentDatetime (existant, non lié) : ce
-      // dernier est horodaté à "maintenant" au moment où l'Owner accepte la Mission
-      // (useOwnerMissions.js), pas la date de RDV souhaitée par la clinique à la création de la
-      // Request -- deux champs distincts, sur deux types distincts, sémantiques différentes.
+      // ci-dessus. SEULE source de vérité pour "la date du RDV" côté UI -- voir le correctif
+      // du bug d'affichage "prévu le" (2026-09-12) : `Mission.appointmentDatetime`, qui partage
+      // le même nom mais vit sur un modèle distinct, était écrit avec `new Date()` au moment de
+      // l'acceptation (useOwnerMissions.js) au lieu de refléter ce champ-ci -- MissionsView.vue
+      // lit désormais `mission.request.appointmentDatetime`, plus jamais `mission.
+      // appointmentDatetime` (voir son commentaire ci-dessous).
       appointmentDatetime: a
         .datetime()
         .authorization(authenticatedReadOnlyVetCreateRead),
@@ -711,6 +713,12 @@ export const schema = a.schema({
       // Résidu ADR-0004 inchangé, non fermé par ce correctif (hors périmètre) : un Owner peut
       // toujours fabriquer un `createMission(status: COMPLETED)` à la création.
       status: a.ref('MissionStatus').required().authorization(missionStatusFieldAuth),
+      // Correctif bug d'affichage "prévu le" (2026-09-12) : ce champ n'est PLUS écrit par
+      // aucun code applicatif (`useOwnerMissions.js` le posait à `new Date()` au moment de
+      // l'acceptation -- l'heure du clic de l'Owner, jamais une vraie date de RDV). Conservé en
+      // schéma (nullable, jamais renseigné) plutôt que supprimé -- suppression de colonne hors
+      // périmètre d'un correctif d'affichage. `Request.appointmentDatetime` (même nom, modèle
+      // différent) reste la seule source de vérité de la date de RDV, voir son commentaire.
       appointmentDatetime: a.datetime(),
 
       // `.authorization()` de champ (revue graphql-schema-reviewer Gen1, Phase 5) : retirer
