@@ -271,6 +271,37 @@ de code, renvoi de code et mot de passe oublié fonctionnent en local dès maint
 n'empruntent aucun flux d'authentification) ; seule la connexion attend un
 `ampx sandbox`/`pipeline-deploy` du repo owner.
 
+## 6ter. Bug réel de déploiement (2026-09-12) : `bff` sans `resourceGroupName`
+
+Premier `ampx sandbox` réel tenté par le repo owner sur cette branche —
+`CloudformationStackCircularDependencyError` entre les stacks `auth`/`waf`/`geo`/`data`/
+`function`. Root cause identique à celle déjà documentée pour
+`mission-validation-auto-finalizer`/`rating-aggregation` (CLAUDE.md, `amplify/functions/
+mission-validation-auto-finalizer/resource.ts`), mais ratée à l'écriture initiale de ce
+chantier : `bff/resource.ts` justifiait l'ABSENCE de `resourceGroupName` uniquement par
+l'angle IAM ("ce Lambda ne demande aucune permission sur les tables `data`") — vrai, mais
+incomplet. `addEnvironment()` (`COGNITO_USER_POOL_CLIENT_ID` référence `auth`,
+`APPSYNC_GRAPHQL_URL` référence `data`, posés dans `amplify/backend.ts`) crée UNE
+DÉPENDANCE DE STACK indépendamment de toute permission IAM. Sans `resourceGroupName`,
+`bff` rejoint par défaut la stack partagée avec `post-confirmation` (dont `auth` dépend
+pour son trigger) — cette même stack référençant ensuite `auth` (pour le client ID)
+fermait directement le cycle `auth -> function -> auth`, sans même repasser par `data`.
+
+**Correctif** : `resourceGroupName: 'data'` sur `bff` (même remède que les deux autres
+Lambdas, suggéré par le message d'erreur d'Amplify lui-même — "si votre fonction... appelle
+l'API data, assignez-la à la stack data"). Place `bff` directement dans la stack `data` :
+sa référence à `cfnGraphqlApi` devient intra-stack, sa référence à `auth` suit la même
+direction que celle déjà établie par `data` (mode d'authentification Cognito de l'API
+AppSync) — aucun nouveau cycle. `tsc --noEmit` et la suite de tests (1001/1001) restent
+verts après ce changement (aucun comportement runtime affecté, seulement le placement de
+stack CDK).
+
+**Leçon pour un futur Lambda avec des `addEnvironment()` cross-resource** : le critère pour
+poser `resourceGroupName` n'est PAS "ai-je besoin d'une permission IAM sur `data`", mais
+"est-ce que `backend.ts` pose sur moi un `addEnvironment()` référençant une ressource dont
+dépend déjà (directement ou transitivement) la stack où j'atterrirais par défaut". `bff` en
+est l'exemple : zéro permission DynamoDB, mais bien deux `addEnvironment()` cross-stack.
+
 ## 6. Ce que ce document ne tranche pas encore
 
 - Aucun `ampx sandbox`/`pipeline-deploy` n'a été lancé pour ce chantier (aucun agent ne

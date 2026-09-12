@@ -22,15 +22,31 @@ import { defineFunction } from '@aws-amplify/backend'
  * directement (même raison que les Lambdas `mission-validation-auto-finalizer`/`rating-aggregation` :
  * un import direct embarquerait tout `@aws-amplify/backend` dans le bundle esbuild).
  *
- * Pas de `resourceGroupName: 'data'` ici (contrairement aux deux Lambdas ci-dessus) : ce Lambda
- * ne demande AUCUNE permission IAM sur les tables `data` (il parle à Cognito et à AppSync par
- * HTTPS avec un vrai JWT userPool, jamais par accès direct DynamoDB) -- rien qui reproduise le
- * cycle `auth -> function -> data -> auth` documenté dans `rating-aggregation/resource.ts`.
- * Non vérifié par une synthèse CDK réelle (aucun agent ne déploie) -- à confirmer au premier
- * `ampx sandbox` du repo owner.
+ * `resourceGroupName: 'data'` -- correctif post-déploiement réel (2026-09-12,
+ * `CloudformationStackCircularDependencyError` confirmé par un vrai `ampx sandbox` en échec,
+ * stacks `auth`/`waf`/`geo`/`data`/`function` cités). Le raisonnement initial de cette
+ * sous-tâche ("ce Lambda n'a besoin d'aucune permission IAM sur les tables `data`, donc pas
+ * besoin de `resourceGroupName`") ne couvrait que l'angle IAM -- il ratait que
+ * `addEnvironment()` crée LUI AUSSI une dépendance de stack, indépendamment de toute policy.
+ * Sans lui, `bff` atterrit par défaut dans la même stack imbriquée partagée que
+ * `post-confirmation` (trigger Cognito, dont `auth` a besoin de l'ARN -- `auth` dépend donc de
+ * cette stack "function"). Or `amplify/backend.ts` pose sur `bff`
+ * `COGNITO_USER_POOL_CLIENT_ID` (référence `auth`) ET `APPSYNC_GRAPHQL_URL` (référence
+ * `data`) -- cette même stack "function" dépend donc AUSSI de `auth`, d'où un cycle direct
+ * `auth -> function -> auth` (même famille que le cycle
+ * `auth -> function -> data -> auth` déjà documenté dans
+ * `mission-validation-auto-finalizer/resource.ts`/`rating-aggregation/resource.ts`, mais qui
+ * n'a ici pas même besoin de repasser par `data` pour se refermer). `resourceGroupName: 'data'`
+ * place directement `bff` DANS la stack `data` -- sa référence à `cfnGraphqlApi` (déjà dans
+ * cette même stack) devient une référence INTRA-stack, et sa référence à `auth`
+ * (`userPoolClientId`) suit la même direction que celle déjà établie par `data` lui-même (mode
+ * d'authentification Cognito de l'API AppSync, comportement Gen2 standard) -- aucun nouveau
+ * cycle. `post-confirmation` reste seul dans la stack "function" par défaut, qui ne référence
+ * plus rien en retour : le cycle est cassé.
  */
 export const bff = defineFunction({
   name: 'bff',
   entry: './handler.ts',
+  resourceGroupName: 'data',
   timeoutSeconds: 15,
 })

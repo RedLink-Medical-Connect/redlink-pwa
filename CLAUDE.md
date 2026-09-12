@@ -119,6 +119,16 @@ architecturales) et `.cursorrules` (conventions détaillées pour l'éditeur).
 - Lambda : trigger PostConfirmation sur le modèle de fonctions Gen2
   (`amplify/functions/post-confirmation/`, TypeScript, `defineFunction`),
   référencé depuis `amplify/auth/resource.ts` — voir ADR-0008.
+- **`resourceGroupName` sur `defineFunction` — critère complet** : une Lambda sans
+  `resourceGroupName` rejoint par défaut la stack imbriquée partagée avec
+  `post-confirmation` (trigger Cognito, dont `auth` dépend). Le critère pour lui en poser
+  un n'est **pas** seulement "ai-je besoin d'une permission IAM sur `data`" (angle initial
+  documenté ci-dessous pour les deux Lambdas à accès DynamoDB direct) — `backend.ts` posant
+  un `addEnvironment()` référençant une ressource `auth`/`data` cross-stack suffit, À LUI
+  SEUL, à fermer un cycle (`bff/resource.ts`, ADR-0021 §6ter — zéro permission DynamoDB,
+  mais deux `addEnvironment()` cross-stack ont suffi à provoquer
+  `CloudformationStackCircularDependencyError` en déploiement réel). Vérifier les DEUX
+  angles avant de conclure qu'un `resourceGroupName` n'est pas nécessaire.
 - **Lambda planifiée + accès DynamoDB direct** : `defineFunction({ schedule: { cron,
   timezone } })` (`amplify/functions/mission-validation-auto-finalizer/`, EventBridge
   Scheduler ; cron EventBridge à 5-6 champs, `day-of-month` OU `day-of-week` à `?`).
