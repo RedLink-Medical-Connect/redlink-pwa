@@ -272,14 +272,13 @@ export function useOwnerMissions() {
       // selectionSet reprenant EXACTEMENT les champs sélectionnés par `listMyAnimalsMissions`
       // (Gen1, custom-queries.js) -- vérifiés un par un contre ce que ce composable ET
       // MissionsView.vue consomment réellement (animalName/animalSpecies flattenés
-      // ci-dessous ; mission.status/appointmentDatetime ; mission.request.clinic.name/
-      // address/phone/latitude/longitude, affichés/ouverts dans Maps par MissionsView.vue --
-      // `mission.request.id`/`requestType` eux-mêmes ne sont consommés par aucune vue, mais
-      // reproduits tels quels : traduction mécanique de la query Gen1, pas une occasion de
-      // resserrer davantage ici). `animal.missions`/`mission.request` sont des tableaux/objets
-      // directs (relation `selectionSet` Gen2), jamais enveloppés dans `{ items: [...] }`
-      // comme le faisait Gen1 -- voir useClinicDonors.js pour ce même comportement déjà
-      // rencontré en lot 2.
+      // ci-dessous ; mission.status ; mission.request.clinic.name/address/phone/latitude/
+      // longitude, affichés/ouverts dans Maps par MissionsView.vue -- `mission.request.id`
+      // n'est consommé par aucune vue, mais reproduit tel quel : traduction mécanique de la
+      // query Gen1, pas une occasion de resserrer davantage ici). `animal.missions`/
+      // `mission.request` sont des tableaux/objets directs (relation `selectionSet` Gen2),
+      // jamais enveloppés dans `{ items: [...] }` comme le faisait Gen1 -- voir
+      // useClinicDonors.js pour ce même comportement déjà rencontré en lot 2.
       //
       // Câblage UI double validation/notation (sous-tâche suivante, PR de suivi) : champs
       // ajoutés à ce selectionSet préexistant, chacun consommé par MissionsView.vue --
@@ -292,6 +291,13 @@ export function useOwnerMissions() {
       // sans aller-retour réseau dédié -- même raisonnement que
       // `resolveMissionClinicId()` ci-dessous, qui ne peut pas être réutilisée ici (elle lit
       // une SEULE Mission par id, hors de toute liste chargée).
+      //
+      // Correctif bug d'affichage "prévu le" (2026-09-12) : `missions.appointmentDatetime`
+      // retiré (n'était plus consommé par aucune vue une fois le correctif posé -- convention
+      // stricte contre la sur-sélection, même raisonnement que `missions.clinicValidationOutcome`
+      // ci-dessus), remplacé par `missions.request.appointmentDatetime` -- la vraie date de RDV
+      // choisie par la clinique (`amplify/data/resource.ts`, `Request.appointmentDatetime`),
+      // seule source de vérité désormais lue par MissionsView.vue.
       const { data, errors } = await client.models.Animal.list({
         filter: { ownerID: { eq: userId } },
         selectionSet: [
@@ -300,11 +306,11 @@ export function useOwnerMissions() {
           'species',
           'missions.id',
           'missions.status',
-          'missions.appointmentDatetime',
           'missions.ownerValidationOutcome',
           'missions.ownerDisputeReason',
           'missions.request.id',
           'missions.request.requestType',
+          'missions.request.appointmentDatetime',
           'missions.request.clinicID',
           'missions.request.clinic.name',
           'missions.request.clinic.address',
@@ -423,6 +429,15 @@ export function useOwnerMissions() {
       if (!satisfiesFrequencyRule(animal)) throw new Error('FREQUENCY_RULE_NOT_SATISFIED')
 
       // 4. Crée la Mission.
+      //
+      // Correctif bug d'affichage "prévu le" (2026-09-12) : `appointmentDatetime` n'est PLUS
+      // posé ici. Il valait `new Date().toISOString()` -- l'heure du clic de l'Owner sur
+      // "Accepter", pas une date de RDV -- et MissionsView.vue l'affichait tel quel sous le
+      // libellé "Prévu le" (`dashboard.owner.missions_list.planned_on`), donnant l'impression
+      // que le RDV était planifié au moment même de l'acceptation. La vraie date de RDV
+      // (choisie par la clinique) vit sur `Request.appointmentDatetime` -- déjà chargée via
+      // `mission.request.appointmentDatetime` (voir le selectionSet de `fetchMyMissions`
+      // ci-dessus), inutile de la dupliquer sur `Mission` à la création.
       const missionInput = {
         requestID: request.id,
         animalID: animal.id,
@@ -430,7 +445,6 @@ export function useOwnerMissions() {
           request.requestType === RequestType.EMERGENCY
             ? MissionStatus.PENDING_ARRIVAL
             : MissionStatus.ACCEPTED,
-        appointmentDatetime: new Date().toISOString(),
       }
 
       const { data: createdMission, errors: createMissionErrors } =
