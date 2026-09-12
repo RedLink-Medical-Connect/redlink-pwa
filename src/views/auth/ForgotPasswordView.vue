@@ -1,6 +1,7 @@
 <script setup>
 import { ref, watch } from 'vue'
 import { useAuthStore } from '@/stores/auth'
+import { usePassword } from '@/composables/usePassword'
 import { useI18n } from 'vue-i18n'
 
 const auth = useAuthStore()
@@ -9,7 +10,13 @@ const step = ref(1) // 1 = Email, 2 = Reset
 
 const email = ref('')
 const code = ref('')
-const newPassword = ref('')
+// Même règle de sécurité que l'inscription (`usePassword.js`, synchronisée avec
+// `cfnUserPool.policies.passwordPolicy`) -- avant ce correctif, un mot de passe faible
+// n'était ici rejeté que côté Cognito (message d'erreur brut, aucun feedback avant
+// soumission), contrairement à RegisterOwnerView.vue/RegisterClinicView.vue. Pas de champ
+// de confirmation dans ce formulaire (`confirmPassword`/`doMatch` du composable restent
+// inutilisés) : `isPasswordValid` seul suffit au feedback recherché ici.
+const { password: newPassword, isValid: isPasswordValid } = usePassword()
 
 watch([email, code, newPassword], () => {
   if (auth.error) auth.clearError()
@@ -30,6 +37,11 @@ const handleSendCode = async () => {
 const handleReset = async () => {
   if (!code.value || !newPassword.value) {
     auth.setError(t('errors.fill_code_password'))
+    return
+  }
+
+  if (!isPasswordValid.value) {
+    auth.setError(t('errors.password_length'))
     return
   }
 
@@ -111,10 +123,17 @@ const handleReset = async () => {
           <Password
             v-model="newPassword"
             toggle-mask
+            :feedback="false"
             class="w-full"
             input-class="w-full !bg-zinc-200 dark:!bg-zinc-800 !border-none !text-zinc-900 dark:!text-white !p-4 !rounded-md focus:!ring-2 focus:!ring-[#ff3b4e]"
-            :invalid="!!auth.error"
+            :invalid="!!auth.error || (!isPasswordValid && newPassword.length > 0)"
           />
+          <small
+            v-if="newPassword.length > 0 && !isPasswordValid"
+            class="text-red-500 text-[10px] font-bold ml-1"
+          >
+            {{ $t('errors.password_length') }}
+          </small>
         </div>
 
         <Button
