@@ -27,6 +27,20 @@ describe('renderLayout', () => {
     const html = renderLayout({ locale: 'fr', preheader: 'p', heading: 'h', bodyHtml: '<p>b</p>' })
     expect(html).toContain(String(new Date().getFullYear()))
   })
+
+  // Retour repo owner (2026-09-12) : l'adresse expéditeur (défaut Cognito) ne peut pas être
+  // personnalisée -- le wordmark et la couleur d'accent doivent donc reprendre exactement
+  // l'identité visuelle du site (AppHeader.vue/AppFooter.vue), pas une charte inventée.
+  it('reprend le wordmark "RedLink" (casse exacte du site) et la couleur d\'accent #ff3b4e', () => {
+    const html = renderLayout({ locale: 'fr', preheader: 'p', heading: 'h', bodyHtml: '<p>b</p>' })
+    expect(html).toContain('>RedLink<')
+    expect(html).toContain('#ff3b4e')
+  })
+
+  it('affiche la tagline du site sous le wordmark', () => {
+    const html = renderLayout({ locale: 'fr', preheader: 'p', heading: 'h', bodyHtml: '<p>b</p>' })
+    expect(html).toContain("Relie les cliniques vétérinaires aux propriétaires volontaires")
+  })
 })
 
 describe('renderCodeBlock', () => {

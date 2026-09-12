@@ -104,3 +104,35 @@ Si les emails transactionnels se multiplient significativement au-delà des deux
 si le design attendu devient trop riche pour des tables + CSS inline écrites à la main (mise en
 page complexe, plusieurs colonnes), introduire MJML (compilé en HTML à la construction, pas au
 runtime Lambda) devient justifié — pas aujourd'hui (YAGNI).
+
+## 5. Identité visuelle alignée sur le site réel, pas inventée (retour repo owner, 2026-09-12)
+
+Première version de `layout.ts` : bandeau plein `#b91c1c` (rouge générique, jamais utilisé
+ailleurs dans ce repo) avec `Redlink` en blanc dessus. Revu après retour explicite du repo owner :
+**l'adresse expéditeur ne peut pas être personnalisée** (`no-reply@verificationemail.com`, défaut
+Cognito — changer ça demande un domaine SES vérifié, hors périmètre ici). Puisque l'expéditeur ne
+peut pas signaler "ceci vient de Redlink", le CONTENU doit le faire à lui seul, en reprenant
+fidèlement ce que le destinataire reconnaît déjà du site plutôt qu'une charte inventée pour
+l'email :
+
+- Couleur d'accent : `#ff3b4e`, la seule utilisée dans tout `src/` (`AppHeader.vue`, boutons de
+  `RegisterOwnerView.vue`/`ForgotPasswordView.vue`, etc.) — remplace le `#b91c1c` d'origine, qui
+  n'existe nulle part ailleurs dans ce repo.
+- Wordmark : `RedLink` (casse exacte, jamais `Redlink`/`REDLINK` bien que les deux existent aussi
+  ailleurs dans le produit) — copié à l'identique de `AppHeader.vue`/`AppFooter.vue`. Posé en
+  header sur fond BLANC (pas une bande colorée comme la v1) : c'est la mise en page réelle du
+  site (`<header class="bg-white ...">`), pas une invention. Une bande de 4px `#ff3b4e` au-dessus
+  reste le seul élément de couleur pleine — signal visible même dans un aperçu tronqué (liste de
+  messagerie), avant que le wordmark lui-même ne soit lu.
+- Tagline sous le wordmark : reprise mot pour mot de `home.hero.subtitle`
+  (`src/locales/{fr,en}.json`) plutôt qu'un texte inventé pour l'email — dupliquée dans
+  `i18n/messages.ts` (pas d'import cross-runtime possible entre la SPA et ce Lambda), documenté
+  comme tel dans le commentaire du fichier.
+- Bloc code (`renderCodeBlock`) : fond/bordure teintés dans l'accent (`#fff1f2`/`#ffb3bb`), texte
+  du code en `#ff3b4e` — auparavant un gris neutre, sans lien visuel avec la marque.
+
+`brandName: 'Redlink'` (i18n/messages.ts) reste utilisé tel quel pour le texte de sujet/footer en
+prose (`Confirmez votre adresse email Redlink`, `© {year} Redlink...`) — casse déjà utilisée dans
+ce contexte ailleurs dans le produit (`src/locales/fr.json`). Seul le wordmark visuel du header
+est fixé à `RedLink`, hardcodé directement dans `layout.ts` plutôt que dans le dictionnaire i18n :
+un logotype ne se traduit pas, contrairement au reste du contenu de l'email.

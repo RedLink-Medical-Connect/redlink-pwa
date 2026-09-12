@@ -24,6 +24,7 @@ export function resolveEmailLocale(rawLocale: string | undefined): EmailLocale {
 
 interface EmailMessages {
   brandName: string
+  tagline: string
   footerNote: string
   footerRights: (year: number) => string
   verification: {
@@ -48,6 +49,13 @@ interface EmailMessages {
 export const emailMessages: Record<EmailLocale, EmailMessages> = {
   fr: {
     brandName: 'Redlink',
+    // Reprise mot pour mot de `home.hero.subtitle` (src/locales/fr.json) -- pas d'import
+    // cross-runtime possible depuis ce Lambda (SPA vs handler Gen2, voir le commentaire de
+    // fichier), donc dupliquée ici plutôt que partagée. Sert d'ancrage d'identité visuelle
+    // dans le header de l'email (retour repo owner, 2026-09-12 : l'adresse expéditeur ne peut
+    // pas être personnalisée côté Cognito -- ce texte, déjà familier pour qui a visité le
+    // site, doit suffire à lui seul à rendre l'email reconnaissable).
+    tagline: "Relie les cliniques vétérinaires aux propriétaires volontaires pour les transfusions d'urgence.",
     footerNote: 'Cet email vous a été envoyé automatiquement, merci de ne pas y répondre.',
     footerRights: (year) => `© ${year} Redlink. Tous droits réservés.`,
     verification: {
@@ -71,6 +79,9 @@ export const emailMessages: Record<EmailLocale, EmailMessages> = {
   },
   en: {
     brandName: 'Redlink',
+    // Mirrors `home.hero.subtitle` (src/locales/en.json) -- see the fr entry above for why
+    // this is duplicated rather than imported.
+    tagline: 'Connects veterinary clinics with willing pet owners for emergency transfusions.',
     footerNote: 'This email was sent automatically, please do not reply to it.',
     footerRights: (year) => `© ${year} Redlink. All rights reserved.`,
     verification: {

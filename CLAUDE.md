@@ -130,7 +130,11 @@ architecturales) et `.cursorrules` (conventions détaillées pour l'éditeur).
   `ResendConfirmationCodeCommand`/`ForgotPasswordCommand`), résolue avec repli sur `fr`
   uniquement côté `custom-message` (`i18n/messages.ts`, `resolveEmailLocale`) — jamais côté
   BFF. Référence pour tout futur email transactionnel (notification de match, etc.) : ajouter
-  un fichier dans `templates/`, pas un nouveau système. Voir ADR-0022.
+  un fichier dans `templates/`, pas un nouveau système. Identité visuelle alignée sur le site
+  réel, jamais inventée pour l'email (adresse expéditeur non personnalisable, défaut Cognito
+  `no-reply@verificationemail.com`) : couleur d'accent `#ff3b4e`, wordmark `RedLink` (casse
+  exacte, hardcodé dans `layout.ts` — jamais traduit, comme `AppHeader.vue`/`AppFooter.vue`).
+  Voir ADR-0022 §5.
 - **`resourceGroupName` sur `defineFunction` — critère complet** : une Lambda sans
   `resourceGroupName` rejoint par défaut la stack imbriquée partagée avec
   `post-confirmation` (trigger Cognito, dont `auth` dépend). Le critère pour lui en poser
