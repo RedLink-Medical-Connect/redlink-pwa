@@ -3,12 +3,23 @@ import * as authRoutes from './auth-routes'
 import type { RouteResult } from './auth-routes'
 import * as clinicRoutes from './clinic-routes'
 import { proxyGraphql } from './graphql-proxy'
+import { ORIGIN_VERIFY_HEADER } from './origin-verify'
 
 /**
  * Point d'entrée du BFF -- voir docs/adr/0021-bff-cognito-session-cloudfront.md. Format d'event
  * Lambda Function URL v2.0 (identique à API Gateway HTTP API v2.0 -- `event.cookies: string[]`,
  * `event.rawPath`, `event.requestContext.http.method`), CloudFront devant (ADR-0021 §2) : pas de
  * CORS à gérer, la SPA et ce Lambda sont same-origin sous le domaine de la distribution.
+ *
+ * Function URL en `authType: NONE` (`amplify/backend.ts`) -- ce Lambda est donc, au sens IAM,
+ * appelable par n'importe qui qui devine son URL `*.lambda-url.<region>.on.aws`. La protection
+ * réelle est le header `ORIGIN_VERIFY_HEADER` : CloudFront l'attache (valeur secrète,
+ * *origin custom header*) à CHAQUE requête qu'il transmet à cette origine, quelle que soit la
+ * méthode HTTP ou la présence d'un corps -- un appelant qui contacterait le Function URL
+ * directement ne peut pas le fournir. `ORIGIN_VERIFY_SECRET` absent (local `ampx sandbox`/
+ * `npm run dev` : pas de distribution CloudFront devant, voir `amplify/backend.ts`) désactive
+ * ce contrôle plutôt que de rejeter systématiquement -- la même distinction que le reste de ce
+ * fichier fait déjà pour l'absence de CloudFront en local.
  *
  * `/api/graphql` (relais brut, `graphql-proxy.ts`) vs `/api/auth/*` (SDK Cognito direct,
  * `auth-routes.ts`) : deux familles de contrat de réponse différentes (la première renvoie le
@@ -18,6 +29,11 @@ import { proxyGraphql } from './graphql-proxy'
 export const handler = async (
   event: APIGatewayProxyEventV2,
 ): Promise<APIGatewayProxyStructuredResultV2> => {
+  const originVerifySecret = process.env.ORIGIN_VERIFY_SECRET
+  if (originVerifySecret && event.headers?.[ORIGIN_VERIFY_HEADER] !== originVerifySecret) {
+    return { statusCode: 403, body: JSON.stringify({ error: 'FORBIDDEN' }) }
+  }
+
   const method = event.requestContext.http.method
   const path = event.rawPath
   const cookies = event.cookies

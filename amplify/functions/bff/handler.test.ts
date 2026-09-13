@@ -1,9 +1,10 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { APIGatewayProxyEventV2 } from 'aws-lambda'
 import { handler } from './handler'
 import * as authRoutes from './auth-routes'
 import * as clinicRoutes from './clinic-routes'
 import { proxyGraphql } from './graphql-proxy'
+import { ORIGIN_VERIFY_HEADER } from './origin-verify'
 
 // Routage pur : chaque route déléguée est mockée, sa propre logique a sa propre couverture
 // (`auth-routes.test.ts`, `clinic-routes.test.ts`, `graphql-proxy.test.ts`). Ce fichier
@@ -26,6 +27,55 @@ function buildEvent(overrides: Partial<APIGatewayProxyEventV2> = {}): APIGateway
 
 beforeEach(() => {
   vi.clearAllMocks()
+})
+
+afterEach(() => {
+  delete process.env.ORIGIN_VERIFY_SECRET
+})
+
+describe('vérification du header secret partagé (ORIGIN_VERIFY_SECRET)', () => {
+  it('rejette (403) une requête sans le header quand ORIGIN_VERIFY_SECRET est configuré (déploiement réel)', async () => {
+    process.env.ORIGIN_VERIFY_SECRET = 'le-secret'
+
+    const event = buildEvent({ headers: {} })
+
+    const result = await handler(event)
+
+    expect(result.statusCode).toBe(403)
+    expect(authRoutes.signIn).not.toHaveBeenCalled()
+  })
+
+  it('rejette (403) une requête avec la mauvaise valeur de header', async () => {
+    process.env.ORIGIN_VERIFY_SECRET = 'le-secret'
+
+    const event = buildEvent({ headers: { [ORIGIN_VERIFY_HEADER]: 'pas-le-bon-secret' } })
+
+    const result = await handler(event)
+
+    expect(result.statusCode).toBe(403)
+  })
+
+  it('route normalement une requête avec la bonne valeur de header', async () => {
+    process.env.ORIGIN_VERIFY_SECRET = 'le-secret'
+    vi.mocked(authRoutes.signIn).mockResolvedValue({ statusCode: 200, body: { status: 'SIGNED_IN' } })
+
+    const event = buildEvent({ headers: { [ORIGIN_VERIFY_HEADER]: 'le-secret' } })
+
+    const result = await handler(event)
+
+    expect(result.statusCode).toBe(200)
+    expect(authRoutes.signIn).toHaveBeenCalled()
+  })
+
+  it("ne vérifie rien quand ORIGIN_VERIFY_SECRET est absent (local, pas de CloudFront devant)", async () => {
+    vi.mocked(authRoutes.signIn).mockResolvedValue({ statusCode: 200, body: { status: 'SIGNED_IN' } })
+
+    const event = buildEvent({ headers: {} })
+
+    const result = await handler(event)
+
+    expect(result.statusCode).toBe(200)
+  })
 })
 
 describe('handler routing', () => {
