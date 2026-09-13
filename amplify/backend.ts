@@ -758,6 +758,28 @@ if (hostingAppId && hostingBranch) {
     sourceArn: `arn:aws:cloudfront::${Stack.of(distribution).account}:distribution/${distribution.distributionId}`,
   })
 
+  /**
+   * Deuxième grant, en plus de `AllowCloudFrontInvoke` ci-dessus -- confirmé manquant en
+   * déploiement réel (2026-09-13, `main`) : OAC pour un Lambda Function URL renvoie un 403
+   * `AccessDeniedException` (`x-amzn-errortype`), sans jamais atteindre le code du handler
+   * (aucune invocation, aucun log group CloudWatch créé), tant que `cloudfront.amazonaws.com`
+   * n'a QUE `lambda:InvokeFunctionUrl` -- la doc AWS de référence pour cette combinaison exige
+   * les DEUX actions (`lambda:InvokeFunctionUrl` ET `lambda:InvokeFunction`, même principal,
+   * même condition `SourceArn`), voir « Grant CloudFront permission to access the Lambda
+   * function URL » (docs.aws.amazon.com/AmazonCloudFront, private-content-restricting-access-
+   * to-lambda). Ni le grant explicite ci-dessus ni le grant auto-généré par
+   * `withOriginAccessControl` ne posent cette seconde action -- les deux ne couvrent que
+   * `InvokeFunctionUrl`. Indépendant du domaine qui pointe vers la distribution (CloudFront
+   * signe la requête au niveau de l'origine, avant tout routage par nom de domaine) : un futur
+   * nom de domaine personnalisé pointé sur cette même distribution n'a besoin d'aucun grant
+   * supplémentaire.
+   */
+  backend.bff.resources.lambda.addPermission('AllowCloudFrontInvokeFunction', {
+    principal: new ServicePrincipal('cloudfront.amazonaws.com'),
+    action: 'lambda:InvokeFunction',
+    sourceArn: `arn:aws:cloudfront::${Stack.of(distribution).account}:distribution/${distribution.distributionId}`,
+  })
+
   backend.addOutput({
     custom: {
       bffDistributionDomain: distribution.distributionDomainName,
