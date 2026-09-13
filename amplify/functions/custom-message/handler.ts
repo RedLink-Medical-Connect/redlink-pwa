@@ -1,6 +1,7 @@
 import type { CustomMessageTriggerHandler } from 'aws-lambda'
 import { renderVerificationEmail } from './templates/verification-email'
 import { renderForgotPasswordEmail } from './templates/forgot-password-email'
+import { renderInviteVeterinarianEmail } from './templates/invite-veterinarian-email'
 
 /**
  * Trigger Cognito `CustomMessage` -- voir docs/adr/0022-branded-transactional-emails.md.
@@ -19,8 +20,16 @@ import { renderForgotPasswordEmail } from './templates/forgot-password-email'
  * dispatcher, la résolution de repli vit à un seul endroit.
  *
  * `CustomMessage_SignUp` et `CustomMessage_ResendCode` partagent le même email (même geste
- * utilisateur du point de vue produit : confirmer son adresse). Les autres `triggerSource`
- * possibles (`AdminCreateUser`, `UpdateUserAttribute`, `VerifyUserAttribute`,
+ * utilisateur du point de vue produit : confirmer son adresse).
+ *
+ * `CustomMessage_AdminCreateUser` (invitation d'un vétérinaire par le référent de sa clinique,
+ * `amplify/functions/bff/clinic-routes.ts`) : `codeParameter` porte ici le MOT DE PASSE
+ * TEMPORAIRE généré par `AdminCreateUserCommand` (pas un code à 6 chiffres) --
+ * `renderInviteVeterinarianEmail` réutilise `renderCodeBlock` telle quelle, Cognito résout le
+ * placeholder de la même façon quel que soit son contenu réel. `usernameParameter` porte
+ * l'identifiant de connexion (l'email, `Username` posé explicitement sur `AdminCreateUserCommand`).
+ *
+ * Les autres `triggerSource` possibles (`UpdateUserAttribute`, `VerifyUserAttribute`,
  * `Authentication`) ne sont déclenchés par aucun flux applicatif de ce repo aujourd'hui --
  * `event` traverse inchangé, Cognito applique alors son template par défaut plutôt qu'un
  * design à moitié fini pour un cas qui ne peut pas se produire.
@@ -39,6 +48,13 @@ export const handler: CustomMessageTriggerHandler = async (event) => {
     }
     case 'CustomMessage_ForgotPassword': {
       const { subject, html } = renderForgotPasswordEmail({ code, locale })
+      event.response.emailSubject = subject
+      event.response.emailMessage = html
+      break
+    }
+    case 'CustomMessage_AdminCreateUser': {
+      const username = event.request.usernameParameter ?? event.userName
+      const { subject, html } = renderInviteVeterinarianEmail({ code, username, locale })
       event.response.emailSubject = subject
       event.response.emailMessage = html
       break

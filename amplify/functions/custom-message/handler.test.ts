@@ -10,11 +10,17 @@ const handler = rawHandler as unknown as (
   event: ReturnType<typeof buildEvent>,
 ) => Promise<ReturnType<typeof buildEvent>>
 
-function buildEvent(triggerSource: string, clientMetadata?: Record<string, string>) {
+function buildEvent(
+  triggerSource: string,
+  clientMetadata?: Record<string, string>,
+  usernameParameter?: string,
+) {
   return {
     triggerSource,
+    userName: 'vet@example.com',
     request: {
       codeParameter: '123456',
+      usernameParameter,
       clientMetadata,
     },
     response: {
@@ -47,8 +53,15 @@ describe('custom-message handler', () => {
     expect(event.response.emailSubject).toBe('Confirm your Redlink email address')
   })
 
-  it('triggerSource non géré (ex. AdminCreateUser) : ne modifie pas la réponse, laisse Cognito appliquer son template par défaut', async () => {
-    const event = await handler(buildEvent('CustomMessage_AdminCreateUser'))
+  it('CustomMessage_AdminCreateUser : rend l\'email d\'invitation vétérinaire, avec le mot de passe temporaire et l\'identifiant', async () => {
+    const event = await handler(buildEvent('CustomMessage_AdminCreateUser', undefined, 'collegue@example.com'))
+    expect(event.response.emailSubject).toBe('Vous êtes invité·e à rejoindre une clinique sur Redlink')
+    expect(event.response.emailMessage).toContain('123456')
+    expect(event.response.emailMessage).toContain('collegue@example.com')
+  })
+
+  it("triggerSource non géré (ex. UpdateUserAttribute) : ne modifie pas la réponse, laisse Cognito appliquer son template par défaut", async () => {
+    const event = await handler(buildEvent('CustomMessage_UpdateUserAttribute'))
     expect(event.response.emailSubject).toBeUndefined()
     expect(event.response.emailMessage).toBeUndefined()
   })

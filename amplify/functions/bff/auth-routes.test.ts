@@ -13,7 +13,13 @@ import {
   SetUserMFAPreferenceCommand,
 } from '@aws-sdk/client-cognito-identity-provider'
 import * as authRoutes from './auth-routes'
-import { ID_TOKEN_COOKIE, ACCESS_TOKEN_COOKIE, REFRESH_TOKEN_COOKIE, MFA_SESSION_COOKIE } from './cookies'
+import {
+  ID_TOKEN_COOKIE,
+  ACCESS_TOKEN_COOKIE,
+  REFRESH_TOKEN_COOKIE,
+  MFA_SESSION_COOKIE,
+  NEW_PASSWORD_SESSION_COOKIE,
+} from './cookies'
 
 // Même pattern que post-confirmation/handler.test.ts et rating-aggregation/handler.test.ts :
 // on stubbe `CognitoIdentityProviderClient.prototype.send` directement plutôt que `vi.mock` du
@@ -93,6 +99,18 @@ describe('signIn', () => {
     expect(result.statusCode).toBe(401)
     expect(result.setCookies).toBeUndefined()
   })
+
+  it('challenge NEW_PASSWORD_REQUIRED (compte AdminCreateUser, invitation vétérinaire) : ne pose que le cookie de session dédié', async () => {
+    sendSpy.mockResolvedValue({ ChallengeName: 'NEW_PASSWORD_REQUIRED', Session: 'new-pwd-session-abc' } as never)
+
+    const result = await authRoutes.signIn({ email: 'a@b.com', password: 'TempPassword123!' })
+
+    expect(result.statusCode).toBe(200)
+    expect(result.body).toEqual({ status: 'CONFIRM_SIGN_IN_WITH_NEW_PASSWORD' })
+    expect(result.setCookies).toEqual([
+      expect.stringContaining(`${NEW_PASSWORD_SESSION_COOKIE}=new-pwd-session-abc`),
+    ])
+  })
 })
 
 describe('confirmSignIn (challenge MFA)', () => {
@@ -102,14 +120,28 @@ describe('confirmSignIn (challenge MFA)', () => {
     expect(sendSpy).not.toHaveBeenCalled()
   })
 
-  it('succès : pose les cookies de session ET efface le cookie de session MFA', async () => {
-    const mfaSession = fakeJwt({ username: 'user-1' })
+  it("renvoie 400 si l'email manque", async () => {
+    const result = await authRoutes.confirmSignIn(
+      { code: '123456' },
+      [`${MFA_SESSION_COOKIE}=opaque-mfa-session`],
+    )
+    expect(result.statusCode).toBe(400)
+    expect(sendSpy).not.toHaveBeenCalled()
+  })
+
+  it("succès : pose les cookies de session ET efface le cookie de session MFA -- USERNAME vient de body.email, PAS décodé du Session (le Session Cognito n'est pas un JWT décodable, même bug que confirmNewPassword)", async () => {
+    // Session volontairement OPAQUE (pas un JWT) : c'est la vraie forme rencontrée contre
+    // Cognito (2026-09-13).
+    const mfaSession = 'opaque-mfa-session-blob-not-a-jwt'
     const idToken = fakeJwt({ sub: 'user-1', email: 'a@b.com' })
     sendSpy.mockResolvedValue({
       AuthenticationResult: { IdToken: idToken, AccessToken: 'access-1', RefreshToken: 'refresh-1' },
     } as never)
 
-    const result = await authRoutes.confirmSignIn({ code: '123456' }, [`${MFA_SESSION_COOKIE}=${mfaSession}`])
+    const result = await authRoutes.confirmSignIn(
+      { code: '123456', email: 'a@b.com' },
+      [`${MFA_SESSION_COOKIE}=${mfaSession}`],
+    )
 
     expect(result.statusCode).toBe(200)
     expect(result.setCookies).toContainEqual(expect.stringMatching(new RegExp(`^${MFA_SESSION_COOKIE}=; .*Max-Age=0`)))
@@ -119,8 +151,69 @@ describe('confirmSignIn (challenge MFA)', () => {
     expect(command.input).toMatchObject({
       ChallengeName: 'SOFTWARE_TOKEN_MFA',
       Session: mfaSession,
-      ChallengeResponses: { USERNAME: 'user-1', SOFTWARE_TOKEN_MFA_CODE: '123456' },
+      ChallengeResponses: { USERNAME: 'a@b.com', SOFTWARE_TOKEN_MFA_CODE: '123456' },
     })
+  })
+})
+
+describe('confirmNewPassword (challenge NEW_PASSWORD_REQUIRED)', () => {
+  it('renvoie 400 si le nouveau mot de passe ou le cookie de session manque', async () => {
+    const result = await authRoutes.confirmNewPassword({}, undefined)
+    expect(result.statusCode).toBe(400)
+    expect(sendSpy).not.toHaveBeenCalled()
+  })
+
+  it('renvoie 400 si l\'email manque', async () => {
+    const result = await authRoutes.confirmNewPassword(
+      { newPassword: 'NewPassword123!' },
+      [`${NEW_PASSWORD_SESSION_COOKIE}=opaque-session`],
+    )
+    expect(result.statusCode).toBe(400)
+    expect(sendSpy).not.toHaveBeenCalled()
+  })
+
+  it("succès : pose les cookies de session ET efface le cookie de session dédié -- USERNAME vient de body.email, PAS décodé du Session (bug réel : le Session Cognito n'est pas un JWT décodable, voir le commentaire de confirmNewPassword)", async () => {
+    // Session volontairement OPAQUE (pas un JWT) : c'est la vraie forme rencontrée contre
+    // Cognito (2026-09-13) -- `readUsernameFromChallengeSession` plantait dessus.
+    const session = 'opaque-session-blob-not-a-jwt'
+    const idToken = fakeJwt({ sub: 'user-1', email: 'collegue@example.com' })
+    sendSpy.mockResolvedValue({
+      AuthenticationResult: { IdToken: idToken, AccessToken: 'access-1', RefreshToken: 'refresh-1' },
+    } as never)
+
+    const result = await authRoutes.confirmNewPassword(
+      { newPassword: 'NewPassword123!', email: 'collegue@example.com' },
+      [`${NEW_PASSWORD_SESSION_COOKIE}=${session}`],
+    )
+
+    expect(result.statusCode).toBe(200)
+    expect(result.body).toEqual({
+      status: 'SIGNED_IN',
+      user: { sub: 'user-1', email: 'collegue@example.com', name: null, profile: null },
+    })
+    expect(result.setCookies).toContainEqual(
+      expect.stringMatching(new RegExp(`^${NEW_PASSWORD_SESSION_COOKIE}=; .*Max-Age=0`)),
+    )
+
+    const [command] = sendSpy.mock.calls[0]
+    expect(command).toBeInstanceOf(RespondToAuthChallengeCommand)
+    expect(command.input).toMatchObject({
+      ChallengeName: 'NEW_PASSWORD_REQUIRED',
+      Session: session,
+      ChallengeResponses: { USERNAME: 'collegue@example.com', NEW_PASSWORD: 'NewPassword123!' },
+    })
+  })
+
+  it('échec du challenge : 401, jamais de cookie posé', async () => {
+    sendSpy.mockResolvedValue({} as never)
+
+    const result = await authRoutes.confirmNewPassword(
+      { newPassword: 'NewPassword123!', email: 'collegue@example.com' },
+      [`${NEW_PASSWORD_SESSION_COOKIE}=opaque-session-blob-not-a-jwt`],
+    )
+
+    expect(result.statusCode).toBe(401)
+    expect(result.setCookies).toBeUndefined()
   })
 })
 
@@ -257,6 +350,47 @@ describe('signOut', () => {
 
     expect(sendSpy).not.toHaveBeenCalled()
     expect(result.setCookies).toHaveLength(3)
+  })
+})
+
+describe('updateProfile', () => {
+  it('401 sans access token, jamais d\'appel SDK', async () => {
+    const result = await authRoutes.updateProfile({ name: 'Jean Dupont' }, undefined)
+    expect(result.statusCode).toBe(401)
+    expect(sendSpy).not.toHaveBeenCalled()
+  })
+
+  it('400 si le nom manque', async () => {
+    const result = await authRoutes.updateProfile({}, [`${ACCESS_TOKEN_COOKIE}=access-1`])
+    expect(result.statusCode).toBe(400)
+    expect(sendSpy).not.toHaveBeenCalled()
+  })
+
+  it('succès : UpdateUserAttributesCommand avec le nom, authentifié par l\'access token de l\'appelant (self-service, pas Admin)', async () => {
+    sendSpy.mockResolvedValue({} as never)
+
+    const result = await authRoutes.updateProfile(
+      { name: 'Jean Dupont' },
+      [`${ACCESS_TOKEN_COOKIE}=access-1`],
+    )
+
+    expect(result).toEqual({ statusCode: 200, body: { status: 'UPDATED' } })
+    const [command] = sendSpy.mock.calls[0]
+    expect(command.input).toMatchObject({
+      AccessToken: 'access-1',
+      UserAttributes: [{ Name: 'name', Value: 'Jean Dupont' }],
+    })
+  })
+
+  it('échec Cognito : 400', async () => {
+    sendSpy.mockRejectedValue(new Error('boom'))
+
+    const result = await authRoutes.updateProfile(
+      { name: 'Jean Dupont' },
+      [`${ACCESS_TOKEN_COOKIE}=access-1`],
+    )
+
+    expect(result).toEqual({ statusCode: 400, body: { error: 'UPDATE_PROFILE_FAILED' } })
   })
 })
 

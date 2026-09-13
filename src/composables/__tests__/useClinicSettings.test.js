@@ -21,6 +21,7 @@ import { createPinia, setActivePinia } from 'pinia'
 const vetGetMock = vi.fn()
 const vetListMock = vi.fn()
 const vetDeleteMock = vi.fn()
+const vetUpdateMock = vi.fn()
 const clinicDeleteMock = vi.fn()
 const deleteUserMock = vi.fn()
 const fetchMock = vi.fn()
@@ -32,7 +33,7 @@ vi.mock('@/services/bff-graphql-client', () => ({
         get: (...args) => vetGetMock(...args),
         list: (...args) => vetListMock(...args),
         delete: (...args) => vetDeleteMock(...args),
-        update: vi.fn(),
+        update: (...args) => vetUpdateMock(...args),
       },
       Clinic: {
         delete: (...args) => clinicDeleteMock(...args),
@@ -70,6 +71,7 @@ vi.mock('@/router', () => ({
 }))
 
 import { useClinicSettings, hasProactiveRatingAlert } from '@/composables/useClinicSettings'
+import { useAuthStore } from '@/stores/auth'
 
 /**
  * Charge un Vet+Clinic (nécessaire pour que `vetId.value`/`clinicId.value` soient définis)
@@ -214,6 +216,49 @@ describe('useClinicSettings.deleteAccount', () => {
     expect(vetDeleteMock).toHaveBeenCalledWith({ id: 'vet-1' })
     expect(clinicDeleteMock).not.toHaveBeenCalled()
     expect(deleteUserMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('useClinicSettings.updateVetDetails', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vetGetMock.mockReset()
+    vetUpdateMock.mockReset()
+    fetchMock.mockReset()
+    vi.stubGlobal('fetch', fetchMock)
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+  })
+
+  it("succès : synchronise le nom Cognito (`/api/auth/update-profile`) puis le store, best-effort", async () => {
+    // Simule une session déjà établie (`setUserFromSession`, stores/auth.js) -- sans ça,
+    // `auth.user` est `null` et `setUserName()` n'a rien à mettre à jour.
+    const auth = useAuthStore()
+    auth.user = { username: 'vet-1', userId: 'vet-1', attributes: { email: 'alex.martin@clinique.fr', name: '', profile: 'vet' } }
+
+    const { vetForm, updateVetDetails } = await primeVetAndClinic()
+    vetForm.value.firstname = 'Jean'
+    vetForm.value.lastname = 'Dupont'
+    vetUpdateMock.mockResolvedValueOnce({ data: { id: 'vet-1' }, errors: undefined })
+    fetchMock.mockResolvedValueOnce({ ok: true, json: async () => ({ status: 'UPDATED' }) })
+
+    await updateVetDetails()
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/auth/update-profile',
+      expect.objectContaining({ body: JSON.stringify({ name: 'Jean Dupont' }) }),
+    )
+    expect(auth.user.attributes.name).toBe('Jean Dupont')
+  })
+
+  it("échec de la synchronisation Cognito : n'empêche PAS la sauvegarde du profil (best-effort)", async () => {
+    const { vetForm, updateVetDetails } = await primeVetAndClinic()
+    vetForm.value.firstname = 'Jean'
+    vetForm.value.lastname = 'Dupont'
+    vetUpdateMock.mockResolvedValueOnce({ data: { id: 'vet-1' }, errors: undefined })
+    fetchMock.mockRejectedValueOnce(new Error('network down'))
+
+    await expect(updateVetDetails()).resolves.toBeUndefined()
+    expect(vetUpdateMock).toHaveBeenCalledTimes(1)
   })
 })
 

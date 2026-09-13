@@ -137,7 +137,7 @@ const toggleMenu = (event) => {
         <div v-if="auth.isAuthenticated" class="flex items-center gap-3">
           <div class="flex flex-col items-end text-right">
             <span class="text-sm font-bold text-zinc-800 dark:text-white leading-none">
-              {{ auth.user?.attributes?.name || auth.user?.username }}
+              {{ auth.user?.attributes?.name || auth.user?.attributes?.email }}
             </span>
             <span class="text-[10px] text-zinc-500 uppercase tracking-wider">
               {{ auth.currentRole === 'vet' ? $t('roles.vet') : $t('roles.owner') }}

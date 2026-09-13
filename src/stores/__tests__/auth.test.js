@@ -85,6 +85,16 @@ describe('login', () => {
     expect(auth.error).toBe('errors.login_failed')
     expect(router.push).not.toHaveBeenCalled()
   })
+
+  it('CONFIRM_SIGN_IN_WITH_NEW_PASSWORD (compte AdminCreateUser, invitation vétérinaire) : redirige vers set-new-password', async () => {
+    fetchMock.mockResolvedValue(jsonResponse(200, { status: 'CONFIRM_SIGN_IN_WITH_NEW_PASSWORD' }))
+
+    const auth = useAuthStore()
+    await auth.login('a@b.com', 'TempPassword123!')
+
+    expect(auth.isAuthenticated).toBe(false)
+    expect(router.push).toHaveBeenCalledWith({ name: 'set-new-password', query: { email: 'a@b.com' } })
+  })
 })
 
 describe('confirmMfaChallenge', () => {
@@ -94,21 +104,56 @@ describe('confirmMfaChallenge', () => {
     )
 
     const auth = useAuthStore()
-    const result = await auth.confirmMfaChallenge('123456')
+    const result = await auth.confirmMfaChallenge('123456', 'a@b.com')
 
     expect(result).toBe(true)
     expect(auth.currentRole).toBe('vet')
     expect(router.push).toHaveBeenCalledWith('/dashboard/requests')
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/auth/confirm-signin',
+      expect.objectContaining({ body: JSON.stringify({ code: '123456', email: 'a@b.com' }) }),
+    )
   })
 
   it('code invalide : renvoie false, error posé', async () => {
     fetchMock.mockResolvedValue(jsonResponse(401, { error: 'MFA_CHALLENGE_FAILED' }))
 
     const auth = useAuthStore()
-    const result = await auth.confirmMfaChallenge('000000')
+    const result = await auth.confirmMfaChallenge('000000', 'a@b.com')
 
     expect(result).toBe(false)
     expect(auth.error).toBe('errors.mfa_challenge_failed')
+  })
+})
+
+describe('confirmNewPasswordChallenge', () => {
+  it('succès : peuple user, redirige, renvoie true', async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse(200, { status: 'SIGNED_IN', user: { sub: 'vet-2', profile: 'vet' } }),
+    )
+
+    const auth = useAuthStore()
+    const result = await auth.confirmNewPasswordChallenge('NewPassword123!', 'collegue@example.com')
+
+    expect(result).toBe(true)
+    expect(auth.currentRole).toBe('vet')
+    expect(router.push).toHaveBeenCalledWith('/dashboard/requests')
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/auth/confirm-new-password',
+      expect.objectContaining({
+        body: JSON.stringify({ newPassword: 'NewPassword123!', email: 'collegue@example.com' }),
+      }),
+    )
+  })
+
+  it('challenge échoué : renvoie false, error posé', async () => {
+    fetchMock.mockResolvedValue(jsonResponse(401, { error: 'NEW_PASSWORD_CHALLENGE_FAILED' }))
+
+    const auth = useAuthStore()
+    const result = await auth.confirmNewPasswordChallenge('weak', 'collegue@example.com')
+
+    expect(result).toBe(false)
+    expect(auth.error).toBe('errors.new_password_challenge_failed')
   })
 })
 
@@ -249,5 +294,25 @@ describe('init', () => {
     await auth.init()
 
     expect(auth.isAuthenticated).toBe(false)
+  })
+})
+
+describe('setUserName', () => {
+  it('met à jour auth.user.attributes.name (reflète /api/auth/update-profile côté en-tête)', async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse(200, { authenticated: true, user: { sub: 'vet-1', name: '', profile: 'vet' } }),
+    )
+    const auth = useAuthStore()
+    await auth.init()
+
+    auth.setUserName('Jean Dupont')
+
+    expect(auth.user.attributes.name).toBe('Jean Dupont')
+  })
+
+  it('sans session active (user null) : ne fait rien, ne plante pas', () => {
+    const auth = useAuthStore()
+    expect(() => auth.setUserName('Jean Dupont')).not.toThrow()
+    expect(auth.user).toBeNull()
   })
 })

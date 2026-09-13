@@ -8,9 +8,10 @@ import StarRating from '@/components/common/StarRating.vue'
 import MfaSettings from '@/components/common/MfaSettings.vue'
 import { useToast } from 'primevue/usetoast'
 import { useClinicSettings } from '@/composables/useClinicSettings'
+import { useClinicVeterinarians } from '@/composables/useClinicVeterinarians'
 import Dialog from 'primevue/dialog'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const showDeleteConfirm = ref(false)
 const toast = useToast()
 
@@ -31,9 +32,23 @@ const {
   deleteAccount,
 } = useClinicSettings()
 
+const {
+  veterinarians,
+  isLoading: isTeamLoading,
+  loadError: teamLoadError,
+  isReferent,
+  isInviting,
+  inviteError,
+  fetchTeam,
+  inviteVeterinarian,
+} = useClinicVeterinarians()
+
+const inviteEmail = ref('')
+
 const tabs = [
   { id: 'general', label: 'dashboard.settings.tabs.general' },
   { id: 'vet_ref', label: 'dashboard.settings.tabs.vet_ref' },
+  { id: 'team', label: 'dashboard.settings.tabs.team' },
   { id: 'reputation', label: 'dashboard.settings.tabs.reputation' },
   { id: 'security', label: 'dashboard.settings.tabs.security' },
 ]
@@ -47,7 +62,21 @@ onMounted(() => {
       life: 3000,
     })
   })
+  fetchTeam()
 })
+
+const onInviteVeterinarian = async () => {
+  const ok = await inviteVeterinarian(inviteEmail.value, locale.value)
+  if (ok) {
+    inviteEmail.value = ''
+    toast.add({
+      severity: 'success',
+      summary: t('common.success'),
+      detail: t('dashboard.settings.team.toasts.invite_sent'),
+      life: 3000,
+    })
+  }
+}
 
 const onAddressSelect = (data) => {
   clinicForm.value.address = data.address
@@ -324,6 +353,81 @@ const onDelete = async () => {
               />
             </div>
           </form>
+
+          <div v-else-if="activeTab === 'team'" class="flex flex-col gap-6 max-w-3xl">
+            <h2
+              class="text-xl font-bold text-zinc-900 dark:text-white mb-4 border-l-4 border-[#ff3b4e] pl-3"
+            >
+              {{ $t('dashboard.settings.tabs.team') }}
+            </h2>
+
+            <div
+              v-if="teamLoadError"
+              role="alert"
+              class="p-4 rounded-lg border border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-900/20 text-sm text-red-700 dark:text-red-400"
+            >
+              {{ $t('dashboard.settings.team.load_error') }}
+            </div>
+
+            <div v-else class="flex flex-col gap-3">
+              <div
+                v-for="colleague in veterinarians"
+                :key="colleague.id"
+                class="flex items-center justify-between gap-3 p-4 bg-zinc-50 dark:bg-zinc-950/50 rounded-lg border border-zinc-200 dark:border-zinc-800"
+              >
+                <div>
+                  <p class="font-bold text-zinc-900 dark:text-white">
+                    {{ colleague.firstname || colleague.lastname
+                      ? `${colleague.firstname} ${colleague.lastname}`.trim()
+                      : colleague.email }}
+                  </p>
+                  <p class="text-xs text-zinc-500 dark:text-zinc-400">{{ colleague.email }}</p>
+                </div>
+                <span
+                  class="text-[10px] font-bold uppercase px-2 py-1 rounded-full whitespace-nowrap"
+                  :class="colleague.isReferent
+                    ? 'bg-[#ff3b4e]/10 text-[#ff3b4e]'
+                    : 'bg-zinc-200 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400'"
+                >
+                  {{ colleague.isReferent
+                    ? $t('dashboard.settings.team.role_referent')
+                    : $t('dashboard.settings.team.role_veterinarian') }}
+                </span>
+              </div>
+
+              <p v-if="!isTeamLoading && veterinarians.length === 0" class="text-sm text-zinc-400 dark:text-zinc-500">
+                {{ $t('dashboard.settings.team.empty') }}
+              </p>
+            </div>
+
+            <form
+              v-if="isReferent"
+              class="flex flex-col gap-3 mt-6 pt-6 border-t border-zinc-200 dark:border-zinc-800"
+              @submit.prevent="onInviteVeterinarian"
+            >
+              <label class="text-xs font-bold text-zinc-500 uppercase">
+                {{ $t('dashboard.settings.team.invite_label') }}
+              </label>
+              <div class="flex flex-col sm:flex-row gap-3">
+                <InputText
+                  v-model="inviteEmail"
+                  type="email"
+                  :placeholder="$t('dashboard.settings.team.invite_placeholder')"
+                  class="flex-grow !bg-zinc-50 dark:!bg-zinc-950 !border-zinc-300 dark:!border-zinc-800 !text-zinc-900 dark:!text-white !p-3 focus:!border-[#ff3b4e]"
+                />
+                <Button
+                  type="submit"
+                  :label="$t('dashboard.settings.team.invite_btn')"
+                  :loading="isInviting"
+                  :disabled="!inviteEmail"
+                  class="!bg-[#ff3b4e] !border-[#ff3b4e] !text-white font-bold px-6 py-3 shadow-lg hover:!bg-[#e63545]"
+                />
+              </div>
+              <small v-if="inviteError" class="text-red-500 text-[10px] font-bold ml-1">
+                {{ $t(inviteError) }}
+              </small>
+            </form>
+          </div>
 
           <div v-else-if="activeTab === 'reputation'" class="flex flex-col gap-6 max-w-3xl">
             <h2

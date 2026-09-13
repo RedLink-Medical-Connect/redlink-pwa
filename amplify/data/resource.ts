@@ -414,6 +414,19 @@ export const schema = a.schema({
       lastname: a.string().required(),
       email: a.string().required(),
 
+      // Invitation d'un vétérinaire par le référent de sa clinique (`amplify/functions/bff/
+      // clinic-routes.ts`) : la ligne est écrite en DIRECT sur DynamoDB dès l'envoi de
+      // l'invitation, AVANT que la collègue n'ait jamais choisi son mot de passe -- sans ce
+      // champ, le sous-onglet "Équipe" (`useClinicVeterinarians.js`) afficherait des comptes
+      // qui n'existent pas encore vraiment côté utilisateur. Posé à `false` par
+      // `clinic-routes.ts` à l'invitation, `true` par la vétérinaire elle-même (via son propre
+      // `allow.owner()`, aucune règle de champ dédiée nécessaire) juste après avoir résolu le
+      // challenge Cognito `NEW_PASSWORD_REQUIRED` (`useClinicVeterinarians.confirmOwnAccount()`,
+      // appelé par `SetNewPasswordView.vue`). Toujours `true` pour un vétérinaire auto-inscrit
+      // (`completeVetRegistration`, `useRegistrationCompletion.js`) : son compte Cognito est
+      // déjà confirmé (email vérifié) au moment où cette ligne est créée.
+      accountConfirmed: a.boolean(),
+
       clinicID: a.id().required(),
       clinic: a.belongsTo('Clinic', 'clinicID'),
 

@@ -88,6 +88,12 @@ const router = createRouter({
       meta: { layout: 'AuthLayout' },
     },
     {
+      path: '/set-new-password',
+      name: 'set-new-password',
+      component: () => import('@/views/auth/SetNewPasswordView.vue'),
+      meta: { layout: 'AuthLayout' },
+    },
+    {
       path: '/forgot-password',
       name: 'forgot-password',
       component: () => import('@/views/auth/ForgotPasswordView.vue'),

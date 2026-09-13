@@ -1,6 +1,7 @@
 import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from 'aws-lambda'
 import * as authRoutes from './auth-routes'
 import type { RouteResult } from './auth-routes'
+import * as clinicRoutes from './clinic-routes'
 import { proxyGraphql } from './graphql-proxy'
 
 /**
@@ -36,6 +37,7 @@ export const handler = async (
   const routes: Record<string, () => Promise<RouteResult>> = {
     'POST /api/auth/signin': () => authRoutes.signIn(body),
     'POST /api/auth/confirm-signin': () => authRoutes.confirmSignIn(body, cookies),
+    'POST /api/auth/confirm-new-password': () => authRoutes.confirmNewPassword(body, cookies),
     'POST /api/auth/signup': () => authRoutes.signUp(body),
     'POST /api/auth/confirm-signup': () => authRoutes.confirmSignUp(body),
     'POST /api/auth/resend-code': () => authRoutes.resendCode(body),
@@ -44,10 +46,12 @@ export const handler = async (
     'GET /api/auth/session': () => authRoutes.getSession(cookies),
     'POST /api/auth/signout': () => authRoutes.signOut(cookies),
     'POST /api/auth/delete-account': () => authRoutes.deleteAccount(cookies),
+    'POST /api/auth/update-profile': () => authRoutes.updateProfile(body, cookies),
     'GET /api/auth/mfa/status': () => authRoutes.getMfaStatus(cookies),
     'POST /api/auth/mfa/setup': () => authRoutes.startMfaSetup(cookies),
     'POST /api/auth/mfa/verify': () => authRoutes.confirmMfaSetup(body, cookies),
     'POST /api/auth/mfa/disable': () => authRoutes.disableMfa(cookies),
+    'POST /api/clinic/veterinarians': () => clinicRoutes.inviteVeterinarian(body, cookies),
   }
 
   const route = routes[`${method} ${path}`]

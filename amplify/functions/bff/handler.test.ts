@@ -2,13 +2,15 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { APIGatewayProxyEventV2 } from 'aws-lambda'
 import { handler } from './handler'
 import * as authRoutes from './auth-routes'
+import * as clinicRoutes from './clinic-routes'
 import { proxyGraphql } from './graphql-proxy'
 
 // Routage pur : chaque route déléguée est mockée, sa propre logique a sa propre couverture
-// (`auth-routes.test.ts`, `graphql-proxy.test.ts`). Ce fichier vérifie seulement que
-// method+path arrive à la bonne fonction, avec le bon body/cookies, et que le contrat de
-// réponse HTTP (statusCode/body/cookies) est bien reconstruit.
+// (`auth-routes.test.ts`, `clinic-routes.test.ts`, `graphql-proxy.test.ts`). Ce fichier
+// vérifie seulement que method+path arrive à la bonne fonction, avec le bon body/cookies, et
+// que le contrat de réponse HTTP (statusCode/body/cookies) est bien reconstruit.
 vi.mock('./auth-routes')
+vi.mock('./clinic-routes')
 vi.mock('./graphql-proxy')
 
 function buildEvent(overrides: Partial<APIGatewayProxyEventV2> = {}): APIGatewayProxyEventV2 {
@@ -74,6 +76,51 @@ describe('handler routing', () => {
     await handler(event)
 
     expect(authRoutes.confirmSignIn).toHaveBeenCalledWith({ code: '123456' }, ['rl_mfa_session=xyz'])
+  })
+
+  it('POST /api/auth/confirm-new-password transmet le body ET les cookies (challenge NEW_PASSWORD_REQUIRED)', async () => {
+    vi.mocked(authRoutes.confirmNewPassword).mockResolvedValue({ statusCode: 200, body: { status: 'SIGNED_IN' } })
+
+    const event = buildEvent({
+      rawPath: '/api/auth/confirm-new-password',
+      body: JSON.stringify({ newPassword: 'NewPassword123!' }),
+      cookies: ['rl_new_password_session=xyz'],
+    })
+
+    await handler(event)
+
+    expect(authRoutes.confirmNewPassword).toHaveBeenCalledWith(
+      { newPassword: 'NewPassword123!' },
+      ['rl_new_password_session=xyz'],
+    )
+  })
+
+  it('POST /api/clinic/veterinarians transmet le body ET les cookies (invitation vétérinaire)', async () => {
+    vi.mocked(clinicRoutes.inviteVeterinarian).mockResolvedValue({ statusCode: 200, body: { status: 'INVITED' } })
+
+    const event = buildEvent({
+      rawPath: '/api/clinic/veterinarians',
+      body: JSON.stringify({ email: 'a@b.com' }),
+      cookies: ['rl_access_token=xyz'],
+    })
+
+    await handler(event)
+
+    expect(clinicRoutes.inviteVeterinarian).toHaveBeenCalledWith({ email: 'a@b.com' }, ['rl_access_token=xyz'])
+  })
+
+  it('POST /api/auth/update-profile transmet le body ET les cookies', async () => {
+    vi.mocked(authRoutes.updateProfile).mockResolvedValue({ statusCode: 200, body: { status: 'UPDATED' } })
+
+    const event = buildEvent({
+      rawPath: '/api/auth/update-profile',
+      body: JSON.stringify({ name: 'Jean Dupont' }),
+      cookies: ['rl_access_token=xyz'],
+    })
+
+    await handler(event)
+
+    expect(authRoutes.updateProfile).toHaveBeenCalledWith({ name: 'Jean Dupont' }, ['rl_access_token=xyz'])
   })
 
   it('GET /api/auth/session route vers getSession avec les cookies, sans body', async () => {

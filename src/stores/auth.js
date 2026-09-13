@@ -57,6 +57,17 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  /**
+   * Reflète immédiatement dans l'en-tête (`AppHeader.vue`) un nom synchronisé côté Cognito via
+   * `/api/auth/update-profile` (`useClinicSettings.updateVetDetails()`/`useOwnerProfile.js`) --
+   * sans ça, il faudrait attendre le prochain `init()`/rechargement pour voir le changement,
+   * alors que la sauvegarde vient de réussir.
+   */
+  function setUserName(name) {
+    if (!user.value) return
+    user.value.attributes.name = name
+  }
+
   async function init() {
     try {
       const response = await fetch('/api/auth/session', { credentials: 'include' })
@@ -97,6 +108,20 @@ export const useAuthStore = defineStore('auth', () => {
     return false
   }
 
+  /**
+   * Compte créé par `AdminCreateUser` (invitation d'un vétérinaire par le référent de sa
+   * clinique, `useClinicVeterinarians.js`) : premier login sur mot de passe temporaire,
+   * Cognito répond `NEW_PASSWORD_REQUIRED` (voir `signIn()`,
+   * `amplify/functions/bff/auth-routes.ts`) au lieu de `SIGNED_IN`.
+   */
+  async function redirectIfNewPasswordRequired(status, email) {
+    if (status === 'CONFIRM_SIGN_IN_WITH_NEW_PASSWORD') {
+      await router.push({ name: 'set-new-password', query: { email } })
+      return true
+    }
+    return false
+  }
+
   async function login(email, password) {
     isLoading.value = true
     error.value = null
@@ -113,6 +138,8 @@ export const useAuthStore = defineStore('auth', () => {
         return
       } else if (await redirectIfMfaRequired(data.status, email)) {
         return
+      } else if (await redirectIfNewPasswordRequired(data.status, email)) {
+        return
       }
     } catch (err) {
       console.error(err)
@@ -122,11 +149,11 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  async function confirmMfaChallenge(code) {
+  async function confirmMfaChallenge(code, email) {
     isLoading.value = true
     error.value = null
     try {
-      const { ok, data } = await bffFetch('/api/auth/confirm-signin', { body: { code } })
+      const { ok, data } = await bffFetch('/api/auth/confirm-signin', { body: { code, email } })
       if (ok && data.status === 'SIGNED_IN') {
         setUserFromSession(data.user)
         await redirectAfterLogin()
@@ -137,6 +164,27 @@ export const useAuthStore = defineStore('auth', () => {
     } catch (err) {
       console.error(err)
       error.value = `errors.mfa_challenge_failed`
+      return false
+    } finally {
+      isLoading.value = false
+    }
+  }
+
+  async function confirmNewPasswordChallenge(newPassword, email) {
+    isLoading.value = true
+    error.value = null
+    try {
+      const { ok, data } = await bffFetch('/api/auth/confirm-new-password', { body: { newPassword, email } })
+      if (ok && data.status === 'SIGNED_IN') {
+        setUserFromSession(data.user)
+        await redirectAfterLogin()
+        return true
+      }
+      error.value = `errors.new_password_challenge_failed`
+      return false
+    } catch (err) {
+      console.error(err)
+      error.value = `errors.new_password_challenge_failed`
       return false
     } finally {
       isLoading.value = false
@@ -286,6 +334,7 @@ export const useAuthStore = defineStore('auth', () => {
     register,
     confirmRegistration,
     confirmMfaChallenge,
+    confirmNewPasswordChallenge,
     logout,
     forgotPass,
     resetPassSubmit,
@@ -294,5 +343,6 @@ export const useAuthStore = defineStore('auth', () => {
     setError,
     clearTempRegistrationData,
     setTempRegistrationData,
+    setUserName,
   }
 })

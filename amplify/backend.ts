@@ -23,6 +23,7 @@ import { postConfirmation } from './functions/post-confirmation/resource'
 import { missionValidationAutoFinalizer } from './functions/mission-validation-auto-finalizer/resource'
 import { ratingAggregation } from './functions/rating-aggregation/resource'
 import { bff } from './functions/bff/resource'
+import { veterinarianAccountAdmin } from './functions/veterinarian-account-admin/resource'
 
 /**
  * Phase 8, sous-tâche 4 (migration Gen1 -> Gen2) : `data` (defineData,
@@ -37,6 +38,7 @@ const backend = defineBackend({
   missionValidationAutoFinalizer,
   ratingAggregation,
   bff,
+  veterinarianAccountAdmin,
 })
 
 // Permission IAM de la Lambda PostConfirmation (scopée à `cognito-idp:AdminAddUserToGroup`
@@ -163,6 +165,7 @@ const animalTable = backend.data.resources.tables['Animal']
 const requestTable = backend.data.resources.tables['Request']
 const clinicTable = backend.data.resources.tables['Clinic']
 const clinicOwnerRelationTable = backend.data.resources.tables['ClinicOwnerRelation']
+const veterinarianTable = backend.data.resources.tables['Veterinarian']
 
 const autoFinalizerLambda = backend.missionValidationAutoFinalizer.resources.lambda
 
@@ -599,13 +602,87 @@ new CfnWebACLAssociation(wafStack, 'AppSyncWebAclAssociation', {
 
 /**
  * BFF Cognito (session cookie HttpOnly) -- voir docs/adr/0021-bff-cognito-session-cloudfront.md
- * pour le design complet. Le Lambda `bff` n'a besoin d'AUCUNE permission IAM sur les tables
- * `data` (il parle à Cognito et AppSync par HTTPS avec un vrai JWT userPool, jamais par accès
- * DynamoDB direct) -- juste des identifiants Cognito (App Client ID) et de l'URL AppSync,
- * injectés en variables d'environnement ci-dessous.
+ * pour le design complet. Pour `/api/auth/*` et `/api/graphql`, le Lambda `bff` ne parle qu'à
+ * Cognito et AppSync par HTTPS avec un vrai JWT userPool, jamais par accès DynamoDB direct --
+ * juste des identifiants Cognito (App Client ID) et de l'URL AppSync, injectés en variables
+ * d'environnement ci-dessous.
+ *
+ * `/api/clinic/veterinarians` (invitation d'un vétérinaire par le référent de sa clinique,
+ * `amplify/functions/bff/clinic-routes.ts`) a besoin d'un accès DynamoDB direct en lecture sur
+ * `Veterinarian`/`Clinic` (vérifier que l'appelant est bien le référent) et en écriture sur
+ * `Veterinarian` (créer la ligne de la collègue invitée, avec SON identité comme `owner` -- voir
+ * le commentaire de `clinic-routes.ts` pour le raisonnement complet sur ce point) : IAM scopée
+ * ci-dessous, même famille que `missionValidationAutoFinalizer`/`ratingAggregation` plus haut.
+ *
+ * Permissions Cognito Admin (`AdminCreateUser`/`AdminAddUserToGroup`/`AdminDeleteUser`) pour
+ * cette même route : PAS accordées à `bff` -- deux tentatives directes ont chacune cassé un
+ * déploiement réel (`ampx sandbox`, 2026-09-13 : `addToRolePolicy` référençant
+ * `userPool.userPoolArn` depuis `bff` fait ressortir un bug CDK/Cognito de sérialisation du
+ * schéma d'attributs sur `CfnUserPool` ; `access()` ciblant `bff` directement ferme un cycle
+ * `auth -> data -> auth`) -- voir `amplify/auth/resource.ts` pour le détail complet des deux
+ * échecs. La solution : une DEUXIÈME Lambda dédiée, `veterinarianAccountAdmin`
+ * (`amplify/functions/veterinarian-account-admin/`), qui porte ces permissions via `access()`
+ * (stack "function" partagée avec `postConfirmation`/`customMessage`, jamais la stack `data`).
+ * `bff` l'invoque ci-dessous via `lambda:InvokeFunction` (`clinic-routes.ts`, `InvokeCommand`)
+ * -- une permission Lambda-vers-Lambda tout à fait ordinaire, sans rapport avec le piège
+ * `CfnUserPool` ci-dessus (aucun problème connu/rencontré à référencer l'ARN d'un AUTRE Lambda
+ * cross-stack, contrairement au User Pool).
  */
+backend.bff.resources.lambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: ['lambda:InvokeFunction'],
+    resources: [backend.veterinarianAccountAdmin.resources.lambda.functionArn],
+  }),
+)
+backend.bff.resources.lambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: ['dynamodb:GetItem'],
+    resources: [veterinarianTable.tableArn, clinicTable.tableArn],
+  }),
+)
+backend.bff.resources.lambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: ['dynamodb:PutItem'],
+    resources: [veterinarianTable.tableArn],
+  }),
+)
+
 backend.bff.addEnvironment('COGNITO_USER_POOL_CLIENT_ID', backend.auth.resources.userPoolClient.userPoolClientId)
+backend.bff.addEnvironment('COGNITO_USER_POOL_ID', backend.auth.resources.userPool.userPoolId)
 backend.bff.addEnvironment('APPSYNC_GRAPHQL_URL', cfnGraphqlApi.attrGraphQlUrl)
+backend.bff.addEnvironment('VETERINARIAN_TABLE_NAME', veterinarianTable.tableName)
+backend.bff.addEnvironment('CLINIC_TABLE_NAME', clinicTable.tableName)
+backend.bff.addEnvironment(
+  'VETERINARIAN_ACCOUNT_ADMIN_FUNCTION_NAME',
+  backend.veterinarianAccountAdmin.resources.lambda.functionName,
+)
+
+/**
+ * `vite-plugins/bff-dev-middleware.js` exécute le VRAI handler `bff` dans le process Vite
+ * pendant `npm run dev` (voir son commentaire de fichier, ADR-0021 §6bis) -- il reconstruit les
+ * variables d'environnement ci-dessus depuis `amplify_outputs.json` (`outputs.auth.*`/
+ * `outputs.data.*`), qui ne contient QUE les catégories `auth`/`data`/`storage`/... connues
+ * d'Amplify, jamais un nom de table DynamoDB ou de fonction Lambda brut. `custom` (déjà utilisé
+ * plus bas pour `bffDistributionDomain`) est le mécanisme prévu pour exactement ce besoin.
+ *
+ * Historique (2026-09-13, pour mémoire seulement -- plus d'actualité) : ce même `addOutput`,
+ * ainsi que `access()` ciblant `veterinarianAccountAdmin` (`amplify/auth/resource.ts`), avaient
+ * chacun temporairement cassé un déploiement réel (`[DeploymentError] ... amplifyAuthUserPool
+ * ... Invalid AttributeDataType input`, puis une policy IAM jamais réellement attachée malgré
+ * un déploiement "réussi"). Diagnostiqué comme de la DÉRIVE CLOUDFORMATION accumulée sur ce
+ * sandbox (jamais mis à jour depuis sa création initiale, des mois plus tôt), pas un problème
+ * de conception : un `ampx sandbox delete` + `ampx sandbox` (sandbox entièrement neuf) a résolu
+ * les deux symptômes d'un coup, confirmé par une vérification IAM directe. Les contournements
+ * correspondants (découverte de ressources à l'exécution, décodage de JWT pour `userPoolId`)
+ * ont été retirés en conséquence.
+ */
+backend.addOutput({
+  custom: {
+    veterinarianTableName: veterinarianTable.tableName,
+    clinicTableName: clinicTable.tableName,
+    veterinarianAccountAdminFunctionName: backend.veterinarianAccountAdmin.resources.lambda.functionName,
+  },
+})
 
 /**
  * Function URL en `authType: AWS_IAM` -- PAS `NONE` : `FunctionUrlOrigin.withOriginAccessControl()`

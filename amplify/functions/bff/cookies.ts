@@ -23,6 +23,11 @@ export const MFA_SESSION_COOKIE = 'rl_mfa_session'
 // Cognito exige aussi un `Session` entre `SignUp` et le challenge `CONFIRM_SIGN_UP` -- non
 // utilisé ici : `ConfirmSignUpCommand` ne prend qu'un `ConfirmationCode` + `Username`, pas de
 // `Session` (contrairement à `RespondToAuthChallengeCommand`). Rien à stocker pour ce flux.
+// Même raisonnement que `MFA_SESSION_COOKIE` ci-dessus, pour le challenge `NEW_PASSWORD_REQUIRED`
+// (compte créé par `AdminCreateUser` -- invitation d'un vétérinaire par le référent de sa
+// clinique, voir `clinic-routes.ts`) : jamais un credential, juste le jeton d'échange Cognito
+// le temps de choisir un mot de passe définitif.
+export const NEW_PASSWORD_SESSION_COOKIE = 'rl_new_password_session'
 
 interface SetCookieOptions {
   maxAgeSeconds: number
