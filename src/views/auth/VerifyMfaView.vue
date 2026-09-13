@@ -24,7 +24,7 @@ onMounted(() => {
 
 const handleVerify = async () => {
   if (code.value.length < 6) return
-  await auth.confirmMfaChallenge(code.value)
+  await auth.confirmMfaChallenge(code.value, email.value)
 }
 </script>
 

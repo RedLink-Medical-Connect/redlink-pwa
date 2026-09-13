@@ -100,6 +100,55 @@ architecturales) et `.cursorrules` (conventions détaillées pour l'éditeur).
   design complet, en particulier le piège vérifié dans le code source installé (`endpoint`
   passé à `generateClient()` désactive le chargement du schéma `.models`) qui a fait
   changer d'approche en cours d'implémentation.
+- **Invitation d'un utilisateur par un autre (compte créé pour un tiers)** : un vétérinaire
+  référent (= `Clinic.owner`, la règle `allow.owner()` déjà existante — déjà le seul autorisé
+  à supprimer sa Clinic, `useClinicSettings.deleteAccount`) invite une collègue par email
+  (`POST /api/clinic/veterinarians`, `amplify/functions/bff/clinic-routes.ts`) :
+  `AdminCreateUserCommand` + `AdminAddUserToGroupCommand('Veterinarians')` côté BFF (permissions
+  IAM `cognito-idp:AdminCreateUser`/`AdminAddUserToGroup`/`AdminDeleteUser`, scopées à
+  `userPoolArn`, posées via l'`access` déclaratif de `defineAuth`
+  (`amplify/auth/resource.ts`) — PAS via `addToRolePolicy` dans `backend.ts` référençant
+  `backend.auth.resources.userPool.userPoolArn`/`.userPoolId` depuis `bff` (stack `data`),
+  essayé en premier et qui **casse un déploiement réel** (`ampx sandbox`,
+  `[DeploymentError] ... amplifyAuthUserPool ... Invalid AttributeDataType input`, 2026-09-13) :
+  la moindre référence croisée de stack vers une propriété de `CfnUserPool` — même un simple
+  `Ref`/`GetAtt`, sans aucun rapport avec son `Schema` — force apparemment CloudFormation à
+  retraiter ce UserPool pour la première fois depuis sa création (jamais mis à jour jusque-là),
+  ce qui fait ressortir un bug de sérialisation du schéma d'attributs (`fullname`/`profilePage`)
+  côté CDK/Amplify. `access()` évite ça : la policy IAM est créée EN LOCAL dans la stack `auth`
+  (référence locale à `userPoolArn`, aucun `Output` cross-stack sur `CfnUserPool` lui-même) —
+  seule la référence au RÔLE de `bff` traverse les stacks, même direction déjà établie
+  (`data -> auth`, comme pour `COGNITO_USER_POOL_CLIENT_ID`), jamais `auth -> data`. Corollaire :
+  `userPoolId` (paramètre requis par les appels `AdminXxxCommand`) n'est PAS injecté en variable
+  d'environnement (même piège) — déduit à l'exécution du claim `iss` de l'access token de
+  l'appelant, déjà validé auprès de Cognito via `GetUserCommand`. Référence pour toute future
+  permission IAM qu'un Lambda de la stack `data` doit obtenir sur une ressource `auth` : passer
+  par `access()` (`auth -> data` pour importer le RÔLE), jamais par un `addToRolePolicy`
+  référençant une propriété du UserPool lui-même (`data -> auth`) — même quand cette direction
+  semble plus sûre sur le papier (pas de cycle), elle a un coût de déploiement réel différent et
+  plus sournois qu'une `CloudformationStackCircularDependencyError` franche.
+  L'email de bienvenue (mot de passe temporaire) réutilise le trigger `CustomMessage` existant
+  (`CustomMessage_AdminCreateUser`, ADR-0022) — aucun nouveau service d'envoi d'email. Point
+  structurel à retenir pour tout futur flux "j'agis pour créer le compte de quelqu'un d'autre" :
+  la ligne `Veterinarian` de la collègue est écrite EN DIRECT sur DynamoDB (bypass AppSync,
+  même famille que "Lambda + accès DynamoDB direct" plus bas), PAS via
+  `client.models.Veterinarian.create()` relayé avec la session du référent — sinon le champ
+  caché `owner` (`allow.owner()`) porterait l'identité du RÉFÉRENT (celui qui appelle l'API),
+  pas celle de la collègue, et elle ne pourrait alors plus jamais modifier son propre profil
+  (`updateVetDetails`, protégé par `allow.owner()` seul). `owner` posé à la main au format
+  `"${sub}::${username}"` (confirmé par le pin test `resource.transform.test.ts`), avec
+  `Username` fixé explicitement à l'email sur `AdminCreateUserCommand` (comme `signUp()` le
+  fait déjà pour l'auto-inscription) pour que ce format soit reproductible. Vérification
+  "l'appelant est bien le référent" faite via un `GetUserCommand` (identité validée AUPRÈS DE
+  COGNITO, jamais un JWT décodé localement, même principe que `tryGetUser()`), jamais un champ
+  envoyé par le client. Rollback best-effort (`AdminDeleteUser`) si une étape après
+  `AdminCreateUser` échoue — sans lui, un compte Cognito authentifiable resterait orphelin
+  (sans ligne `Veterinarian` ni appartenance au groupe), et tout nouvel essai échouerait en
+  boucle sur `UsernameExistsException` sans recours self-service (trouvé en revue
+  devsecops-aws). Premier compte créé pour quelqu'un d'autre plutôt que par la personne
+  elle-même dans ce repo — `signIn()` gère aussi le challenge Cognito `NEW_PASSWORD_REQUIRED`
+  qui en découle (mot de passe temporaire à changer à la première connexion,
+  `RespondToAuthChallengeCommand` non-admin, aucune permission IAM supplémentaire).
 - Geo (Amazon Location Service, place index) : pas de première-classe Gen2
   (pas de `defineGeo()`) — échappatoire CDK dans `amplify/backend.ts`
   (`backend.createStack('geo-stack')`, policy IAM scopée à l'ARN de l'index sur

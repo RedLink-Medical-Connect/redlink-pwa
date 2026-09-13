@@ -272,6 +272,7 @@
     "mfa_verification_failed": "Code invalide. Vérifiez votre application d'authentification et réessayez.",
     "mfa_disable_failed": "Impossible de désactiver la double authentification.",
     "mfa_challenge_failed": "Code invalide ou expiré.",
+    "new_password_challenge_failed": "Impossible de définir ce mot de passe. Réessayez.",
     "owner_profile_missing": "Profil propriétaire introuvable.",
     "auth_required": "Vous devez être connecté.",
     "generic": "Une erreur inattendue est survenue.",
@@ -437,6 +438,12 @@
       "title": "DOUBLE AUTHENTIFICATION",
       "subtitle": "Entrez le code à 6 chiffres de votre application d'authentification",
       "code_label": "CODE",
+      "btn": "VALIDER"
+    },
+    "set_new_password": {
+      "title": "CHOISISSEZ VOTRE MOT DE PASSE",
+      "subtitle": "Vous avez été invité·e à rejoindre une clinique sur Redlink. Choisissez votre mot de passe pour",
+      "label": "NOUVEAU MOT DE PASSE",
       "btn": "VALIDER"
     },
     "forgot": {
@@ -859,11 +866,30 @@
       "tabs": {
         "general": "INFORMATIONS GÉNÉRALES",
         "subscription": "ABONNEMENT",
-        "vet_ref": "VÉTÉRINAIRE RÉFÉRENT",
+        "vet_ref": "MON PROFIL",
+        "team": "ÉQUIPE",
         "notifications": "PRÉFÉRENCES DE NOTIFICATION",
         "activity": "HISTORIQUE D'ACTIVITÉ",
         "reputation": "RÉPUTATION",
         "security": "SÉCURITÉ"
+      },
+      "team": {
+        "load_error": "Impossible de charger l'équipe de la clinique.",
+        "empty": "Aucun vétérinaire dans cette clinique pour le moment.",
+        "role_referent": "Référent",
+        "role_veterinarian": "Vétérinaire",
+        "invite_label": "Inviter un vétérinaire",
+        "invite_placeholder": "email{'@'}exemple.fr",
+        "invite_btn": "Inviter",
+        "toasts": {
+          "invite_sent": "Invitation envoyée par email."
+        },
+        "errors": {
+          "email_already_exists": "Ce compte existe déjà.",
+          "not_referent": "Seul le vétérinaire référent peut inviter un nouveau vétérinaire.",
+          "missing_email": "Veuillez renseigner un email.",
+          "invite_failed": "L'invitation a échoué, veuillez réessayer."
+        }
       },
       "clinic_name": "Nom de la clinique",
       "phone": "Numéro de téléphone",

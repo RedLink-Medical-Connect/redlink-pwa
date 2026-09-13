@@ -44,6 +44,15 @@ interface EmailMessages {
     expiry: string
     ignoreNote: string
   }
+  inviteVeterinarian: {
+    subject: string
+    preheader: string
+    heading: string
+    intro: string
+    usernameLabel: string
+    codeLabel: string
+    expiry: string
+  }
 }
 
 export const emailMessages: Record<EmailLocale, EmailMessages> = {
@@ -76,6 +85,19 @@ export const emailMessages: Record<EmailLocale, EmailMessages> = {
       expiry: 'Ce code expire dans 1 heure.',
       ignoreNote: "Si vous n'êtes pas à l'origine de cette demande, vous pouvez ignorer cet email.",
     },
+    inviteVeterinarian: {
+      subject: 'Vous êtes invité·e à rejoindre une clinique sur Redlink',
+      preheader: 'Votre mot de passe temporaire Redlink',
+      heading: 'Bienvenue sur Redlink',
+      intro:
+        "Le vétérinaire référent de votre clinique vous invite à créer votre compte Redlink. Connectez-vous avec l'identifiant et le mot de passe temporaire ci-dessous, puis choisissez votre propre mot de passe.",
+      usernameLabel: 'Votre identifiant',
+      codeLabel: 'Votre mot de passe temporaire',
+      // Durée par défaut de Cognito pour un mot de passe temporaire `AdminCreateUser`
+      // (`TemporaryPasswordValidityDays`, non surchargé dans `amplify/backend.ts`) -- à
+      // corriger ici si ce réglage est un jour explicité côté `cfnUserPool.policies`.
+      expiry: 'Ce mot de passe temporaire expire sous 7 jours.',
+    },
   },
   en: {
     brandName: 'Redlink',
@@ -100,6 +122,16 @@ export const emailMessages: Record<EmailLocale, EmailMessages> = {
       codeLabel: 'Your reset code',
       expiry: 'This code expires in 1 hour.',
       ignoreNote: "If you didn't request this, you can safely ignore this email.",
+    },
+    inviteVeterinarian: {
+      subject: "You've been invited to join a clinic on Redlink",
+      preheader: 'Your temporary Redlink password',
+      heading: 'Welcome to Redlink',
+      intro:
+        "Your clinic's referring veterinarian has invited you to create your Redlink account. Sign in with the username and temporary password below, then choose your own password.",
+      usernameLabel: 'Your username',
+      codeLabel: 'Your temporary password',
+      expiry: 'This temporary password expires in 7 days.',
     },
   },
 }

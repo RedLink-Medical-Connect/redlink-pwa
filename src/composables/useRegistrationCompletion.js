@@ -210,6 +210,10 @@ export function useRegistrationCompletion() {
       firstname: data.firstname,
       lastname: data.lastname,
       email: data.email,
+      // Toujours `true` pour l'auto-inscription (contrairement à l'invitation d'un collègue,
+      // `clinic-routes.ts`) : le compte Cognito est déjà confirmé (email vérifié) à cette
+      // étape -- voir le commentaire du champ dans `amplify/data/resource.ts`.
+      accountConfirmed: true,
     })
 
     throwIfGraphqlError(vetErrors, 'createVeterinarian')

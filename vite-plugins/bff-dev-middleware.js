@@ -38,6 +38,12 @@ import { readFileSync } from 'node:fs'
  *
  * `apply: 'serve'` : ce plugin n'existe QUE pour le serveur de dev -- jamais dans un bundle de
  * production (`npm run build`), où CloudFront + le vrai Lambda prennent le relais.
+ *
+ * `/api/clinic/veterinarians` (invitation d'un vétérinaire, `clinic-routes.ts`) a besoin de
+ * trois noms de ressources bruts (deux tables DynamoDB, une fonction Lambda) qu'`amplify_
+ * outputs.json` n'expose dans aucune catégorie connue (`auth`/`data`/...) -- posés côté
+ * `backend.addOutput({ custom: {...} })` (`amplify/backend.ts`, même mécanisme déjà utilisé
+ * pour `bffDistributionDomain`) précisément pour ce besoin, lisibles ici sous `outputs.custom`.
  */
 export function bffDevMiddleware() {
   return {
@@ -45,6 +51,14 @@ export function bffDevMiddleware() {
     apply: 'serve',
 
     configureServer(server) {
+      // `apply: 'serve'` ne suffit pas à exclure Vitest : `vitest.config.js` fusionne
+      // `vite.config.js` (`mergeConfig`), et Vitest démarre son PROPRE serveur Vite en mode
+      // "serve" pour sa pipeline de transformation -- ce hook s'exécuterait donc aussi à
+      // chaque `npx vitest run` sans ce garde-fou. `process.env.VITEST` est posée par Vitest
+      // lui-même sur son propre process (et ceux qu'il lance) -- seul signal fiable pour
+      // distinguer les deux, `apply`/`command`/`mode` ne le permettent pas ici.
+      if (process.env.VITEST) return
+
       let outputs
       try {
         outputs = JSON.parse(
@@ -69,8 +83,12 @@ export function bffDevMiddleware() {
       // local elle DOIT venir de la région réelle du user pool, pas d'une variable d'ambiance
       // de la machine qui pointerait ailleurs (le client SDK interrogerait un autre compte).
       process.env.COGNITO_USER_POOL_CLIENT_ID = outputs.auth.user_pool_client_id
+      process.env.COGNITO_USER_POOL_ID = outputs.auth.user_pool_id
       process.env.APPSYNC_GRAPHQL_URL = outputs.data.url
       process.env.AWS_REGION = outputs.auth.aws_region
+      process.env.VETERINARIAN_TABLE_NAME = outputs.custom?.veterinarianTableName
+      process.env.CLINIC_TABLE_NAME = outputs.custom?.clinicTableName
+      process.env.VETERINARIAN_ACCOUNT_ADMIN_FUNCTION_NAME = outputs.custom?.veterinarianAccountAdminFunctionName
 
       server.middlewares.use(async (req, res, next) => {
         // Middleware NON monté sur un préfixe (`server.middlewares.use(fn)`, pas

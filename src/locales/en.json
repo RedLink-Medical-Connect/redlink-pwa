@@ -272,6 +272,7 @@
     "mfa_verification_failed": "Invalid code. Check your authenticator app and try again.",
     "mfa_disable_failed": "Unable to disable two-factor authentication.",
     "mfa_challenge_failed": "Invalid or expired code.",
+    "new_password_challenge_failed": "Unable to set this password. Please try again.",
     "owner_profile_missing": "Owner profile not found.",
     "auth_required": "You must be logged in.",
     "generic": "An unexpected error occurred.",
@@ -457,6 +458,12 @@
       "subtitle": "Enter the 6-digit code from your authenticator app",
       "code_label": "CODE",
       "btn": "VERIFY"
+    },
+    "set_new_password": {
+      "title": "CHOOSE YOUR PASSWORD",
+      "subtitle": "You've been invited to join a clinic on Redlink. Choose your password for",
+      "label": "NEW PASSWORD",
+      "btn": "CONFIRM"
     },
     "forgot": {
       "title": "FORGOT PASSWORD",
@@ -859,11 +866,30 @@
       "tabs": {
         "general": "GENERAL INFORMATION",
         "subscription": "SUBSCRIPTION",
-        "vet_ref": "REFERRING VETERINARIAN",
+        "vet_ref": "MY PROFILE",
+        "team": "TEAM",
         "notifications": "NOTIFICATION PREFERENCES",
         "activity": "ACTIVITY HISTORY",
         "reputation": "REPUTATION",
         "security": "SECURITY"
+      },
+      "team": {
+        "load_error": "Unable to load the clinic's team.",
+        "empty": "No veterinarian in this clinic yet.",
+        "role_referent": "Referring vet",
+        "role_veterinarian": "Veterinarian",
+        "invite_label": "Invite a veterinarian",
+        "invite_placeholder": "email{'@'}example.com",
+        "invite_btn": "Invite",
+        "toasts": {
+          "invite_sent": "Invitation sent by email."
+        },
+        "errors": {
+          "email_already_exists": "This account already exists.",
+          "not_referent": "Only the referring veterinarian can invite a new veterinarian.",
+          "missing_email": "Please enter an email address.",
+          "invite_failed": "The invitation failed, please try again."
+        }
       },
       "clinic_name": "Clinic name",
       "phone": "Phone number",

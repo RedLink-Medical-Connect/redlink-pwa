@@ -72,6 +72,7 @@ vi.mock('@/router', () => ({
 }))
 
 import { useOwnerProfile } from '@/composables/useOwnerProfile'
+import { useAuthStore } from '@/stores/auth'
 
 const buildProfile = (overrides = {}) => ({
   id: 'owner-1',
@@ -240,5 +241,50 @@ describe('useOwnerProfile.deleteAccount', () => {
     // remonter -- contrairement à un échec de nettoyage DB (voir le test précédent).
     expect(deleteUserMock).toHaveBeenCalledTimes(1)
     expect(isSaving.value).toBe(false)
+  })
+})
+
+describe('useOwnerProfile.updateProfile', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    resetAllMocks()
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+  })
+
+  const primeProfile = async () => {
+    ownerGetMock.mockResolvedValueOnce({ data: buildProfile(), errors: undefined })
+    const composable = useOwnerProfile()
+    await composable.fetchProfile()
+    return composable
+  }
+
+  it("succès : synchronise le nom Cognito (`/api/auth/update-profile`) puis le store, best-effort (même correctif que useClinicSettings.updateVetDetails)", async () => {
+    const auth = useAuthStore()
+    auth.user = { username: 'owner-1', userId: 'owner-1', attributes: { email: 'jean.dupont@example.com', name: '', profile: 'owner' } }
+
+    const { form, updateProfile } = await primeProfile()
+    form.value.firstname = 'Jean'
+    form.value.lastname = 'Dupont'
+    ownerUpdateMock.mockResolvedValueOnce({ data: { id: 'owner-1' }, errors: undefined })
+    fetchMock.mockResolvedValueOnce({ ok: true, json: async () => ({ status: 'UPDATED' }) })
+
+    await updateProfile()
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/auth/update-profile',
+      expect.objectContaining({ body: JSON.stringify({ name: 'Jean Dupont' }) }),
+    )
+    expect(auth.user.attributes.name).toBe('Jean Dupont')
+  })
+
+  it("échec de la synchronisation Cognito : n'empêche PAS la sauvegarde du profil (best-effort)", async () => {
+    const { form, updateProfile } = await primeProfile()
+    form.value.firstname = 'Jean'
+    form.value.lastname = 'Dupont'
+    ownerUpdateMock.mockResolvedValueOnce({ data: { id: 'owner-1' }, errors: undefined })
+    fetchMock.mockRejectedValueOnce(new Error('network down'))
+
+    await expect(updateProfile()).resolves.toBeUndefined()
+    expect(ownerUpdateMock).toHaveBeenCalledTimes(1)
   })
 })

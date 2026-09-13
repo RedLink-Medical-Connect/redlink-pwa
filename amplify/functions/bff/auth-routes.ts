@@ -13,6 +13,7 @@ import {
   AssociateSoftwareTokenCommand,
   VerifySoftwareTokenCommand,
   SetUserMFAPreferenceCommand,
+  UpdateUserAttributesCommand,
   type AuthenticationResultType,
 } from '@aws-sdk/client-cognito-identity-provider'
 import {
@@ -20,6 +21,7 @@ import {
   ACCESS_TOKEN_COOKIE,
   REFRESH_TOKEN_COOKIE,
   MFA_SESSION_COOKIE,
+  NEW_PASSWORD_SESSION_COOKIE,
   buildSetCookie,
   clearCookie,
   readCookie,
@@ -45,6 +47,7 @@ export interface RouteResult {
 const REFRESH_TOKEN_MAX_AGE_SECONDS = 7 * 24 * 60 * 60 // 7 jours, aligné sur cfnUserPoolClient.refreshTokenValidity
 const SESSION_TOKEN_MAX_AGE_SECONDS = 15 * 60 // 15 min, aligné sur accessTokenValidity/idTokenValidity
 const MFA_SESSION_MAX_AGE_SECONDS = 5 * 60 // le temps de saisir un code TOTP, pas plus
+const NEW_PASSWORD_SESSION_MAX_AGE_SECONDS = 10 * 60 // le temps de choisir un mot de passe, pas plus
 
 function getClient() {
   return new CognitoIdentityProviderClient({ region: process.env.AWS_REGION })
@@ -138,6 +141,22 @@ export async function signIn(body: { email?: string; password?: string }): Promi
       }
     }
 
+    if (result.ChallengeName === 'NEW_PASSWORD_REQUIRED') {
+      // Compte créé par `AdminCreateUserCommand` (invitation d'un vétérinaire par le référent
+      // de sa clinique, voir `clinic-routes.ts`) : Cognito le place en `FORCE_CHANGE_PASSWORD`,
+      // le mot de passe temporaire reçu par email ne peut servir qu'une fois. Même mécanique
+      // d'échange que le challenge MFA ci-dessus (`Session` opaque, pas un credential).
+      return {
+        statusCode: 200,
+        body: { status: 'CONFIRM_SIGN_IN_WITH_NEW_PASSWORD' },
+        setCookies: [
+          buildSetCookie(NEW_PASSWORD_SESSION_COOKIE, result.Session!, {
+            maxAgeSeconds: NEW_PASSWORD_SESSION_MAX_AGE_SECONDS,
+          }),
+        ],
+      }
+    }
+
     if (!result.AuthenticationResult) {
       return { statusCode: 500, body: { error: 'UNEXPECTED_CHALLENGE', challenge: result.ChallengeName } }
     }
@@ -157,12 +176,19 @@ export async function signIn(body: { email?: string; password?: string }): Promi
   }
 }
 
+/**
+ * `USERNAME` : `body.email` transmis par le frontend (`VerifyMfaView.vue` le connaît déjà,
+ * porté dans l'URL depuis `signIn()`), PAS extrait de `session` -- même bug que celui corrigé
+ * sur `confirmNewPassword` (2026-09-13) : le `Session` Cognito n'est pas garanti être un JWT
+ * décodable (`readUsernameFromChallengeSession`, qui le supposait, a été retirée -- plus aucun
+ * appelant après ce correctif).
+ */
 export async function confirmSignIn(
-  body: { code?: string },
+  body: { code?: string; email?: string },
   cookies: string[] | undefined,
 ): Promise<RouteResult> {
   const session = readCookie(cookies, MFA_SESSION_COOKIE)
-  if (!body.code || !session) {
+  if (!body.code || !body.email || !session) {
     return { statusCode: 400, body: { error: 'MISSING_MFA_CHALLENGE' } }
   }
 
@@ -172,7 +198,7 @@ export async function confirmSignIn(
         ClientId: getClientId(),
         ChallengeName: 'SOFTWARE_TOKEN_MFA',
         Session: session,
-        ChallengeResponses: { USERNAME: readUsernameFromMfaSession(session), SOFTWARE_TOKEN_MFA_CODE: body.code },
+        ChallengeResponses: { USERNAME: body.email, SOFTWARE_TOKEN_MFA_CODE: body.code },
       }),
     )
 
@@ -192,16 +218,59 @@ export async function confirmSignIn(
 }
 
 /**
- * `RespondToAuthChallengeCommand` exige `USERNAME` dans `ChallengeResponses` -- Cognito ne le
- * redérive pas depuis le `Session` opaque. On ne le stocke PAS séparément (un cookie de plus à
- * gérer) : le `Session` lui-même est un JWT signé par Cognito dont le payload porte déjà le
- * username, lisible sans vérification pour la même raison que `decodeIdTokenClaims` (Cognito
- * vérifie sa propre signature au prochain appel `RespondToAuthChallenge` -- une valeur falsifiée
- * ferait simplement échouer ce prochain appel, jamais une usurpation réussie).
+ * Réponse au challenge `NEW_PASSWORD_REQUIRED` -- uniquement atteint aujourd'hui par un compte
+ * créé via `AdminCreateUserCommand` (invitation d'un vétérinaire, `clinic-routes.ts`), voir la
+ * branche correspondante dans `signIn()` ci-dessus. `RespondToAuthChallengeCommand` (variante
+ * NON-admin, comme le challenge MFA) : aucune permission IAM supplémentaire requise sur le rôle
+ * de ce Lambda, contrairement à `AdminCreateUser`/`AdminAddUserToGroup`.
+ *
+ * `USERNAME` : `body.email` transmis par le frontend (`SetNewPasswordView.vue` le connaît déjà,
+ * porté dans l'URL depuis `signIn()`), PAS extrait de `session` -- bug réel rencontré
+ * (2026-09-13) : le code supposait à tort que le `Session` Cognito est un JWT signé (3
+ * segments, `header.payload.signature`) ; en pratique, le `Session` renvoyé par Cognito pour CE
+ * challenge n'a pas cette forme (`decodeIdTokenClaims` plantait sur `Buffer.from(undefined,
+ * ...)`, confirmé par un vrai test contre Cognito -- probablement chiffré/JWE comme le refresh
+ * token, jamais un JWS en clair). `signIn()` connaît déjà l'email au moment de créer la Session
+ * (c'est `AuthParameters.USERNAME` de l'`InitiateAuthCommand` d'origine) -- le renvoyer
+ * explicitement évite d'avoir à le redériver d'une valeur opaque dont le format n'est pas
+ * garanti. Même correctif appliqué à `confirmSignIn`/MFA ci-dessus (même bug latent, jamais
+ * déclenché en conditions réelles avant cette découverte).
  */
-function readUsernameFromMfaSession(session: string): string {
-  const claims = decodeIdTokenClaims(session)
-  return (claims.username as string) ?? (claims['cognito:username'] as string)
+export async function confirmNewPassword(
+  body: { newPassword?: string; email?: string },
+  cookies: string[] | undefined,
+): Promise<RouteResult> {
+  const session = readCookie(cookies, NEW_PASSWORD_SESSION_COOKIE)
+  if (!body.newPassword || !body.email || !session) {
+    return { statusCode: 400, body: { error: 'MISSING_NEW_PASSWORD_CHALLENGE' } }
+  }
+
+  try {
+    const result = await getClient().send(
+      new RespondToAuthChallengeCommand({
+        ClientId: getClientId(),
+        ChallengeName: 'NEW_PASSWORD_REQUIRED',
+        Session: session,
+        ChallengeResponses: {
+          USERNAME: body.email,
+          NEW_PASSWORD: body.newPassword,
+        },
+      }),
+    )
+
+    if (!result.AuthenticationResult) {
+      return { statusCode: 401, body: { error: 'NEW_PASSWORD_CHALLENGE_FAILED' } }
+    }
+
+    return {
+      statusCode: 200,
+      body: { status: 'SIGNED_IN', user: userFromIdToken(result.AuthenticationResult.IdToken!) },
+      setCookies: [...sessionCookiesFor(result.AuthenticationResult), clearCookie(NEW_PASSWORD_SESSION_COOKIE)],
+    }
+  } catch (err) {
+    console.error('confirmNewPassword error:', err)
+    return { statusCode: 400, body: { error: 'NEW_PASSWORD_CHALLENGE_FAILED' } }
+  }
 }
 
 export async function signUp(body: {
@@ -448,6 +517,42 @@ export async function deleteAccount(cookies: string[] | undefined): Promise<Rout
  */
 function requireAccessToken(cookies: string[] | undefined): string | null {
   return readCookie(cookies, ACCESS_TOKEN_COOKIE) ?? null
+}
+
+/**
+ * Synchronise le claim Cognito `name` (celui que `AppHeader.vue` affiche, `auth.user.attributes.
+ * name`) avec le profil réel -- `useClinicSettings.updateVetDetails()`/`useOwnerProfile.js`
+ * l'appellent en écriture secondaire best-effort après avoir sauvegardé `firstname`/`lastname`
+ * dans DynamoDB (CLAUDE.md, "écriture secondaire best-effort" -- un échec ici ne doit jamais
+ * faire échouer la sauvegarde du profil elle-même). Bug réel corrigé (2026-09-13) : ce claim
+ * n'était JAMAIS mis à jour après la création initiale du compte -- absent pour un compte créé
+ * via `AdminCreateUser` (invitation, `clinic-routes.ts`, aucun `name` connu à cet instant), et
+ * silencieusement périmé pour un compte auto-inscrit dès que `firstname`/`lastname` étaient
+ * modifiés depuis Réglages -- l'en-tête retombait sur `auth.user.username` (le `sub` Cognito,
+ * un UUID brut) faute de mieux. `UpdateUserAttributesCommand` (self-service, PAS
+ * `AdminUpdateUserAttributes`) : authentifié par l'access token de l'appelant lui-même, aucune
+ * permission IAM supplémentaire requise sur le rôle de ce Lambda.
+ */
+export async function updateProfile(
+  body: { name?: string },
+  cookies: string[] | undefined,
+): Promise<RouteResult> {
+  const accessToken = requireAccessToken(cookies)
+  if (!accessToken) return { statusCode: 401, body: { error: 'NOT_AUTHENTICATED' } }
+  if (!body.name) return { statusCode: 400, body: { error: 'MISSING_NAME' } }
+
+  try {
+    await getClient().send(
+      new UpdateUserAttributesCommand({
+        AccessToken: accessToken,
+        UserAttributes: [{ Name: 'name', Value: body.name }],
+      }),
+    )
+    return { statusCode: 200, body: { status: 'UPDATED' } }
+  } catch (err) {
+    console.error('updateProfile error:', err)
+    return { statusCode: 400, body: { error: 'UPDATE_PROFILE_FAILED' } }
+  }
 }
 
 export async function getMfaStatus(cookies: string[] | undefined): Promise<RouteResult> {

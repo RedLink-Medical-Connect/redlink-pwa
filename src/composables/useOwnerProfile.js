@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { generateClient } from '@/services/bff-graphql-client'
 import { deleteUser, getCurrentUser } from '@/services/bff-auth-session'
+import { bffFetch } from '@/services/bff-fetch'
 import { useAuthStore } from '@/stores/auth'
 import { useRouter } from 'vue-router'
 import { throwIfGraphqlError } from '@/services/graphql-error-service'
@@ -130,6 +131,18 @@ export function useOwnerProfile() {
       const { errors } = await client.models.Owner.update(input)
 
       throwIfGraphqlError(errors, 'updateOwner')
+
+      // Écriture secondaire best-effort (convention CLAUDE.md, même correctif que
+      // `useClinicSettings.updateVetDetails()` pour les vétérinaires) : synchronise le claim
+      // Cognito `name` que l'en-tête affiche (`AppHeader.vue`) -- un échec ici ne doit jamais
+      // faire échouer la sauvegarde du profil elle-même, déjà réussie à cet instant.
+      try {
+        const name = `${form.value.firstname} ${form.value.lastname}`.trim()
+        const { ok } = await bffFetch('/api/auth/update-profile', { body: { name } })
+        if (ok) auth.setUserName(name)
+      } catch (nameError) {
+        console.error('Erreur synchronisation du nom affiché (best-effort) :', nameError)
+      }
     } finally {
       isSaving.value = false
     }
