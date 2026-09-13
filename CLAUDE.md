@@ -95,11 +95,33 @@ architecturales) et `.cursorrules` (conventions détaillées pour l'éditeur).
   oublié/MFA TOTP — `USER_PASSWORD_AUTH`, pas de réimplémentation SRP), relais GraphQL
   BRUT pour `/api/graphql` (le client `.models.X` construit le document GraphQL exactement
   comme avant, seul le header `Authorization` est substitué en vol). CloudFront devant SPA
-  (Amplify Hosting) et BFF (Lambda Function URL + OAC) pour rester same-origin — nécessaire
-  pour que `SameSite=Strict` fonctionne sans domaine personnalisé. Voir ADR-0021 pour le
-  design complet, en particulier le piège vérifié dans le code source installé (`endpoint`
-  passé à `generateClient()` désactive le chargement du schéma `.models`) qui a fait
-  changer d'approche en cours d'implémentation.
+  (Amplify Hosting) et BFF (Lambda Function URL) pour rester same-origin — nécessaire pour
+  que `SameSite=Strict` fonctionne sans domaine personnalisé. Voir ADR-0021 pour le design
+  complet, en particulier le piège vérifié dans le code source installé (`endpoint` passé à
+  `generateClient()` désactive le chargement du schéma `.models`) qui a fait changer
+  d'approche en cours d'implémentation.
+- **Protection du Lambda Function URL du BFF — PAS OAC/`authType: AWS_IAM`** : confirmé en
+  déploiement réel (2026-09-13, `main`) qu'OAC (CloudFront Origin Access Control) pour une
+  origine Lambda Function URL ne sait signer correctement que les requêtes SANS corps
+  (GET/HEAD) — pour POST/PUT (la quasi-totalité des routes `/api/auth/*`/`/api/clinic/*`),
+  OAC exige que le CLIENT calcule lui-même `x-amz-content-sha256`/une signature SigV4, ce
+  qu'un `fetch()` de navigateur ne fait jamais. Symptôme observé : `403 SignatureDoesNotMatch`
+  sur `POST /api/auth/signup` via CloudFront, alors qu'un `GET /api/auth/session` (sans corps)
+  passait — limitation documentée d'AWS (`docs.aws.amazon.com/AmazonCloudFront`,
+  private-content-restricting-access-to-lambda, "Lambda doesn't support unsigned payloads"),
+  pas une mauvaise configuration. `amplify/backend.ts` utilise à la place le pattern "header
+  secret partagé" que la doc AWS recommande elle-même quand OAC ne convient pas : Function URL
+  en `authType: NONE`, un secret généré par Secrets Manager (jamais en clair dans le dépôt ni
+  le template synthétisé, `Secret.secretValue.unsafeUnwrap()`) posé à la fois comme *origin
+  custom header* CloudFront (`ORIGIN_VERIFY_HEADER`, `amplify/functions/bff/origin-verify.ts`)
+  et comme variable d'environnement du Lambda (`ORIGIN_VERIFY_SECRET`) ; `handler.ts` rejette
+  (403) toute requête où les deux ne correspondent pas, désactivé si `ORIGIN_VERIFY_SECRET`
+  est absent (local `ampx sandbox`/`npm run dev`, pas de CloudFront devant). `origin-verify.ts`
+  est un fichier à part, sans aucun import de `@aws-amplify/backend` : `handler.ts` ne peut pas
+  importer depuis `resource.ts` (`defineFunction`) sans casser Vitest/l'esbuild du Lambda —
+  référence pour toute future constante partagée entre `backend.ts` et un handler. Référence
+  pour toute future protection d'une origine Lambda Function URL derrière CloudFront : header
+  secret partagé par défaut, OAC réservé aux origines qui ne reçoivent que GET/HEAD.
 - **Invitation d'un utilisateur par un autre (compte créé pour un tiers)** : un vétérinaire
   référent (= `Clinic.owner`, la règle `allow.owner()` déjà existante — déjà le seul autorisé
   à supprimer sa Clinic, `useClinicSettings.deleteAccount`) invite une collègue par email

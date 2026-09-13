@@ -1,6 +1,7 @@
 import { defineBackend } from '@aws-amplify/backend'
 import { Duration, Names, Stack } from 'aws-cdk-lib'
-import { Policy, PolicyStatement, ServicePrincipal } from 'aws-cdk-lib/aws-iam'
+import { Policy, PolicyStatement } from 'aws-cdk-lib/aws-iam'
+import { Secret } from 'aws-cdk-lib/aws-secretsmanager'
 import { FilterCriteria, FilterRule, FunctionUrlAuthType, StartingPosition } from 'aws-cdk-lib/aws-lambda'
 import { DynamoEventSource } from 'aws-cdk-lib/aws-lambda-event-sources'
 import { AwsCustomResource, AwsCustomResourcePolicy, PhysicalResourceId } from 'aws-cdk-lib/custom-resources'
@@ -23,6 +24,7 @@ import { postConfirmation } from './functions/post-confirmation/resource'
 import { missionValidationAutoFinalizer } from './functions/mission-validation-auto-finalizer/resource'
 import { ratingAggregation } from './functions/rating-aggregation/resource'
 import { bff } from './functions/bff/resource'
+import { ORIGIN_VERIFY_HEADER } from './functions/bff/origin-verify'
 import { veterinarianAccountAdmin } from './functions/veterinarian-account-admin/resource'
 
 /**
@@ -685,17 +687,23 @@ backend.addOutput({
 })
 
 /**
- * Function URL en `authType: AWS_IAM` -- PAS `NONE` : `FunctionUrlOrigin.withOriginAccessControl()`
- * ci-dessous (vérifié dans les types installés, `aws-cdk-lib/aws-cloudfront-origins` 2.265.0,
- * `FunctionUrlOrigin.withOriginAccessControl` existe bel et bien -- contrairement à une première
- * hypothèse non vérifiée de cette sous-tâche) ne protège RIEN si `authType` reste `NONE` : OAC
- * fait signer les requêtes par CloudFront (SigV4), mais seul `AWS_IAM` fait que le Lambda exige
- * cette signature. Le grant explicite ci-dessous (`addPermission`, scopé à l'ARN de CETTE
- * distribution) est nécessaire en plus : le L2 `withOriginAccessControl` crée l'OAC côté
- * CloudFront mais n'ajoute PAS lui-même la policy de ressource côté Lambda qui l'autorise.
+ * Function URL en `authType: NONE` -- PAS `AWS_IAM`/OAC. Abandonné (2026-09-13, confirmé en
+ * déploiement réel) : OAC pour une origine Lambda Function URL ne sait signer correctement que
+ * les requêtes SANS corps (GET/HEAD) -- pour POST/PUT (la quasi-totalité des routes de ce
+ * handler), OAC exige que le CLIENT fournisse lui-même un `x-amz-content-sha256`/une signature
+ * SigV4, ce qu'un `fetch()` de navigateur ne fait jamais (et n'est pas raisonnablement
+ * faisable côté front). Symptôme observé : `403 SignatureDoesNotMatch` sur
+ * `POST /api/auth/signup` via CloudFront, alors qu'un `GET /api/auth/session` (sans corps)
+ * passait. Limitation documentée d'AWS, pas une mauvaise config -- voir
+ * docs.aws.amazon.com/AmazonCloudFront (private-content-restricting-access-to-lambda, "Lambda
+ * doesn't support unsigned payloads") et
+ * https://advancedweb.hu/shorts/cloudfront-supports-oac-for-lambda-except-it-does-not/.
+ * Remplacé par le pattern "header secret partagé" ci-dessous (`bffOriginVerifySecret`) -- voir
+ * le commentaire sur `ORIGIN_VERIFY_HEADER` (`amplify/functions/bff/resource.ts`) pour le
+ * détail du mécanisme et pourquoi il n'a pas cette limitation.
  */
 const bffFunctionUrl = backend.bff.resources.lambda.addFunctionUrl({
-  authType: FunctionUrlAuthType.AWS_IAM,
+  authType: FunctionUrlAuthType.NONE,
 })
 
 /**
@@ -727,6 +735,23 @@ if (hostingAppId && hostingBranch) {
     headerBehavior: OriginRequestHeaderBehavior.allowList('Content-Type'),
   })
 
+  /**
+   * Valeur générée par CloudFormation/Secrets Manager -- jamais en clair ni dans ce dépôt ni
+   * dans le template synthétisé (voir `SecretProps.secretString` dans `aws-cdk-lib`, qui
+   * déconseille explicitement de fournir une valeur littérale ici). `excludePunctuation`/
+   * `includeSpace: false` : doit rester une valeur de header HTTP valide sans échappement.
+   * `.secretValue.unsafeUnwrap()` (utilisé deux fois ci-dessous, sur le custom header ET sur
+   * la variable d'environnement du Lambda) est l'échappatoire CDK prévue pour ce cas précis --
+   * la valeur devient une référence dynamique CloudFormation (`{{resolve:secretsmanager:...}}`)
+   * dans les deux propriétés, jamais une valeur littérale dans le template.
+   */
+  const bffOriginVerifySecret = new Secret(backend.bff.stack, 'BffOriginVerifySecret', {
+    generateSecretString: {
+      excludePunctuation: true,
+      includeSpace: false,
+    },
+  })
+
   const distribution = new Distribution(backend.bff.stack, 'BffDistribution', {
     comment: 'redlink-pwa : SPA (Amplify Hosting) + BFF Cognito (Lambda), same-origin pour les cookies SameSite=Strict',
     defaultBehavior: {
@@ -736,7 +761,15 @@ if (hostingAppId && hostingBranch) {
     },
     additionalBehaviors: {
       '/api/*': {
-        origin: FunctionUrlOrigin.withOriginAccessControl(bffFunctionUrl),
+        // PAS `FunctionUrlOrigin.withOriginAccessControl()` -- voir le commentaire sur
+        // `bffFunctionUrl` plus haut (limitation OAC documentée sur POST/PUT). `customHeaders`
+        // est attaché par CloudFront à CHAQUE requête envoyée à cette origine, quelle que soit
+        // la méthode HTTP -- `handler.ts` le vérifie.
+        origin: new FunctionUrlOrigin(bffFunctionUrl, {
+          customHeaders: {
+            [ORIGIN_VERIFY_HEADER]: bffOriginVerifySecret.secretValue.unsafeUnwrap(),
+          },
+        }),
         viewerProtocolPolicy: ViewerProtocolPolicy.HTTPS_ONLY,
         // JAMAIS de cache sur les routes d'auth/session -- une réponse mise en cache
         // servirait la session d'un autre visiteur.
@@ -748,37 +781,9 @@ if (hostingAppId && hostingBranch) {
     },
   })
 
-  // Grant explicite (voir commentaire sur `bffFunctionUrl` ci-dessus) : `withOriginAccessControl`
-  // crée l'OAC côté CloudFront mais n'ajoute pas la policy de ressource côté Lambda -- scopé à
-  // l'ARN de CETTE distribution précisément (jamais un wildcard, même discipline IAM que le
-  // reste de ce fichier, voir ADR-0008/0012/0013/0016).
-  backend.bff.resources.lambda.addPermission('AllowCloudFrontInvoke', {
-    principal: new ServicePrincipal('cloudfront.amazonaws.com'),
-    action: 'lambda:InvokeFunctionUrl',
-    sourceArn: `arn:aws:cloudfront::${Stack.of(distribution).account}:distribution/${distribution.distributionId}`,
-  })
-
-  /**
-   * Deuxième grant, en plus de `AllowCloudFrontInvoke` ci-dessus -- confirmé manquant en
-   * déploiement réel (2026-09-13, `main`) : OAC pour un Lambda Function URL renvoie un 403
-   * `AccessDeniedException` (`x-amzn-errortype`), sans jamais atteindre le code du handler
-   * (aucune invocation, aucun log group CloudWatch créé), tant que `cloudfront.amazonaws.com`
-   * n'a QUE `lambda:InvokeFunctionUrl` -- la doc AWS de référence pour cette combinaison exige
-   * les DEUX actions (`lambda:InvokeFunctionUrl` ET `lambda:InvokeFunction`, même principal,
-   * même condition `SourceArn`), voir « Grant CloudFront permission to access the Lambda
-   * function URL » (docs.aws.amazon.com/AmazonCloudFront, private-content-restricting-access-
-   * to-lambda). Ni le grant explicite ci-dessus ni le grant auto-généré par
-   * `withOriginAccessControl` ne posent cette seconde action -- les deux ne couvrent que
-   * `InvokeFunctionUrl`. Indépendant du domaine qui pointe vers la distribution (CloudFront
-   * signe la requête au niveau de l'origine, avant tout routage par nom de domaine) : un futur
-   * nom de domaine personnalisé pointé sur cette même distribution n'a besoin d'aucun grant
-   * supplémentaire.
-   */
-  backend.bff.resources.lambda.addPermission('AllowCloudFrontInvokeFunction', {
-    principal: new ServicePrincipal('cloudfront.amazonaws.com'),
-    action: 'lambda:InvokeFunction',
-    sourceArn: `arn:aws:cloudfront::${Stack.of(distribution).account}:distribution/${distribution.distributionId}`,
-  })
+  // Même valeur que le custom header ci-dessus, côté Lambda -- `handler.ts` compare
+  // `event.headers[ORIGIN_VERIFY_HEADER]` à cette variable d'environnement.
+  backend.bff.addEnvironment('ORIGIN_VERIFY_SECRET', bffOriginVerifySecret.secretValue.unsafeUnwrap())
 
   backend.addOutput({
     custom: {
