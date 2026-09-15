@@ -238,7 +238,35 @@ architecturales) et `.cursorrules` (conventions détaillées pour l'éditeur).
   Régler explicitement `retryAttempts` (défaut = rejeu INFINI, shard bloqué 24 h) et
   filtrer sur `eventName` ; le handler doit être idempotent (le lot entier est rejoué
   sur échec). Voir `amplify/functions/rating-aggregation/` et ADR-0017.
+- **Lambda de NOTIFICATION sur flux DynamoDB (pas d'agrégat, pas d'écriture)** : variante plus
+  légère du point précédent — `amplify/functions/clinic-verification-notifier/` (déclenchée
+  sur `INSERT` de `Clinic`, vérification d'identité RPPS/numéro d'ordre avant activation) lit
+  UNIQUEMENT le `NewImage` du flux (aucune requête DynamoDB supplémentaire) et appelle SES
+  (`@aws-sdk/client-ses`, `ses:SendEmail` scopé à l'ARN exact de l'identité vérifiée — jamais de
+  wildcard). `retryAttempts: 0` (pas 3 comme `rating-aggregation`) : une notification manquée
+  n'a aucun effet de bord sur les données (`Clinic.verificationStatus` reste `PENDING` que
+  l'email parte ou non), donc rejouer un échec durable (identité SES non vérifiée) bloquerait le
+  shard pour rien — best-effort, logué en `console.error`, jamais fail-loud, même famille
+  qu'"écriture secondaire best-effort" ci-dessous transposée côté notification. **Bootstrap SES
+  sans domaine dédié** : tant qu'aucune identité SES n'est vérifiée sur le compte, utiliser la
+  MÊME adresse comme expéditeur et destinataire admin (le compte SES démarre en mode sandbox,
+  qui n'autorise l'envoi que vers des adresses elles-mêmes vérifiées) — une seule identité à
+  vérifier manuellement en console AWS avant le premier déploiement réel, repointer vers un
+  `no-reply@` dédié le jour où un domaine est vérifié (un changement d'une ligne, voir
+  `CLINIC_VERIFICATION_SENDER_EMAIL`, `amplify/functions/clinic-verification-notifier/resource.ts`).
 - DynamoDB via les modèles `defineData` (`@model`/`a.model()`).
+- **Champ auto-déclaré à la création, jamais modifiable ensuite (même par qui l'a écrit)** :
+  cinquième idiome `@auth` de ce schéma — `.authorization()` de champ accordant `create`+`read`
+  au rôle qui écrit la valeur initiale, mais JAMAIS `update`, à personne (`clinicVerificationStatusFieldAuth`
+  sur `Clinic.verificationStatus`). Distinct du quatrième idiome ci-dessous (agrégat calculé
+  côté serveur, `create` refusé à TOUT LE MONDE) : ici le composable a besoin d'écrire une
+  valeur initiale fixe (`'PENDING'` en dur) à la création de la ligne, ce que
+  `clinicRatingAndModerationFieldsReadOnly` interdirait. Résidu assumé, même famille que
+  `missionStatusFieldAuth` : un appel GraphQL direct pourrait forger `createClinic(verificationStatus:
+  ACTIVE)` — accepté ici car sans effet de bord serveur (la seule garde réelle est la garde de
+  navigation Vue, pas ce champ). La seule voie légitime de transition (`PENDING` → `ACTIVE`) est
+  une mutation custom dédiée réservée à `allow.group('Admins')` (`approveClinicVerification`,
+  idiome ADR-0011), jamais un `update` généré.
 - **Champ dénormalisé calculé côté serveur (agrégat)** : quatrième idiome `@auth` de ce
   schéma — `.authorization()` de CHAMP n'accordant que `read`, à personne `create`/
   `update` (`clinicRatingAndModerationFieldsReadOnly`/`ownerRatingAggregateFieldsReadOnly`,
