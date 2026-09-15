@@ -230,6 +230,8 @@ describe('useMatchingRequests', () => {
           'requiredSpecies',
           'requiredBloodGroup',
           'appointmentDatetime',
+          'appointmentWindowStart',
+          'appointmentWindowEnd',
           'clinic.id',
           'clinic.name',
           'clinic.latitude',
@@ -905,6 +907,79 @@ describe('useMatchingRequests', () => {
       await searchMatches()
 
       expect(matches.value.map((m) => m.id)).toEqual(['request-emergency'])
+    })
+  })
+
+  // Mode "plage horaire" (appointmentWindowStart/End, alternative à appointmentDatetime --
+  // voir amplify/data/resource.ts) : mêmes intentions que le describe "APPOINTMENT /
+  // OwnerAvailability" ci-dessus, mais ce fichier vérifie ici uniquement le CÂBLAGE du
+  // dispatch (matchesAvailabilityWindow() vs matchesAvailability()) -- matchesAvailabilityWindow()
+  // elle-même est testée en isolation dans eligibility-service.availability-window.test.js.
+  describe('APPOINTMENT / plage horaire (appointmentWindowStart/End)', () => {
+    // Mercredi 12 août 2026, 12h-18h (heure locale) -- même jour que WEDNESDAY_10_30 ci-dessus.
+    const WEDNESDAY_12H = new Date(2026, 7, 12, 12, 0, 0).toISOString()
+    const WEDNESDAY_18H = new Date(2026, 7, 12, 18, 0, 0).toISOString()
+
+    const buildWindowAppointmentRequest = (overrides = {}) =>
+      buildRequest({
+        id: 'request-window',
+        requestType: 'APPOINTMENT',
+        appointmentDatetime: null,
+        appointmentWindowStart: WEDNESDAY_12H,
+        appointmentWindowEnd: WEDNESDAY_18H,
+        ...overrides,
+      })
+
+    it('inclut une Request APPOINTMENT en mode plage horaire qui recouvre (même partiellement) une OwnerAvailability', async () => {
+      mockGraphqlResponses({
+        profile: buildOwnerProfile(),
+        animals: [buildAnimal()],
+        requests: [buildWindowAppointmentRequest()],
+        // Owner libre 14h-22h : recouvre la plage clinique 12h-18h sur 14h-18h seulement.
+        availabilities: [{ dayOfWeek: 3, startTime: '14:00', endTime: '22:00' }],
+      })
+
+      const { matches, searchMatches } = useMatchingRequests()
+      await searchMatches()
+
+      expect(matches.value.map((m) => m.id)).toEqual(['request-window'])
+    })
+
+    it("exclut une Request APPOINTMENT en mode plage horaire par ailleurs éligible si aucune OwnerAvailability ne recouvre la plage", async () => {
+      mockGraphqlResponses({
+        profile: buildOwnerProfile(),
+        animals: [buildAnimal()],
+        requests: [buildWindowAppointmentRequest()],
+        // Owner libre 19h-22h seulement : aucun recouvrement avec la plage clinique 12h-18h.
+        availabilities: [{ dayOfWeek: 3, startTime: '19:00', endTime: '22:00' }],
+      })
+
+      const { matches, searchMatches } = useMatchingRequests()
+      await searchMatches()
+
+      expect(matches.value).toHaveLength(0)
+    })
+
+    it('dispatche vers matchesAvailabilityWindow() (pas matchesAvailability()) dès que appointmentWindowStart/End sont renseignés, même si appointmentDatetime est aussi présent', async () => {
+      // appointmentDatetime pointe sur un jeudi (ne matcherait AUCUNE OwnerAvailability du
+      // mercredi ci-dessous, si jamais matchesAvailability() était appelée par erreur) ; la
+      // plage horaire, elle, tombe le mercredi et recouvre le créneau Owner -- seul un dispatch
+      // correct vers matchesAvailabilityWindow() fait matcher cette Request.
+      const THURSDAY_10_30 = new Date(2026, 7, 13, 10, 30, 0).toISOString()
+
+      mockGraphqlResponses({
+        profile: buildOwnerProfile(),
+        animals: [buildAnimal()],
+        requests: [
+          buildWindowAppointmentRequest({ appointmentDatetime: THURSDAY_10_30 }),
+        ],
+        availabilities: [{ dayOfWeek: 3, startTime: '09:00', endTime: '20:00' }],
+      })
+
+      const { matches, searchMatches } = useMatchingRequests()
+      await searchMatches()
+
+      expect(matches.value.map((m) => m.id)).toEqual(['request-window'])
     })
   })
 

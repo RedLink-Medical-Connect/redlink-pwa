@@ -1,7 +1,7 @@
 import { ref } from 'vue'
 import { generateClient } from '@/services/bff-graphql-client'
 import { getCurrentUser } from '@/services/bff-auth-session'
-import { checkEligibility, matchesAvailability } from '@/services/eligibility-service'
+import { checkEligibility, matchesAvailability, matchesAvailabilityWindow } from '@/services/eligibility-service'
 import { throwIfGraphqlError } from '@/services/graphql-error-service'
 import { useAnimals } from '@/composables/useAnimals'
 import { useOwnerProfile } from '@/composables/useOwnerProfile'
@@ -165,6 +165,8 @@ export function useMatchingRequests() {
           'requiredSpecies',
           'requiredBloodGroup',
           'appointmentDatetime',
+          'appointmentWindowStart',
+          'appointmentWindowEnd',
           'clinic.id',
           'clinic.name',
           'clinic.latitude',
@@ -220,11 +222,23 @@ export function useMatchingRequests() {
           // -- appliqué une fois que checkEligibility() a déjà rendu son verdict, jamais
           // inséré DANS checkEligibility() (les 5 critères de l'Eligibility, CONTEXT.md,
           // restent une hiérarchie fixe et universelle, pas spécifique au type de Request).
-          if (
-            req.requestType === RequestType.APPOINTMENT &&
-            !matchesAvailability(ownerAvailabilities.value, req.appointmentDatetime)
-          ) {
-            continue
+          //
+          // Une Request APPOINTMENT est SOIT en mode "heure précise" (appointmentDatetime)
+          // SOIT en mode "plage horaire" (appointmentWindowStart/End) -- jamais les deux,
+          // voir amplify/data/resource.ts. Le mode plage horaire (présence de
+          // appointmentWindowStart/End) est vérifié en priorité : c'est le seul des deux
+          // qu'une Request créée en mode plage renseigne.
+          if (req.requestType === RequestType.APPOINTMENT) {
+            const isWindowMode = req.appointmentWindowStart && req.appointmentWindowEnd
+            const availabilityMatches = isWindowMode
+              ? matchesAvailabilityWindow(
+                  ownerAvailabilities.value,
+                  req.appointmentWindowStart,
+                  req.appointmentWindowEnd,
+                )
+              : matchesAvailability(ownerAvailabilities.value, req.appointmentDatetime)
+
+            if (!availabilityMatches) continue
           }
 
           // On attache l'animal qui matche, la distance et le critère Clinic Priority

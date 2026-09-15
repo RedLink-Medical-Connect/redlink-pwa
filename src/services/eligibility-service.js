@@ -223,6 +223,60 @@ export const matchesAvailability = (availabilities, appointmentDatetime) => {
 }
 
 /**
+ * Filtre EXCLUSIF équivalent à `matchesAvailability()` ci-dessus, pour le mode "plage horaire"
+ * d'une Request APPOINTMENT (`Request.appointmentWindowStart`/`appointmentWindowEnd`,
+ * alternative à `appointmentDatetime` choisie par la clinique -- voir
+ * `amplify/data/resource.ts`). Compare deux INTERVALLES (la plage clinique, le créneau
+ * `OwnerAvailability` de l'Owner) plutôt qu'un point dans un intervalle comme
+ * `matchesAvailability()` : un simple RECOUVREMENT partiel suffit (le don peut avoir lieu dans
+ * la portion commune aux deux plages) -- la plage clinique n'a pas besoin d'être entièrement
+ * contenue dans le créneau Owner.
+ *
+ * ⚠️ Interprétation d'ingénierie, même statut que CLINIC_PRIORITY_BOOST_RADIUS_KM
+ * (useMatchingRequests.js) / MIN_DAYS_BETWEEN_DONATIONS ci-dessus : ni le CdC ni CONTEXT.md ne
+ * tranchent entre recouvrement et inclusion totale pour ce cas précis -- à valider avec le repo
+ * owner avant un vrai déploiement.
+ *
+ * `appointmentWindowStart`/`appointmentWindowEnd` sont supposés tomber le MÊME jour calendaire
+ * (imposé côté saisie par NewRequestView.vue, jamais revérifié ici) -- le `dayOfWeek` comparé
+ * aux `OwnerAvailability` est donc celui de `appointmentWindowStart` seul.
+ *
+ * @param {Array<{dayOfWeek: number, startTime: string, endTime: string}>} availabilities
+ * @param {string|null|undefined} windowStart - AWSDateTime (ISO 8601)
+ * @param {string|null|undefined} windowEnd - AWSDateTime (ISO 8601)
+ * @returns {boolean}
+ */
+export const matchesAvailabilityWindow = (availabilities, windowStart, windowEnd) => {
+  if (!windowStart || !windowEnd) return false
+
+  const start = new Date(windowStart)
+  const end = new Date(windowEnd)
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return false
+  if (start.getTime() >= end.getTime()) return false
+
+  // Même repli "toujours disponible" par défaut que matchesAvailability() (amendement
+  // ADR-0005) : pas de créneau renseigné (ou lecture indisponible) n'exclut jamais une Request.
+  if (!Array.isArray(availabilities) || availabilities.length === 0) return true
+
+  const dayOfWeek = start.getDay()
+  const windowStartTod = `${String(start.getHours()).padStart(2, '0')}:${String(start.getMinutes()).padStart(2, '0')}`
+  const windowEndTod = `${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}`
+
+  return availabilities.some((availability) => {
+    if (availability?.dayOfWeek !== dayOfWeek) return false
+
+    const availStart = normalizeTimeOfDay(availability?.startTime)
+    const availEnd = normalizeTimeOfDay(availability?.endTime)
+    if (!availStart || !availEnd) return false
+
+    // Recouvrement d'intervalles standard (bornes demi-ouvertes) : deux plages qui se touchent
+    // sans réellement se superposer (ex. Owner libre jusqu'à 12:00, plage clinique à partir de
+    // 12:00) ne comptent volontairement pas comme un recouvrement.
+    return availStart < windowEndTod && windowStartTod < availEnd
+  })
+}
+
+/**
  * Composite : évalue les 5 critères hiérarchisés de l'Eligibility (CONTEXT.md) pour un
  * couple (Animal, Request) donné, dans l'ordre imposé par le CdC :
  *   1. Validated Donor

@@ -6,6 +6,7 @@ import DashboardSidebar from '@/components/dashboard/DashboardSidebar.vue'
 import BreedAutocomplete from '@/components/common/BreedAutocomplete.vue'
 import { useClinicRequests } from '@/composables/useClinicRequest.js'
 import { BloodGroupsBySpecies } from '@/constants/enums.js'
+import { TIME_PRESETS, FULL_DAY_PRESET } from '@/services/availability-service.js'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -25,6 +26,63 @@ const form = ref({
   details: '',
 })
 
+// Mode de saisie de la date souhaitée d'un don planifié (RequestType.APPOINTMENT) : "précis"
+// (comportement historique, un seul instant via DatePicker) ou "plage horaire" (nouveau,
+// même système que OwnerAvailability côté Owner -- présélections + heure manuelle -- mais
+// ancré sur UNE date calendaire précise plutôt que récurrent par jour de semaine). Mutuellement
+// exclusifs côté payload (voir handleSubmit/useClinicRequest.createNewRequest), jamais les deux
+// envoyés à la fois.
+const appointmentMode = ref('precise')
+const windowDate = ref(null)
+const selectedWindowPreset = ref(null)
+const windowStartTime = ref(null)
+const windowEndTime = ref(null)
+
+// TIME_PRESETS (availability-service.js) + "Journée entière" (FULL_DAY_PRESET, réservé à ce
+// formulaire, voir son commentaire) -- contrairement aux présélections combinables
+// d'AvailabilityView.vue, UN SEUL preset est sélectionnable ici : une Request ne porte qu'une
+// seule plage, pas une liste de créneaux.
+const windowPresets = computed(() => [...TIME_PRESETS, FULL_DAY_PRESET])
+
+// Sélection togglable (reclic = désélection) et mutuellement exclusive avec l'heure manuelle
+// (windowStartTime/windowEndTime, réinitialisées ici) -- même intention qu'AvailabilityView.vue
+// (togglePreset), adaptée à une sélection unique au lieu d'un multi-select.
+const selectWindowPreset = (key) => {
+  selectedWindowPreset.value = selectedWindowPreset.value === key ? null : key
+  if (selectedWindowPreset.value) {
+    windowStartTime.value = null
+    windowEndTime.value = null
+  }
+}
+
+// Résout la plage (Date de début / Date de fin) à soumettre pour le mode "plage horaire" --
+// preset sélectionné (heures fixes appliquées à windowDate) sinon heure manuelle
+// (windowStartTime/windowEndTime, jamais les deux à la fois, voir selectWindowPreset), jamais
+// aucun sans l'autre. `null` si la sélection est incomplète (date manquante, ou ni preset ni
+// heure manuelle renseignés) -- laisse handleSubmit décider que c'est un champ manquant.
+const computeWindowRange = () => {
+  if (!windowDate.value) return null
+
+  const preset = windowPresets.value.find((p) => p.key === selectedWindowPreset.value)
+  if (preset) {
+    const start = new Date(windowDate.value)
+    start.setHours(preset.startHour, 0, 0, 0)
+    const end = new Date(windowDate.value)
+    end.setHours(preset.endHour, 0, 0, 0)
+    return { start, end }
+  }
+
+  if (windowStartTime.value && windowEndTime.value) {
+    const start = new Date(windowDate.value)
+    start.setHours(windowStartTime.value.getHours(), windowStartTime.value.getMinutes(), 0, 0)
+    const end = new Date(windowDate.value)
+    end.setHours(windowEndTime.value.getHours(), windowEndTime.value.getMinutes(), 0, 0)
+    return { start, end }
+  }
+
+  return null
+}
+
 const speciesOptions = computed(() => [
   { label: t('request.species.dog'), value: 'dog' },
   { label: t('request.species.cat'), value: 'cat' },
@@ -42,13 +100,20 @@ const selectType = (type) => {
 }
 
 const handleSubmit = async () => {
-  // Phase 6.5 : pour un RDV, la date/heure souhaitée (form.date) est la seule donnée qui
-  // permet ensuite au moteur de matching de confronter cette Request aux OwnerAvailability
-  // d'un Owner (useMatchingRequests.js, matchesAvailability()) — sans elle, la Request
-  // APPOINTMENT créée ne matchera jamais aucun Owner. `breed`/`weight`/`patientName`
-  // restent volontairement collectés par ce formulaire mais jamais envoyés : ce sont des
-  // attributs de l'Animal matché, pas de la Request elle-même (voir docs/adr/0005).
-  const isAppointmentDateMissing = requestType.value === 'appointment' && !form.value.date
+  // Phase 6.5 : pour un RDV, la date/heure souhaitée est la seule donnée qui permet ensuite au
+  // moteur de matching de confronter cette Request aux OwnerAvailability d'un Owner
+  // (useMatchingRequests.js, matchesAvailability()/matchesAvailabilityWindow()) — sans elle, la
+  // Request APPOINTMENT créée ne matchera jamais aucun Owner. `breed`/`weight`/`patientName`
+  // restent volontairement collectés par ce formulaire (mode emergency seulement, voir le
+  // template) mais jamais envoyés : ce sont des attributs de l'Animal matché, pas de la
+  // Request elle-même (voir docs/adr/0005).
+  const windowRange = appointmentMode.value === 'window' ? computeWindowRange() : null
+  const isAppointmentDateMissing =
+    requestType.value === 'appointment' &&
+    (appointmentMode.value === 'precise'
+      ? !form.value.date
+      : !windowRange || windowRange.start >= windowRange.end)
+
   if (!form.value.species || !form.value.bloodGroup || !form.value.quantity || isAppointmentDateMissing) {
     toast.add({
       severity: 'warn',
@@ -65,8 +130,11 @@ const handleSubmit = async () => {
       species: form.value.species,
       bloodGroup: form.value.bloodGroup,
       quantity: form.value.quantity,
-      // Non pertinent pour 'emergency' (createNewRequest ne l'envoie que pour 'appointment').
-      appointmentDatetime: form.value.date,
+      // Non pertinents pour 'emergency' (createNewRequest ne les envoie que pour 'appointment',
+      // et jamais les deux modes à la fois).
+      appointmentDatetime: appointmentMode.value === 'precise' ? form.value.date : null,
+      appointmentWindowStart: windowRange?.start ?? null,
+      appointmentWindowEnd: windowRange?.end ?? null,
       // Note: breed, weight, details peuvent être ajoutés si le backend les supporte plus tard
     }
 
@@ -207,7 +275,11 @@ const handleSubmit = async () => {
           </div>
 
           <form class="flex flex-col gap-6 max-w-3xl" @submit.prevent="handleSubmit">
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <!-- Nom / espèce / race : uniquement en urgence, où l'Animal recherché est un
+                 animal précis. En don planifié, la clinique ne cherche pas forcément pour un
+                 animal donné -- seuls l'espèce (pour filtrer le groupe sanguin), le groupe
+                 sanguin et la quantité comptent, voir le bloc `v-else` plus bas. -->
+            <div v-if="requestType === 'emergency'" class="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div class="flex flex-col gap-2">
                 <label class="text-xs font-bold text-zinc-500 uppercase">{{
                   $t('request.form.patient_name')
@@ -253,7 +325,7 @@ const handleSubmit = async () => {
               </div>
             </div>
 
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div v-if="requestType === 'emergency'" class="grid grid-cols-1 md:grid-cols-3 gap-6">
               <div class="flex flex-col gap-2">
                 <label class="text-xs font-bold text-zinc-500 uppercase">{{
                   $t('request.form.weight')
@@ -292,26 +364,185 @@ const handleSubmit = async () => {
               </div>
             </div>
 
-            <div
-              v-if="requestType === 'appointment'"
-              class="p-4 bg-blue-50 dark:bg-blue-900/10 rounded-lg border border-blue-100 dark:border-blue-900/30 grid grid-cols-1 md:grid-cols-2 gap-6 animate-fade-in"
-            >
+            <div v-else class="grid grid-cols-1 md:grid-cols-3 gap-6">
               <div class="flex flex-col gap-2">
-                <label class="text-xs font-bold text-blue-600 dark:text-blue-400 uppercase">{{
-                  $t('request.form.date_label')
+                <label class="text-xs font-bold text-zinc-500 uppercase">{{
+                  $t('request.form.species')
                 }}</label>
-                <DatePicker
-                  v-model="form.date"
-                  show-icon
-                  show-time
-                  hour-format="24"
-                  class="w-full"
-                  input-class="!bg-white dark:!bg-zinc-900 !border-blue-200 dark:!border-blue-800"
+                <Select
+                  v-model="form.species"
+                  :options="speciesOptions"
+                  option-label="label"
+                  option-value="value"
+                  :placeholder="$t('request.form.select_placeholder')"
+                  class="!bg-zinc-50 dark:!bg-zinc-950 !border-zinc-300 dark:!border-zinc-800 !text-zinc-900 dark:!text-white"
                 />
               </div>
-              <div class="flex flex-col justify-center text-sm text-blue-600 dark:text-blue-400">
-                <i class="pi pi-info-circle mb-1"></i>
-                {{ $t('request.appointment.info') }}
+
+              <div class="flex flex-col gap-2">
+                <label class="text-xs font-bold text-zinc-500 uppercase">{{
+                  $t('request.form.blood_group')
+                }}</label>
+                <Select
+                  v-model="form.bloodGroup"
+                  :options="bloodOptions"
+                  :disabled="!form.species"
+                  :placeholder="$t('request.form.select_blood_placeholder')"
+                  class="!bg-zinc-50 dark:!bg-zinc-950 !border-zinc-300 dark:!border-zinc-800 !text-zinc-900 dark:!text-white"
+                />
+              </div>
+
+              <div class="flex flex-col gap-2">
+                <label class="text-xs font-bold text-zinc-500 uppercase">{{
+                  $t('request.form.quantity')
+                }}</label>
+                <InputNumber
+                  v-model="form.quantity"
+                  suffix=" ml"
+                  class="!bg-zinc-50 dark:!bg-zinc-950 !border-zinc-300 dark:!border-zinc-800 !text-zinc-900 dark:!text-white focus:!border-[#ff3b4e]"
+                  input-class="!bg-transparent !border-none"
+                />
+              </div>
+            </div>
+
+            <div
+              v-if="requestType === 'appointment'"
+              class="p-4 bg-blue-50 dark:bg-blue-900/10 rounded-lg border border-blue-100 dark:border-blue-900/30 flex flex-col gap-4 animate-fade-in"
+            >
+              <!-- Mode "heure précise" (historique) vs "plage horaire" (nouveau, même système
+                   que les disponibilités Owner -- voir AvailabilityView.vue) : mutuellement
+                   exclusifs, voir handleSubmit. -->
+              <div
+                class="flex gap-1.5"
+                role="group"
+                :aria-label="$t('request.form.mode_label')"
+              >
+                <button
+                  type="button"
+                  :aria-pressed="appointmentMode === 'precise'"
+                  class="px-3 py-1.5 rounded-full text-xs font-bold border transition-colors"
+                  :class="
+                    appointmentMode === 'precise'
+                      ? 'bg-blue-600 border-blue-600 text-white'
+                      : 'bg-transparent border-blue-200 dark:border-blue-800 text-blue-600 dark:text-blue-400 hover:border-blue-500'
+                  "
+                  @click="appointmentMode = 'precise'"
+                >
+                  {{ $t('request.form.mode_precise') }}
+                </button>
+                <button
+                  type="button"
+                  :aria-pressed="appointmentMode === 'window'"
+                  class="px-3 py-1.5 rounded-full text-xs font-bold border transition-colors"
+                  :class="
+                    appointmentMode === 'window'
+                      ? 'bg-blue-600 border-blue-600 text-white'
+                      : 'bg-transparent border-blue-200 dark:border-blue-800 text-blue-600 dark:text-blue-400 hover:border-blue-500'
+                  "
+                  @click="appointmentMode = 'window'"
+                >
+                  {{ $t('request.form.mode_window') }}
+                </button>
+              </div>
+
+              <div v-if="appointmentMode === 'precise'" class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div class="flex flex-col gap-2">
+                  <label class="text-xs font-bold text-blue-600 dark:text-blue-400 uppercase">{{
+                    $t('request.form.date_label')
+                  }}</label>
+                  <DatePicker
+                    v-model="form.date"
+                    show-icon
+                    show-time
+                    hour-format="24"
+                    class="w-full"
+                    input-class="!bg-white dark:!bg-zinc-900 !border-blue-200 dark:!border-blue-800"
+                  />
+                </div>
+                <div class="flex flex-col justify-center text-sm text-blue-600 dark:text-blue-400">
+                  <i class="pi pi-info-circle mb-1"></i>
+                  {{ $t('request.appointment.info') }}
+                </div>
+              </div>
+
+              <div v-else class="flex flex-col gap-4">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div class="flex flex-col gap-2">
+                    <label class="text-xs font-bold text-blue-600 dark:text-blue-400 uppercase">{{
+                      $t('request.form.date_label')
+                    }}</label>
+                    <DatePicker
+                      v-model="windowDate"
+                      show-icon
+                      class="w-full"
+                      input-class="!bg-white dark:!bg-zinc-900 !border-blue-200 dark:!border-blue-800"
+                    />
+                  </div>
+                  <div class="flex flex-col justify-center text-sm text-blue-600 dark:text-blue-400">
+                    <i class="pi pi-info-circle mb-1"></i>
+                    {{ $t('request.appointment.info') }}
+                  </div>
+                </div>
+
+                <div class="flex flex-col gap-2">
+                  <label class="text-xs font-bold text-blue-600 dark:text-blue-400 uppercase">{{
+                    $t('request.form.time_label')
+                  }}</label>
+                  <div
+                    class="flex flex-wrap gap-1.5"
+                    role="group"
+                    :aria-label="$t('request.form.time_label')"
+                  >
+                    <button
+                      v-for="preset in windowPresets"
+                      :key="preset.key"
+                      type="button"
+                      :aria-pressed="selectedWindowPreset === preset.key"
+                      class="px-3 py-1.5 rounded-full text-xs font-bold border transition-colors"
+                      :class="
+                        selectedWindowPreset === preset.key
+                          ? 'bg-blue-600 border-blue-600 text-white'
+                          : 'bg-transparent border-blue-200 dark:border-blue-800 text-blue-600 dark:text-blue-400 hover:border-blue-500'
+                      "
+                      @click="selectWindowPreset(preset.key)"
+                    >
+                      {{ $t(`request.form.time_preset_${preset.key}`) }}
+                    </button>
+                  </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3 max-w-sm">
+                  <div class="flex flex-col gap-1">
+                    <span class="text-[11px] font-semibold text-blue-500">{{
+                      $t('request.form.start_label')
+                    }}</span>
+                    <Calendar
+                      v-model="windowStartTime"
+                      time-only
+                      show-icon
+                      icon-display="input"
+                      step-minute="30"
+                      class="w-full"
+                      input-class="w-full !bg-white dark:!bg-zinc-900 !border-blue-200 dark:!border-blue-800"
+                      @update:model-value="selectedWindowPreset = null"
+                    />
+                  </div>
+                  <div class="flex flex-col gap-1">
+                    <span class="text-[11px] font-semibold text-blue-500">{{
+                      $t('request.form.end_label')
+                    }}</span>
+                    <Calendar
+                      v-model="windowEndTime"
+                      time-only
+                      show-icon
+                      icon-display="input"
+                      step-minute="30"
+                      class="w-full"
+                      input-class="w-full !bg-white dark:!bg-zinc-900 !border-blue-200 dark:!border-blue-800"
+                      @update:model-value="selectedWindowPreset = null"
+                    />
+                  </div>
+                </div>
               </div>
             </div>
 

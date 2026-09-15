@@ -199,7 +199,7 @@ onMounted(() => {
                 {{ $t('dashboard.profile.distance_label') }}
                 <span class="text-[#ff3b4e]">{{ form.maxTravelDistance }} {{ $t('common.km') }}</span>
               </label>
-              <Slider v-model="form.maxTravelDistance" :min="5" :max="100" class="w-full" />
+              <Slider v-model="form.maxTravelDistance" :min="1" :max="50" class="w-full" />
             </div>
 
             <div class="flex justify-end pt-4 border-t border-zinc-100 dark:border-zinc-800">

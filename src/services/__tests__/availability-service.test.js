@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { TIME_PRESETS, mergeConsecutiveHourRanges } from '@/services/availability-service'
+import { TIME_PRESETS, FULL_DAY_PRESET, mergeConsecutiveHourRanges } from '@/services/availability-service'
 
 describe('availability-service.TIME_PRESETS', () => {
   it('bornes validées avec le repo owner (2026-08-17) : 8h-12h / 12h-18h / 18h-22h, dans cet ordre', () => {
@@ -8,6 +8,12 @@ describe('availability-service.TIME_PRESETS', () => {
       { key: 'afternoon', startHour: 12, endHour: 18 },
       { key: 'evening', startHour: 18, endHour: 22 },
     ])
+  })
+})
+
+describe('availability-service.FULL_DAY_PRESET', () => {
+  it('couvre exactement l\'étendue fusionnée des 3 TIME_PRESETS (8h-22h) -- réservé au formulaire de Request (NewRequestView.vue), jamais ajouté à TIME_PRESETS lui-même', () => {
+    expect(FULL_DAY_PRESET).toEqual({ key: 'full_day', startHour: 8, endHour: 22 })
   })
 })
 

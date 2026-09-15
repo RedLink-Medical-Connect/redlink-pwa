@@ -179,14 +179,23 @@ export function useClinicRequests() {
         status: RequestStatus.OPEN,
       }
 
-      // Phase 6.5 (ADR-0005) : appointmentDatetime n'a de sens que pour un RDV planifié
-      // (non-pertinent pour 'emergency', laissé absent de l'input dans ce cas plutôt que
-      // d'envoyer explicitement `null`). NewRequestView.vue impose déjà ce champ avant
-      // d'appeler createNewRequest() pour un RDV (voir son handleSubmit) -- ce garde-fou
-      // supplémentaire évite malgré tout d'envoyer un appointmentDatetime vide/invalide si
-      // ce composable est un jour appelé par un autre appelant sans cette validation UI.
-      if (formData.type === 'appointment' && formData.appointmentDatetime) {
-        input.appointmentDatetime = new Date(formData.appointmentDatetime).toISOString()
+      // Phase 6.5 (ADR-0005) : appointmentDatetime/appointmentWindowStart+End n'ont de sens que
+      // pour un RDV planifié (non-pertinents pour 'emergency', laissés absents de l'input dans
+      // ce cas plutôt que d'envoyer explicitement `null`). NewRequestView.vue impose déjà l'un
+      // ou l'autre avant d'appeler createNewRequest() pour un RDV (voir son handleSubmit) -- ce
+      // garde-fou supplémentaire évite malgré tout d'envoyer des champs vides/invalides si ce
+      // composable est un jour appelé par un autre appelant sans cette validation UI.
+      //
+      // Mode "plage horaire" testé en premier : c'est le seul des deux modes qui renseigne
+      // appointmentWindowStart/End (amplify/data/resource.ts, les deux modes sont mutuellement
+      // exclusifs côté formulaire) -- jamais les deux envoyés à la fois.
+      if (formData.type === 'appointment') {
+        if (formData.appointmentWindowStart && formData.appointmentWindowEnd) {
+          input.appointmentWindowStart = new Date(formData.appointmentWindowStart).toISOString()
+          input.appointmentWindowEnd = new Date(formData.appointmentWindowEnd).toISOString()
+        } else if (formData.appointmentDatetime) {
+          input.appointmentDatetime = new Date(formData.appointmentDatetime).toISOString()
+        }
       }
 
       // 3. Appel de la mutation
