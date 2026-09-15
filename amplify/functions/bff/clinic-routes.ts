@@ -173,9 +173,12 @@ export async function inviteVeterinarian(
     try {
       // Écrit en direct (bypass AppSync, voir le commentaire de fichier) : `createdAt`/
       // `updatedAt`/`__typename` posés à la main (CLAUDE.md, "Lambda + accès DynamoDB
-      // direct"). `firstname`/`lastname` volontairement vides -- la collègue les complète
-      // elle-même dans Réglages (`updateVetDetails`, déjà fonctionnel dès que `owner` est
-      // correctement posé).
+      // direct"). `firstname`/`lastname`/`numeroOrdre` volontairement vides -- la collègue les
+      // complète elle-même dans Réglages (`updateVetDetails`, déjà fonctionnel dès que `owner`
+      // est correctement posé). Chaîne vide, jamais absente : `numeroOrdre` est `String!` côté
+      // schéma (`amplify/data/resource.ts`) -- un champ absent renverrait `null` en lecture
+      // GraphQL et ferait échouer toute lecture de cette ligne tant que le profil n'est pas
+      // complété (même raison que `firstname`/`lastname` déjà vides ci-dessous).
       const now = new Date().toISOString()
       await documentClient.send(
         new PutCommand({
@@ -185,6 +188,7 @@ export async function inviteVeterinarian(
             clinicID,
             firstname: '',
             lastname: '',
+            numeroOrdre: '',
             email,
             // Compte pas encore confirmé : la collègue n'a pas encore résolu le challenge
             // `NEW_PASSWORD_REQUIRED` (voir le commentaire du champ dans

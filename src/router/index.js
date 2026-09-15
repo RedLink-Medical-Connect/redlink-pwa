@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/auth.js'
+import { useClinicVerification } from '@/composables/useClinicVerification.js'
 import HomeView from '@/views/HomeView.vue'
 
 const router = createRouter({
@@ -137,6 +138,16 @@ const router = createRouter({
       component: () => import('@/views/dashboard/clinic/NewRequestView.vue'),
       meta: { requiresAuth: true, role: 'vet' },
     },
+    // Vérification d'identité (RPPS + numéro d'ordre) avant activation d'une Clinic -- plan de
+    // durcissement sécurité "Différé 1". `role: 'vet'` comme les autres routes cliniques : la
+    // garde ci-dessous exclut explicitement CETTE route de son propre contrôle pour éviter une
+    // boucle de redirection.
+    {
+      path: '/dashboard/pending-verification',
+      name: 'clinic-pending-verification',
+      component: () => import('@/views/dashboard/clinic/PendingVerificationView.vue'),
+      meta: { requiresAuth: true, role: 'vet' },
+    },
 
     // --- ESPACE PROPRIÉTAIRE (Owners uniquement) ---
     {
@@ -215,6 +226,26 @@ router.beforeEach(async (to, from, next) => {
       return next('/dashboard/requests')
     }
   }
+
+  // Vérification d'identité (RPPS + numéro d'ordre) avant activation d'une Clinic -- plan de
+  // durcissement sécurité "Différé 1". Garde purement UX (voir
+  // `useClinicVerification.js`/`clinicVerificationStatusFieldAuth`), exclut explicitement
+  // `clinic-pending-verification` elle-même pour éviter une boucle de redirection.
+  if (to.meta.role === 'vet' && userRole === 'vet' && to.name !== 'clinic-pending-verification') {
+    try {
+      const { fetchVerificationStatus } = useClinicVerification()
+      const status = await fetchVerificationStatus()
+      if (status === 'PENDING') {
+        return next({ name: 'clinic-pending-verification' })
+      }
+    } catch (err) {
+      // Fail-open, délibérément (voir useClinicVerification.js) : un échec réseau transitoire
+      // ne doit jamais bloquer un vétérinaire déjà ACTIVE hors de son propre dashboard -- la
+      // vraie garde de sécurité reste `@auth`, pas cette redirection.
+      console.error(err)
+    }
+  }
+
   next()
 })
 

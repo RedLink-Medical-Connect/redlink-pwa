@@ -517,6 +517,7 @@
       "fields": {
         "clinic_name": "NOM DE LA CLINIQUE",
         "rpps": "NUMÉRO RPPS",
+        "numero_ordre": "NUMÉRO D'ORDRE",
         "emergency_service": "SERVICE D'URGENCE ?"
       }
     }
@@ -1136,5 +1137,9 @@
     "title": "Page introuvable",
     "description": "Cette page n'existe pas ou plus. Vérifiez l'adresse ou revenez à l'accueil.",
     "cta": "Retour à l'accueil"
+  },
+  "pendingVerification": {
+    "title": "Compte en cours de vérification",
+    "description": "Votre inscription est bien enregistrée. Notre équipe vérifie actuellement le RPPS de votre clinique et votre numéro d'ordre auprès de l'Ordre National des Vétérinaires. Vous recevrez un accès complet dès que cette vérification sera terminée."
   }
 }
