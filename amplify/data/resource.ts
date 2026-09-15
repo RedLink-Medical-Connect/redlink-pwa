@@ -456,7 +456,21 @@ export const schema = a.schema({
       // Gen2 ne contraint pas une VALEUR). Absent pour une collègue invitée
       // (`clinic-routes.ts`, `firstname`/`lastname` vides elles aussi) -- à compléter au même
       // moment qu'elle complète son profil, hors périmètre de cette sous-tâche.
-      numeroOrdre: a.string().required(),
+      //
+      // PAS `.required()` (correctif graphql-schema-reviewer, sous-tâche ajoutant ce champ) :
+      // contrairement à `Clinic.rpps` (présent dès le tout premier commit du schéma Gen2, sur
+      // un environnement vierge, ADR-0009 §1), ce champ arrive sur un modèle déjà
+      // DÉPLOYÉ RÉELLEMENT (`amplify_outputs.json` présent à la racine -- sandbox actif au
+      // moment de cette sous-tâche). Une ligne `Veterinarian` déjà écrite avant ce déploiement
+      // n'a aucun attribut `numeroOrdre` en DynamoDB ; un champ `String!` sur une valeur
+      // absente casse la lecture GraphQL (`Cannot return null for non-nullable type`) au
+      // premier appelant qui le sélectionne -- aucun aujourd'hui (vérifié : aucun
+      // `selectionSet` existant ne le demande), mais une mine dormante pour le prochain écran
+      // admin qui lirait ce champ (justement le but de cette sous-tâche). Nullable en attendant
+      // un vrai backfill (hors périmètre ici, aucun agent n'exécute de script contre AWS réel) ;
+      // reste `required` côté formulaire (`RegisterClinicView.vue`) pour toute NOUVELLE
+      // inscription.
+      numeroOrdre: a.string(),
 
       // Invitation d'un vétérinaire par le référent de sa clinique (`amplify/functions/bff/
       // clinic-routes.ts`) : la ligne est écrite en DIRECT sur DynamoDB dès l'envoi de

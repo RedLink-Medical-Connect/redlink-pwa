@@ -749,9 +749,10 @@ describe('amplify/data/resource.ts — double validation de Mission + notation (
   })
 
   describe('Veterinarian.numeroOrdre — numéro d’ordre personnel du vétérinaire, distinct de Clinic.rpps (entreprise)', () => {
-    it('le champ vit bien dans le type Veterinarian, requis, sans @auth de champ dédiée (même niveau de confiance que rpps)', () => {
+    it("le champ vit bien dans le type Veterinarian, NULLABLE (pas String!), sans @auth de champ dédiée (même niveau de confiance que rpps) -- champ ajouté sur un modèle déjà déployé (amplify_outputs.json réel), .required() casserait la lecture des lignes Veterinarian existantes sans backfill (correctif graphql-schema-reviewer)", () => {
       const veterinarianType = extractType('Veterinarian')
-      expect(veterinarianType).toContain('numeroOrdre: String!\n')
+      expect(veterinarianType).toContain('numeroOrdre: String\n')
+      expect(veterinarianType).not.toContain('numeroOrdre: String!')
     })
   })
 
