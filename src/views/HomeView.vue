@@ -97,7 +97,7 @@ const testimonials = computed(() => [
         </div>
       </div>
     </section>
-
+<!--
     <section class="py-24">
       <div class="container mx-auto px-6">
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-16 items-center">
@@ -203,7 +203,7 @@ const testimonials = computed(() => [
         </div>
       </div>
     </section>
-
+-->
     <section
       class="py-24 bg-gradient-to-b from-white to-zinc-100 dark:from-zinc-950 dark:to-zinc-900"
     >
