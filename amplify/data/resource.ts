@@ -655,6 +655,22 @@ export const schema = a.schema({
       appointmentDatetime: a
         .datetime()
         .authorization(authenticatedReadOnlyVetCreateRead),
+      // Alternative à appointmentDatetime (heure précise) pour une Request APPOINTMENT : une
+      // PLAGE horaire, même système que OwnerAvailability côté Owner (dayOfWeek/startTime/
+      // endTime, voir plus haut) mais ancrée sur une date calendaire précise choisie par la
+      // clinique plutôt que récurrente par jour de semaine. Mutuellement exclusif avec
+      // appointmentDatetime : NewRequestView.vue n'envoie jamais les deux à la fois
+      // (useClinicRequest.createNewRequest), et le moteur de matching dispatche sur lequel des
+      // deux est renseigné (matchesAvailability() vs matchesAvailabilityWindow(), voir
+      // eligibility-service.js) plutôt que d'ajouter un discriminant dédié -- le couple
+      // start/end suffit déjà à savoir dans quel mode est cette Request. Même `.authorization()`
+      // que leur voisin appointmentDatetime.
+      appointmentWindowStart: a
+        .datetime()
+        .authorization(authenticatedReadOnlyVetCreateRead),
+      appointmentWindowEnd: a
+        .datetime()
+        .authorization(authenticatedReadOnlyVetCreateRead),
       // Hors scoping champ, délibérément : ce sont les deux seuls champs (avec activeMissionID
       // plus bas) que `linkRequestToMission` doit pouvoir écrire côté Owner. Sans `update` sur la
       // règle `allow.authenticated()` de niveau modèle, l'acceptation d'une Mission par un Owner

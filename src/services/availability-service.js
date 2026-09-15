@@ -7,6 +7,14 @@ export const TIME_PRESETS = Object.freeze([
   { key: 'evening', startHour: 18, endHour: 22 },
 ])
 
+// Preset supplémentaire, réservé au choix de plage horaire d'une Request APPOINTMENT
+// (NewRequestView.vue) -- volontairement PAS ajouté à `TIME_PRESETS` lui-même pour ne pas
+// faire apparaître une 4e option "Journée entière" sur les présélections combinables
+// d'AvailabilityView.vue (hors périmètre, non demandé). Couvre exactement l'étendue fusionnée
+// des 3 presets Owner ci-dessus (8h-22h) -- une clinique qui propose "Journée entière" équivaut
+// donc à matin+après-midi+soir combinés côté Owner.
+export const FULL_DAY_PRESET = Object.freeze({ key: 'full_day', startHour: 8, endHour: 22 })
+
 /**
  * Fusionne les presets sélectionnés ENSEMBLE et CONSÉCUTIFS (matin+après-midi, après-midi+
  * soir, ou les trois) en un seul groupe d'heures plutôt que de les garder comme autant de

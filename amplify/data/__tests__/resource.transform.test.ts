@@ -279,6 +279,8 @@ describe('amplify/data/resource.ts — Request @auth au niveau champ (équivalen
     'requiredBloodGroup',
     'quantity',
     'appointmentDatetime',
+    'appointmentWindowStart',
+    'appointmentWindowEnd',
     'createdAt',
     'clinicID',
   ])(
@@ -297,6 +299,8 @@ describe('amplify/data/resource.ts — Request @auth au niveau champ (équivalen
     'requiredBloodGroup',
     'quantity',
     'appointmentDatetime',
+    'appointmentWindowStart',
+    'appointmentWindowEnd',
     'createdAt',
     'clinicID',
   ])(

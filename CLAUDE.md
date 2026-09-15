@@ -466,6 +466,21 @@ touchés, en parallèle du reviewer principal).
   réassigner sa ref sur échec — un tableau vide en sortie du composable suffit à
   produire `false` côté fonction pure, fail-closed par construction plutôt que
   par code de repli dupliqué.
+- **Request APPOINTMENT : heure précise XOR plage horaire** : `appointmentDatetime`
+  (historique) et `appointmentWindowStart`/`appointmentWindowEnd` (nouveau, même
+  système de présélections que `OwnerAvailability` côté Owner — matin/après-midi/
+  soir/journée entière ou heure manuelle — mais ancré sur une date calendaire
+  précise plutôt que récurrent par jour de semaine) sont mutuellement exclusifs :
+  `NewRequestView.vue` n'envoie jamais les deux (`useClinicRequest.createNewRequest`
+  teste la plage en premier). Le moteur de matching dispatche sur lequel des deux
+  est renseigné (`useMatchingRequests.js`) entre `matchesAvailability()` (point
+  dans un intervalle) et `matchesAvailabilityWindow()` (recouvrement de deux
+  intervalles, `eligibility-service.js`) — même statut d'interprétation
+  d'ingénierie non tranchée par le CdC que `matchesAvailability()` lui-même. En
+  mode "don planifié" (`RequestType.APPOINTMENT`), le formulaire ne collecte que
+  espèce/groupe sanguin/quantité (pas nom/race/poids, propres à un animal précis
+  qu'une recherche de don planifié n'a pas besoin de cibler) — voir le `v-if
+  requestType === 'emergency'` de `NewRequestView.vue`.
 - **Résolution de contexte (`clinicID`/etc.) qui ne catch pas ses propres
   erreurs** : un helper interne à un composable qui résout un identifiant
   requis pour la suite du flux (ex. `fetchClinicContext()` dans

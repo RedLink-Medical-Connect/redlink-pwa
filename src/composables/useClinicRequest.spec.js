@@ -101,6 +101,73 @@ describe('useClinicRequests > createNewRequest species mapping', () => {
   })
 })
 
+// Mode "plage horaire" (appointmentWindowStart/End, alternative à appointmentDatetime pour une
+// Request APPOINTMENT -- voir amplify/data/resource.ts) : NewRequestView.vue envoie toujours
+// les trois champs (appointmentDatetime/appointmentWindowStart/appointmentWindowEnd), au moins
+// deux valant `null` selon le mode choisi -- createNewRequest() doit ne transmettre à
+// client.models.Request.create() QUE le champ du mode réellement utilisé, jamais les deux à la
+// fois (mutuellement exclusifs côté schéma, ADR-0005).
+describe('useClinicRequests > createNewRequest mode plage horaire vs heure précise', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    getCurrentUser.mockResolvedValue({ userId: 'vet-cognito-id' })
+    vetGetMock.mockResolvedValue({ data: { id: 'vet-cognito-id', clinicID: 'clinic-1' }, errors: undefined })
+    requestCreateMock.mockResolvedValue({ data: { id: 'req-1', status: 'OPEN' }, errors: undefined })
+    requestListMock.mockResolvedValue({ data: [], errors: undefined })
+  })
+
+  const baseFormData = {
+    species: 'dog',
+    bloodGroup: 'DEA 1.1-',
+    quantity: '1',
+    type: 'appointment',
+  }
+
+  it('envoie appointmentWindowStart/End (en ISO) et omet appointmentDatetime quand les deux bornes de plage sont renseignées', async () => {
+    const { createNewRequest } = useClinicRequests()
+
+    await createNewRequest({
+      ...baseFormData,
+      appointmentWindowStart: new Date(2026, 7, 12, 12, 0, 0),
+      appointmentWindowEnd: new Date(2026, 7, 12, 18, 0, 0),
+    })
+
+    const [createInput] = requestCreateMock.mock.calls[0]
+    expect(createInput.appointmentWindowStart).toBe(new Date(2026, 7, 12, 12, 0, 0).toISOString())
+    expect(createInput.appointmentWindowEnd).toBe(new Date(2026, 7, 12, 18, 0, 0).toISOString())
+    expect(createInput).not.toHaveProperty('appointmentDatetime')
+  })
+
+  it('envoie appointmentDatetime (en ISO) et omet appointmentWindowStart/End quand aucune plage n\'est fournie', async () => {
+    const { createNewRequest } = useClinicRequests()
+
+    await createNewRequest({
+      ...baseFormData,
+      appointmentDatetime: new Date(2026, 7, 12, 10, 30, 0),
+    })
+
+    const [createInput] = requestCreateMock.mock.calls[0]
+    expect(createInput.appointmentDatetime).toBe(new Date(2026, 7, 12, 10, 30, 0).toISOString())
+    expect(createInput).not.toHaveProperty('appointmentWindowStart')
+    expect(createInput).not.toHaveProperty('appointmentWindowEnd')
+  })
+
+  it("n'envoie ni appointmentDatetime ni appointmentWindowStart/End pour une Request 'emergency'", async () => {
+    const { createNewRequest } = useClinicRequests()
+
+    await createNewRequest({
+      ...baseFormData,
+      type: 'emergency',
+      appointmentDatetime: new Date(2026, 7, 12, 10, 30, 0),
+    })
+
+    const [createInput] = requestCreateMock.mock.calls[0]
+    expect(createInput).not.toHaveProperty('appointmentDatetime')
+    expect(createInput).not.toHaveProperty('appointmentWindowStart')
+    expect(createInput).not.toHaveProperty('appointmentWindowEnd')
+  })
+})
+
 // Phase 7.6 (R-05, R-17): createNewRequest's catch block used to index `e.errors[0].message`
 // as soon as `e.errors` was truthy, without checking it actually had an item — an error shape
 // with a present-but-empty `errors` array threw a fresh TypeError from inside the error-logging
