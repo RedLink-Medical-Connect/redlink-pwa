@@ -33,6 +33,20 @@ import { defineFunction } from '@aws-amplify/backend'
  * changement d'une seule ligne (voir aussi le commentaire IAM sur la policy `ses:SendEmail`
  * dans `amplify/backend.ts`, qui doit être mise à jour EN MÊME TEMPS -- l'ARN de la policy
  * est scopé à cette valeur exacte).
+ *
+ * ⚠️ RISQUE DE LIVRAISON NON VÉRIFIABLE STATIQUEMENT (revue devsecops-aws, 2026-09-15) :
+ * `vet-alfort.fr` est le domaine professionnel de l'admin, PAS un domaine que ce projet
+ * contrôle (pas d'accès DNS) -- SES peut vérifier et envoyer depuis cette adresse, mais ne peut
+ * poser AUCUN enregistrement DKIM/SPF dessus. Si ce domaine publie une politique DMARC
+ * `p=quarantine`/`p=reject` (fréquent sur un domaine institutionnel, ex. défaut Google
+ * Workspace/M365), le mail envoyé via l'infrastructure SES échouera l'alignement DMARC côté
+ * réception et finira en spam/rejeté -- MÊME BOÎTE, MÊME DOMAINE des deux côtés. Cette Lambda
+ * est aujourd'hui l'UNIQUE canal qui signale une nouvelle Clinic `PENDING` (aucune interface
+ * admin, `retryAttempts: 0`, échec seulement logué -- voir `handler.ts`) : un échec DMARC
+ * systématique (pas juste un throttling ponctuel) rendrait donc TOUTES les inscriptions futures
+ * invisibles, silencieusement, sans aucun signal ailleurs dans l'app. À faire AVANT de se fier
+ * à ce canal en production, une fois l'identité vérifiée en console (aucun agent n'y a accès) :
+ * vérifier si `vet-alfort.fr` publie du DMARC, et tester un envoi réel de bout en bout.
  */
 export const CLINIC_VERIFICATION_SENDER_EMAIL = 'cyril.robert@vet-alfort.fr'
 export const CLINIC_VERIFICATION_ADMIN_EMAIL = 'cyril.robert@vet-alfort.fr'

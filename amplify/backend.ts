@@ -364,8 +364,10 @@ clinicVerificationNotifierLambda.addEventSource(
 )
 
 /**
- * `ses:SendEmail`/`ses:SendRawEmail` scopés à l'ARN EXACT de l'identité SES vérifiée
- * (`CLINIC_VERIFICATION_SENDER_EMAIL`, `amplify/functions/clinic-verification-notifier/
+ * `ses:SendEmail` seul (PAS `SendRawEmail` -- revue devsecops-aws : `handler.ts` ne construit
+ * jamais de MIME brut, seulement `SendEmailCommand`, ajouter l'action non utilisée aurait été
+ * un écart de moindre-privilège sans contrepartie) scopé à l'ARN EXACT de l'identité SES
+ * vérifiée (`CLINIC_VERIFICATION_SENDER_EMAIL`, `amplify/functions/clinic-verification-notifier/
  * resource.ts` -- voir ce fichier pour le choix de bootstrap sans domaine dédié), jamais de
  * wildcard (CLAUDE.md). `Stack.of(...).region`/`.account` : mêmes tokens CDK résolus à la
  * synthèse que le reste de ce fichier (ex. policy IAM du BFF), pas de valeur statique à
@@ -375,7 +377,7 @@ clinicVerificationNotifierLambda.addEventSource(
  */
 clinicVerificationNotifierLambda.addToRolePolicy(
   new PolicyStatement({
-    actions: ['ses:SendEmail', 'ses:SendRawEmail'],
+    actions: ['ses:SendEmail'],
     resources: [
       `arn:aws:ses:${Stack.of(clinicVerificationNotifierLambda).region}:${Stack.of(clinicVerificationNotifierLambda).account}:identity/${CLINIC_VERIFICATION_SENDER_EMAIL}`,
     ],
