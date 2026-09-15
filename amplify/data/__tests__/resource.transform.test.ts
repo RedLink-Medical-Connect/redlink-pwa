@@ -699,12 +699,59 @@ describe('amplify/data/resource.ts — double validation de Mission + notation (
       expect(typeAuthBlock).toContain('{allow: private, operations: [read]}')
     })
 
-    it("aucun AUTRE champ de Clinic ne porte de @auth au niveau champ (name, rpps, transfusionsDone, coordonnées...)", () => {
+    it("aucun AUTRE champ de Clinic ne porte de @auth au niveau champ, HORS verificationStatus (name, rpps, transfusionsDone, coordonnées...) — verificationStatus a sa propre garantie dédiée ci-dessous (clinicVerificationStatusFieldAuth, sous-tâche vérification d'identité RPPS/numéro d'ordre)", () => {
       let restOfType = clinicType.slice(clinicType.indexOf('name: String!'))
-      for (const fieldName of clinicModerationFields) {
+      for (const fieldName of [...clinicModerationFields, 'verificationStatus']) {
         restOfType = restOfType.replace(extractFieldAuthBlock(restOfType, fieldName), '')
       }
       expect(restOfType).not.toContain('@auth(')
+    })
+  })
+
+  describe('Clinic.verificationStatus — vérification d’identité (RPPS + numéro d’ordre), plan de durcissement sécurité "Différé 1"', () => {
+    const clinicType = extractType('Clinic')
+
+    it('le champ vit bien dans le type Clinic, nullable, référence bien le nouvel enum', () => {
+      expect(clinicType).toContain('verificationStatus: ClinicVerificationStatus @auth(')
+    })
+
+    it("Veterinarians a create+read (déclaration initiale à 'PENDING'), jamais update — Admins lecture seule uniquement, PAS de update même pour eux", () => {
+      const block = extractFieldAuthBlock(clinicType, 'verificationStatus')
+      expect(block).toContain('{allow: groups, operations: [create, read], groups: ["Veterinarians"]}')
+      expect(block).toContain('{allow: groups, operations: [read], groups: ["Admins"]}')
+      expect(block).not.toContain('update')
+      expect(block).not.toContain('delete')
+    })
+
+    it("la règle `private` de niveau modèle ne s'applique pas ici — verificationStatus n'est pas exposé à n'importe quel authentifié", () => {
+      const block = extractFieldAuthBlock(clinicType, 'verificationStatus')
+      expect(block).not.toContain('allow: private')
+      expect(block).not.toContain('allow: owner')
+    })
+
+    it("ClinicVerificationStatus n'accepte que PENDING/ACTIVE", () => {
+      expect(compiledSdl).toContain('enum ClinicVerificationStatus {\n  PENDING\n  ACTIVE\n}')
+    })
+  })
+
+  describe('approveClinicVerification — mutation custom réservée aux Admins (plan de durcissement sécurité "Différé 1")', () => {
+    it('compile en tant que mutation custom (argument id, retourne Clinic)', () => {
+      const mutationType = extractType('Mutation')
+      expect(mutationType).toContain('approveClinicVerification(id: ID!): Clinic')
+    })
+
+    it("autorisation restreinte au groupe Admins — @aws_cognito_user_pools(cognito_groups: [...]), PAS le @aws_cognito_user_pools seul de linkRequestToMission (allow.authenticated())", () => {
+      const mutationType = extractType('Mutation')
+      expect(mutationType).toContain(
+        'approveClinicVerification(id: ID!): Clinic @aws_cognito_user_pools(cognito_groups: ["Admins"])',
+      )
+    })
+  })
+
+  describe('Veterinarian.numeroOrdre — numéro d’ordre personnel du vétérinaire, distinct de Clinic.rpps (entreprise)', () => {
+    it('le champ vit bien dans le type Veterinarian, requis, sans @auth de champ dédiée (même niveau de confiance que rpps)', () => {
+      const veterinarianType = extractType('Veterinarian')
+      expect(veterinarianType).toContain('numeroOrdre: String!\n')
     })
   })
 

@@ -86,6 +86,7 @@ const buildVetData = (overrides = {}) => ({
   longitude: '2.4',
   clinic_name: 'Clinique Vétérinaire Alfort',
   rpps: '12345678901',
+  numeroOrdre: '987654',
   cguAccepted: true,
   privacyAccepted: true,
   ...overrides,
@@ -315,8 +316,14 @@ describe('useRegistrationCompletion.completeRegistration — chemin vet', () => 
 
     expect(calls).toEqual(['CreateClinic', 'CreateVeterinarian', 'CreateConsentRecord', 'CreateConsentRecord'])
     expect(clinicInput.id).toBeUndefined()
+    // Vérification d'identité (RPPS + numéro d'ordre) avant activation -- plan de
+    // durcissement sécurité "Différé 1" : 'PENDING' en dur, jamais une valeur transmise par
+    // le "client" (buildVetData() n'en fournit d'ailleurs aucune).
+    expect(clinicInput.verificationStatus).toBe('PENDING')
     expect(vetInput.id).toBe('cognito-vet-1')
     expect(vetInput.clinicID).toBe('clinic-generated-id')
+    // Numéro d'ordre personnel, distinct de rpps (clinique) déjà couvert ci-dessus.
+    expect(vetInput.numeroOrdre).toBe('987654')
     // userID = cognitoUserId directement (pas Clinic.id) -- Veterinarian.id EST le
     // cognitoUserId sur ce schéma, contrairement à Clinic qui a son propre id généré.
     expect(consentInputs).toEqual([

@@ -25,6 +25,11 @@ const form = ref({
   lastname: '',
   firstname: '',
   email: '',
+  // Numéro d'ordre (Ordre National des Vétérinaires), personnel au vétérinaire référent --
+  // distinct de `rpps` ci-dessous (RPPS de la clinique). Vérifié manuellement par un Admin
+  // avant activation de la Clinic (voir `Clinic.verificationStatus`,
+  // amplify/data/resource.ts).
+  numeroOrdre: '',
 
   clinic_name: '',
   rpps: '',
@@ -40,7 +45,13 @@ const form = ref({
 })
 
 const nextStep = () => {
-  if (!form.value.lastname || !form.value.firstname || !form.value.email || !password.value) {
+  if (
+    !form.value.lastname ||
+    !form.value.firstname ||
+    !form.value.numeroOrdre ||
+    !form.value.email ||
+    !password.value
+  ) {
     auth.setError(t('errors.fill_required_fields'))
     return
   }
@@ -157,6 +168,13 @@ const handleRegister = async () => {
             required
           />
         </div>
+
+        <InputText
+          v-model="form.numeroOrdre"
+          :placeholder="$t('auth.register_clinic.fields.numero_ordre')"
+          class="p-3 bg-zinc-100 dark:bg-zinc-800 border-none rounded"
+          required
+        />
 
         <InputText
           v-model="form.email"

@@ -207,6 +207,25 @@ const clinicRatingAndModerationFieldsReadOnly = (allow: any) => [
   allow.group('Veterinarians').to(['read']),
   allow.group('Admins').to(['read']),
 ]
+// Vérification d'identité du vétérinaire référent (RPPS + numéro d'ordre) avant activation
+// d'une nouvelle Clinic -- plan de durcissement sécurité, "Différé 1" (2026-09-02, ré-audit
+// 2026-09-04), repris ici. Le champ `create`+`read` seul pour Veterinarians -- jamais
+// `update`, `Admins` INCLUS : la Clinic déclare `PENDING` UNE SEULE FOIS, à sa propre
+// création (`useRegistrationCompletion.js`), et la SEULE voie légitime PENDING -> ACTIVE est
+// `approveClinicVerification` (mutation custom, `allow.group('Admins')`, écriture directe
+// DynamoDB -- idiome ADR-0011, section 5 plus bas), jamais un `update` généré.
+//
+// RÉSIDU ASSUMÉ, même famille que `missionStatusFieldAuth` ci-dessus : le composable envoie
+// toujours `'PENDING'` en dur (jamais une valeur choisie par l'utilisateur), mais un appel
+// GraphQL direct pourrait forger `createClinic(verificationStatus: ACTIVE)`. Sans effet de
+// bord dangereux immédiat contrairement à `Mission.status` : aucune donnée sensible n'est
+// débloquée par ce seul champ côté serveur (le `@auth` de niveau modèle de `Clinic` reste
+// inchangé, la garde réelle est la garde de navigation Vue, voir `src/router/index.js` --
+// ce champ ne fait QUE piloter l'UX, pas une autorisation GraphQL).
+const clinicVerificationStatusFieldAuth = (allow: any) => [
+  allow.group('Veterinarians').to(['create', 'read']),
+  allow.group('Admins').to(['read']),
+]
 // Pendant du helper ci-dessus pour `Owner` (`averageRatingAsOwner`/`ratingCountAsOwner`), avec
 // DEUX différences imposées par la règle de niveau modèle de `Owner`
 // (`allow.owner(), allow.group('Veterinarians').to(['read'])`), VÉRIFIÉE dans le SDL compilé
@@ -347,6 +366,12 @@ export const schema = a.schema({
   // `@auth`, aucun garde-fou applicatif ne lit `UNDER_REVIEW` -- pas d'exclusion automatique,
   // décision produit explicite.
   ClinicAccountStatus: a.enum(['ACTIVE', 'UNDER_REVIEW']),
+  // Vérification d'identité (RPPS + numéro d'ordre du vétérinaire référent) avant qu'une
+  // Clinic ne soit pleinement active -- voir `clinicVerificationStatusFieldAuth` ci-dessus.
+  // 'PENDING' est l'état INITIAL écrit explicitement à la création (contrairement à
+  // `MissionValidationOutcome`, pas de valeur implicite non écrite ici : le composable de
+  // création envoie 'PENDING' en dur).
+  ClinicVerificationStatus: a.enum(['PENDING', 'ACTIVE']),
 
   // 1. CLINIQUE & VÉTÉRINAIRES
   // ---------------------------------------------------------
@@ -395,6 +420,15 @@ export const schema = a.schema({
       // "juste le flag, une interface admin future tranchera").
       accountStatus: a.ref('ClinicAccountStatus').authorization(clinicRatingAndModerationFieldsReadOnly),
 
+      // Vérification d'identité (RPPS + numéro d'ordre) -- voir
+      // `clinicVerificationStatusFieldAuth` en tête de fichier. Écrit 'PENDING' en dur par
+      // `useRegistrationCompletion.js` à la création de la Clinic ; seule
+      // `approveClinicVerification` (mutation custom, section 5) peut le faire passer à
+      // 'ACTIVE'.
+      verificationStatus: a
+        .ref('ClinicVerificationStatus')
+        .authorization(clinicVerificationStatusFieldAuth),
+
       veterinarians: a.hasMany('Veterinarian', 'clinicID'),
       requests: a.hasMany('Request', 'clinicID'),
       clients: a.hasMany('ClinicOwnerRelation', 'clinicID'),
@@ -413,6 +447,16 @@ export const schema = a.schema({
       firstname: a.string().required(),
       lastname: a.string().required(),
       email: a.string().required(),
+
+      // Numéro d'ordre (Ordre National des Vétérinaires) -- personnel au vétérinaire,
+      // DISTINCT du `Clinic.rpps` existant (entreprise). Auto-déclaré comme `rpps`
+      // aujourd'hui, aucune `.authorization()` de champ dédiée (même niveau de confiance que
+      // `rpps` : vérifié manuellement par un Admin avant activation de la Clinic, voir
+      // `clinicVerificationStatusFieldAuth`, jamais par le schéma lui-même -- `.authorization()`
+      // Gen2 ne contraint pas une VALEUR). Absent pour une collègue invitée
+      // (`clinic-routes.ts`, `firstname`/`lastname` vides elles aussi) -- à compléter au même
+      // moment qu'elle complète son profil, hors périmètre de cette sous-tâche.
+      numeroOrdre: a.string().required(),
 
       // Invitation d'un vétérinaire par le référent de sa clinique (`amplify/functions/bff/
       // clinic-routes.ts`) : la ligne est écrite en DIRECT sur DynamoDB dès l'envoi de
@@ -1275,6 +1319,34 @@ export const schema = a.schema({
         entry: './resolvers/submit-mission-validation-increment-transfusions-done.js',
       }),
     ]),
+
+  // Vérification d'identité du vétérinaire référent (RPPS + numéro d'ordre) -- plan de
+  // durcissement sécurité "Différé 1" (2026-09-02/04). Même famille que
+  // `linkRequestToMission` ci-dessus : un seul `dataSource`, un seul aller-retour DynamoDB
+  // (unit resolver, pas de pipeline nécessaire) -- écriture conditionnelle simple, pas de
+  // vérification multi-modèle ni d'écriture cross-table.
+  //
+  // `allow.group('Admins')` : seule vraie garde de cette mutation, aucune interface admin ne
+  // consomme encore ce droit (voir `PendingVerificationView.vue`/le plan différé) -- un Admin
+  // l'appelle directement (console AppSync/client GraphQL) après avoir vérifié manuellement
+  // le RPPS/numéro d'ordre auprès de l'Ordre National des Vétérinaires (aucune API de
+  // vérification automatisée confirmée disponible à ce jour). Le resolver cible directement
+  // la table managée de `Clinic` (`dataSource: a.ref('Clinic')`) et BYPASSE entièrement le
+  // `@auth` de `Clinic` (type ET champ, y compris `clinicVerificationStatusFieldAuth` qui
+  // n'accorde `update` à personne, `Admins` inclus) -- exactement le même raisonnement
+  // qu'ADR-0011 : la seule garde d'autorisation est celle posée directement sur CETTE
+  // mutation, pas les règles du modèle qu'elle cible.
+  approveClinicVerification: a
+    .mutation()
+    .arguments({ id: a.id().required() })
+    .returns(a.ref('Clinic'))
+    .authorization((allow) => [allow.group('Admins')])
+    .handler(
+      a.handler.custom({
+        dataSource: a.ref('Clinic'),
+        entry: './resolvers/approve-clinic-verification.js',
+      }),
+    ),
 })
 
 export type Schema = ClientSchema<typeof schema>

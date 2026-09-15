@@ -200,6 +200,11 @@ export function useRegistrationCompletion() {
       hasEmergencyService: false,
       transfusionsDone: 0,
       donorOwnersCount: 0,
+      // Vérification d'identité (RPPS + numéro d'ordre) avant activation -- plan de
+      // durcissement sécurité "Différé 1". 'PENDING' en dur, jamais une valeur choisie par
+      // l'utilisateur (voir `clinicVerificationStatusFieldAuth`, amplify/data/resource.ts,
+      // pour le résidu assumé sur ce point).
+      verificationStatus: 'PENDING',
     })
 
     throwIfGraphqlError(clinicErrors, 'createClinic')
@@ -210,6 +215,9 @@ export function useRegistrationCompletion() {
       firstname: data.firstname,
       lastname: data.lastname,
       email: data.email,
+      // Numéro d'ordre (Ordre National des Vétérinaires), personnel au vétérinaire --
+      // distinct de `data.rpps` (RPPS de la clinique, déjà envoyé ci-dessus).
+      numeroOrdre: data.numeroOrdre,
       // Toujours `true` pour l'auto-inscription (contrairement à l'invitation d'un collègue,
       // `clinic-routes.ts`) : le compte Cognito est déjà confirmé (email vérifié) à cette
       // étape -- voir le commentaire du champ dans `amplify/data/resource.ts`.
