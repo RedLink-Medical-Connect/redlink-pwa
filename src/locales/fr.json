@@ -264,6 +264,7 @@
     "reset_password_failed": "Code invalide ou erreur système.",
     "invalid_phone": "Numéro invalide.",
     "invalid_address": "Veuillez sélectionner une adresse valide dans la liste.",
+    "invalid_rpps": "Numéro RPPS invalide (11 chiffres attendus).",
     "delete_account_failed": "Impossible de supprimer le compte pour le moment.",
     "session_expired": "Session expirée.",
     "password_required": "Mot de passe requis.",

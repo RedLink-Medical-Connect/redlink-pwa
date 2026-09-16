@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { usePassword } from '@/composables/usePassword'
+import { isValidRpps } from '@/services/rpps-service'
 import { useI18n } from 'vue-i18n'
 import AddressAutocomplete from '@/components/common/AddressAutocomplete.vue'
 import PhoneInput from '@/components/common/PhoneInput.vue'
@@ -82,6 +83,14 @@ const onAddressSelect = (data) => {
 const handleRegister = async () => {
   if (!form.value.clinic_name || !form.value.rpps || !form.value.address) {
     auth.setError(t('errors.fill_required_fields'))
+    return
+  }
+  // Vérification de FORMAT seule (11 chiffres + clé de Luhn) -- ne garantit pas que ce RPPS
+  // appartient à un professionnel réellement inscrit, voir src/services/rpps-service.js. La
+  // vraie vérification reste la revue manuelle admin avant activation de la Clinic
+  // (Clinic.verificationStatus, amplify/data/resource.ts).
+  if (!isValidRpps(form.value.rpps)) {
+    auth.setError(t('errors.invalid_rpps'))
     return
   }
   if (!form.value.latitude || !form.value.longitude) {
