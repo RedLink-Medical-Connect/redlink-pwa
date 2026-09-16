@@ -89,7 +89,13 @@ const handleRegister = async () => {
   // appartient à un professionnel réellement inscrit, voir src/services/rpps-service.js. La
   // vraie vérification reste la revue manuelle admin avant activation de la Clinic
   // (Clinic.verificationStatus, amplify/data/resource.ts).
-  if (!isValidRpps(form.value.rpps)) {
+  //
+  // Désactivée en dev local (`import.meta.env.DEV`, posé par Vite -- jamais vrai une fois
+  // buildé/déployé, voir vite.config.js) : demande explicite du repo owner (2026-09-16) pour
+  // pouvoir tester le flux d'inscription en sandbox sans avoir à retenir/calculer un vrai
+  // numéro à clé de Luhn valide à chaque essai. Le format réel reste vérifié partout ailleurs
+  // (preview/prod).
+  if (!import.meta.env.DEV && !isValidRpps(form.value.rpps)) {
     auth.setError(t('errors.invalid_rpps'))
     return
   }

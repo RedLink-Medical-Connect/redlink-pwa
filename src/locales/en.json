@@ -264,7 +264,7 @@
     "reset_password_failed": "Invalid code or system error.",
     "invalid_phone": "Invalid phone number.",
     "invalid_address": "Please select a valid address from the list.",
-    "invalid_rpps": "Invalid RPPS number (11 digits expected).",
+    "invalid_rpps": "This RPPS number doesn't look valid: it should be 11 digits including a check digit. Make sure it's the referring veterinarian's own personal RPPS number (not another number like a SIRET). It will also be manually verified by our team before the account is activated.",
     "delete_account_failed": "Unable to delete the account right now.",
     "session_expired": "Session expired.",
     "password_required": "Password required.",
