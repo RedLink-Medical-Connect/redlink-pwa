@@ -25,31 +25,32 @@ import { defineFunction } from '@aws-amplify/backend'
  * encore en mode SANDBOX par défaut sur un nouveau compte -- à confirmer/faire vérifier par le
  * repo owner avant le premier déploiement réel, aucun agent ne déploie ni ne configure la
  * console AWS, voir CLAUDE.md). En mode sandbox, SES n'autorise l'envoi QUE vers des adresses
- * elles-mêmes vérifiées -- utiliser la MÊME adresse comme expéditeur ET destinataire
- * (`cyril.robert@vet-alfort.fr`, l'admin qui traite l'approbation) permet de démarrer avec une
- * seule identité à vérifier manuellement (console SES, "Verified identities"), sans réserver
- * un domaine dédié. Repointer `CLINIC_VERIFICATION_SENDER_EMAIL` vers une adresse `no-reply@`
- * dédiée le jour où un domaine SES est vérifié et le compte sorti du mode sandbox reste un
- * changement d'une seule ligne (voir aussi le commentaire IAM sur la policy `ses:SendEmail`
- * dans `amplify/backend.ts`, qui doit être mise à jour EN MÊME TEMPS -- l'ARN de la policy
- * est scopé à cette valeur exacte).
+ * elles-mêmes vérifiées -- utiliser la MÊME adresse comme expéditeur ET destinataire permet de
+ * démarrer avec une seule identité à vérifier manuellement (console SES, "Verified
+ * identities"), sans réserver un domaine dédié. Repointer `CLINIC_VERIFICATION_SENDER_EMAIL`
+ * vers une adresse `no-reply@` dédiée le jour où un domaine SES est vérifié et le compte sorti
+ * du mode sandbox reste un changement d'une seule ligne (voir aussi le commentaire IAM sur la
+ * policy `ses:SendEmail` dans `amplify/backend.ts`, qui doit être mise à jour EN MÊME TEMPS --
+ * l'ARN de la policy est scopé à cette valeur exacte).
  *
- * ⚠️ RISQUE DE LIVRAISON NON VÉRIFIABLE STATIQUEMENT (revue devsecops-aws, 2026-09-15) :
- * `vet-alfort.fr` est le domaine professionnel de l'admin, PAS un domaine que ce projet
- * contrôle (pas d'accès DNS) -- SES peut vérifier et envoyer depuis cette adresse, mais ne peut
- * poser AUCUN enregistrement DKIM/SPF dessus. Si ce domaine publie une politique DMARC
- * `p=quarantine`/`p=reject` (fréquent sur un domaine institutionnel, ex. défaut Google
- * Workspace/M365), le mail envoyé via l'infrastructure SES échouera l'alignement DMARC côté
- * réception et finira en spam/rejeté -- MÊME BOÎTE, MÊME DOMAINE des deux côtés. Cette Lambda
- * est aujourd'hui l'UNIQUE canal qui signale une nouvelle Clinic `PENDING` (aucune interface
- * admin, `retryAttempts: 0`, échec seulement logué -- voir `handler.ts`) : un échec DMARC
- * systématique (pas juste un throttling ponctuel) rendrait donc TOUTES les inscriptions futures
- * invisibles, silencieusement, sans aucun signal ailleurs dans l'app. À faire AVANT de se fier
- * à ce canal en production, une fois l'identité vérifiée en console (aucun agent n'y a accès) :
- * vérifier si `vet-alfort.fr` publie du DMARC, et tester un envoi réel de bout en bout.
+ * ⚠️ RISQUE DE LIVRAISON NON VÉRIFIABLE STATIQUEMENT (revue devsecops-aws, 2026-09-15 ;
+ * adresse changée le 2026-09-16 pour un test réel -- même risque, aggravé). `gmail.com` n'est
+ * PAS un domaine que ce projet contrôle -- SES peut vérifier et envoyer depuis cette adresse,
+ * mais ne peut poser AUCUN enregistrement DKIM/SPF dessus. Gmail applique une politique DMARC
+ * stricte ET des heuristiques anti-spoofing particulièrement agressives sur son PROPRE domaine
+ * (probablement PIRE qu'un domaine institutionnel moins surveillé, voir la note précédente sur
+ * `vet-alfort.fr`, toujours valable en substance) : un email "From: 17titou@gmail.com" envoyé
+ * depuis l'infrastructure SES (pas les serveurs Google) a un risque réel élevé d'atterrir en
+ * spam voire d'être rejeté silencieusement, MÊME BOÎTE des deux côtés. Cette Lambda est
+ * aujourd'hui l'UNIQUE canal qui signale une nouvelle Clinic `PENDING` (aucune interface admin,
+ * `retryAttempts: 0`, échec seulement logué -- voir `handler.ts`) : un échec systématique
+ * rendrait donc TOUTES les inscriptions futures invisibles, silencieusement. Une fois
+ * l'identité vérifiée en console (aucun agent n'y a accès) : vérifier le dossier spam en plus
+ * de la boîte de réception, et consulter le tableau de bord SES (taux de rebond/plainte) si
+ * rien n'arrive nulle part.
  */
-export const CLINIC_VERIFICATION_SENDER_EMAIL = 'cyril.robert@vet-alfort.fr'
-export const CLINIC_VERIFICATION_ADMIN_EMAIL = 'cyril.robert@vet-alfort.fr'
+export const CLINIC_VERIFICATION_SENDER_EMAIL = '17titou@gmail.com'
+export const CLINIC_VERIFICATION_ADMIN_EMAIL = '17titou@gmail.com'
 
 export const clinicVerificationNotifier = defineFunction({
   name: 'clinic-verification-notifier',
