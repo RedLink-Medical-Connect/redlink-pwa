@@ -264,6 +264,7 @@
     "reset_password_failed": "Code invalide ou erreur système.",
     "invalid_phone": "Numéro invalide.",
     "invalid_address": "Veuillez sélectionner une adresse valide dans la liste.",
+    "invalid_rpps": "Ce numéro RPPS ne semble pas valide : il doit comporter 11 chiffres, dont une clé de contrôle. Vérifiez qu'il s'agit bien du numéro RPPS personnel du vétérinaire référent (pas un autre numéro comme le SIRET). Il sera aussi vérifié manuellement par notre équipe avant l'activation du compte.",
     "delete_account_failed": "Impossible de supprimer le compte pour le moment.",
     "session_expired": "Session expirée.",
     "password_required": "Mot de passe requis.",
@@ -517,6 +518,7 @@
       "fields": {
         "clinic_name": "NOM DE LA CLINIQUE",
         "rpps": "NUMÉRO RPPS",
+        "numero_ordre": "NUMÉRO D'ORDRE",
         "emergency_service": "SERVICE D'URGENCE ?"
       }
     }
@@ -1136,5 +1138,9 @@
     "title": "Page introuvable",
     "description": "Cette page n'existe pas ou plus. Vérifiez l'adresse ou revenez à l'accueil.",
     "cta": "Retour à l'accueil"
+  },
+  "pendingVerification": {
+    "title": "Compte en cours de vérification",
+    "description": "Votre inscription est bien enregistrée. Notre équipe vérifie actuellement le RPPS de votre clinique et votre numéro d'ordre auprès de l'Ordre National des Vétérinaires. Vous recevrez un accès complet dès que cette vérification sera terminée."
   }
 }

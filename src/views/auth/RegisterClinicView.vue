@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { usePassword } from '@/composables/usePassword'
+import { isValidRpps } from '@/services/rpps-service'
 import { useI18n } from 'vue-i18n'
 import AddressAutocomplete from '@/components/common/AddressAutocomplete.vue'
 import PhoneInput from '@/components/common/PhoneInput.vue'
@@ -25,6 +26,11 @@ const form = ref({
   lastname: '',
   firstname: '',
   email: '',
+  // Numéro d'ordre (Ordre National des Vétérinaires), personnel au vétérinaire référent --
+  // distinct de `rpps` ci-dessous (RPPS de la clinique). Vérifié manuellement par un Admin
+  // avant activation de la Clinic (voir `Clinic.verificationStatus`,
+  // amplify/data/resource.ts).
+  numeroOrdre: '',
 
   clinic_name: '',
   rpps: '',
@@ -40,7 +46,13 @@ const form = ref({
 })
 
 const nextStep = () => {
-  if (!form.value.lastname || !form.value.firstname || !form.value.email || !password.value) {
+  if (
+    !form.value.lastname ||
+    !form.value.firstname ||
+    !form.value.numeroOrdre ||
+    !form.value.email ||
+    !password.value
+  ) {
     auth.setError(t('errors.fill_required_fields'))
     return
   }
@@ -71,6 +83,20 @@ const onAddressSelect = (data) => {
 const handleRegister = async () => {
   if (!form.value.clinic_name || !form.value.rpps || !form.value.address) {
     auth.setError(t('errors.fill_required_fields'))
+    return
+  }
+  // Vérification de FORMAT seule (11 chiffres + clé de Luhn) -- ne garantit pas que ce RPPS
+  // appartient à un professionnel réellement inscrit, voir src/services/rpps-service.js. La
+  // vraie vérification reste la revue manuelle admin avant activation de la Clinic
+  // (Clinic.verificationStatus, amplify/data/resource.ts).
+  //
+  // Désactivée en dev local (`import.meta.env.DEV`, posé par Vite -- jamais vrai une fois
+  // buildé/déployé, voir vite.config.js) : demande explicite du repo owner (2026-09-16) pour
+  // pouvoir tester le flux d'inscription en sandbox sans avoir à retenir/calculer un vrai
+  // numéro à clé de Luhn valide à chaque essai. Le format réel reste vérifié partout ailleurs
+  // (preview/prod).
+  if (!import.meta.env.DEV && !isValidRpps(form.value.rpps)) {
+    auth.setError(t('errors.invalid_rpps'))
     return
   }
   if (!form.value.latitude || !form.value.longitude) {
@@ -157,6 +183,13 @@ const handleRegister = async () => {
             required
           />
         </div>
+
+        <InputText
+          v-model="form.numeroOrdre"
+          :placeholder="$t('auth.register_clinic.fields.numero_ordre')"
+          class="p-3 bg-zinc-100 dark:bg-zinc-800 border-none rounded"
+          required
+        />
 
         <InputText
           v-model="form.email"

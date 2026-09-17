@@ -23,6 +23,10 @@ import { data, MISSION_STATUS_INDEX_NAME, RATING_TARGET_INDEX_NAME } from './dat
 import { postConfirmation } from './functions/post-confirmation/resource'
 import { missionValidationAutoFinalizer } from './functions/mission-validation-auto-finalizer/resource'
 import { ratingAggregation } from './functions/rating-aggregation/resource'
+import {
+  clinicVerificationNotifier,
+  CLINIC_VERIFICATION_SENDER_EMAIL,
+} from './functions/clinic-verification-notifier/resource'
 import { bff } from './functions/bff/resource'
 import { ORIGIN_VERIFY_HEADER } from './functions/bff/origin-verify'
 import { veterinarianAccountAdmin } from './functions/veterinarian-account-admin/resource'
@@ -39,6 +43,7 @@ const backend = defineBackend({
   data,
   missionValidationAutoFinalizer,
   ratingAggregation,
+  clinicVerificationNotifier,
   bff,
   veterinarianAccountAdmin,
 })
@@ -328,6 +333,56 @@ backend.ratingAggregation.addEnvironment('RATING_TABLE_NAME', ratingTable.tableN
 backend.ratingAggregation.addEnvironment('RATING_TARGET_INDEX_NAME', RATING_TARGET_INDEX_NAME)
 backend.ratingAggregation.addEnvironment('CLINIC_TABLE_NAME', clinicTable.tableName)
 backend.ratingAggregation.addEnvironment('OWNER_TABLE_NAME', ownerTable.tableName)
+
+/**
+ * Lambda `clinic-verification-notifier` (2026-09-15, plan de durcissement sécurité "Différé
+ * 1" -- vérification d'identité RPPS/numéro d'ordre du vétérinaire référent avant activation
+ * d'une Clinic). Même famille de câblage que `ratingAggregationLambda` juste au-dessus (flux
+ * DynamoDB Streams déjà actif sur `Clinic`, `DynamoEventSource` crée l'`EventSourceMapping` ET
+ * les permissions de lecture du flux), avec des réglages plus légers :
+ * - `filters` : seuls les `INSERT` déclenchent la Lambda -- une nouvelle Clinic ne peut être
+ *   créée qu'une fois (`useRegistrationCompletion.js`), jamais réécrite avec le même effet.
+ * - `retryAttempts: 0` (pas 3 comme `ratingAggregation`) : voir le commentaire d'en-tête de
+ *   `handler.ts` -- un échec SES est soit transitoire (un rejeu immédiat par le même
+ *   `EventSourceMapping` n'aide pas plus qu'une prochaine invocation naturelle), soit durable
+ *   (identité SES non vérifiée), et cette notification n'a aucun effet de bord sur les données
+ *   contrairement à `rating-aggregation` -- bloquer le shard `Clinic` pour un email manqué
+ *   serait disproportionné.
+ * - Aucune policy IAM DynamoDB : ce handler ne fait aucun appel DynamoDB (voir son en-tête),
+ *   seulement `ses:SendEmail`.
+ */
+const clinicVerificationNotifierLambda = backend.clinicVerificationNotifier.resources.lambda
+
+clinicVerificationNotifierLambda.addEventSource(
+  new DynamoEventSource(clinicTable, {
+    startingPosition: StartingPosition.LATEST,
+    batchSize: 5,
+    maxBatchingWindow: Duration.seconds(5),
+    retryAttempts: 0,
+    filters: [FilterCriteria.filter({ eventName: FilterRule.isEqual('INSERT') })],
+  }),
+)
+
+/**
+ * `ses:SendEmail` seul (PAS `SendRawEmail` -- revue devsecops-aws : `handler.ts` ne construit
+ * jamais de MIME brut, seulement `SendEmailCommand`, ajouter l'action non utilisée aurait été
+ * un écart de moindre-privilège sans contrepartie) scopé à l'ARN EXACT de l'identité SES
+ * vérifiée (`CLINIC_VERIFICATION_SENDER_EMAIL`, `amplify/functions/clinic-verification-notifier/
+ * resource.ts` -- voir ce fichier pour le choix de bootstrap sans domaine dédié), jamais de
+ * wildcard (CLAUDE.md). `Stack.of(...).region`/`.account` : mêmes tokens CDK résolus à la
+ * synthèse que le reste de ce fichier (ex. policy IAM du BFF), pas de valeur statique à
+ * deviner. Si `CLINIC_VERIFICATION_SENDER_EMAIL` change (domaine SES dédié plus tard), cette
+ * policy DOIT changer avec -- les deux valeurs viennent du même import, un désynchronisé est
+ * donc mécaniquement impossible ici (contrairement à un ARN recopié en dur séparément).
+ */
+clinicVerificationNotifierLambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: ['ses:SendEmail'],
+    resources: [
+      `arn:aws:ses:${Stack.of(clinicVerificationNotifierLambda).region}:${Stack.of(clinicVerificationNotifierLambda).account}:identity/${CLINIC_VERIFICATION_SENDER_EMAIL}`,
+    ],
+  }),
+)
 
 /**
  * Geo (Amazon Location Service place index) -- prérequis découvert tardivement en
