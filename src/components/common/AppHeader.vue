@@ -68,7 +68,10 @@ const toggleMenu = (event) => {
   >
     <div class="container mx-auto px-4 h-full flex items-center justify-between">
       <div class="flex items-center gap-4 mr-auto">
-        <router-link to="/" class="flex items-center gap-2 group">
+        <router-link
+          :to="auth.isAuthenticated ? '/dashboard' : '/'"
+          class="flex items-center gap-2 group"
+        >
           <span
             class="text-2xl font-bold text-[#ff3b4e] tracking-tight group-hover:opacity-90 transition"
           >
