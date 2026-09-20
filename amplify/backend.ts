@@ -27,6 +27,10 @@ import {
   clinicVerificationNotifier,
   CLINIC_VERIFICATION_SENDER_EMAIL,
 } from './functions/clinic-verification-notifier/resource'
+import { animalDonorNotifier } from './functions/animal-donor-notifier/resource'
+import { missionNotifier } from './functions/mission-notifier/resource'
+import { requestMatcherNotifier } from './functions/request-matcher-notifier/resource'
+import { animalValidationExpiryNotifier } from './functions/animal-validation-expiry-notifier/resource'
 import { bff } from './functions/bff/resource'
 import { ORIGIN_VERIFY_HEADER } from './functions/bff/origin-verify'
 import { veterinarianAccountAdmin } from './functions/veterinarian-account-admin/resource'
@@ -44,6 +48,10 @@ const backend = defineBackend({
   missionValidationAutoFinalizer,
   ratingAggregation,
   clinicVerificationNotifier,
+  animalDonorNotifier,
+  missionNotifier,
+  requestMatcherNotifier,
+  animalValidationExpiryNotifier,
   bff,
   veterinarianAccountAdmin,
 })
@@ -348,8 +356,12 @@ backend.ratingAggregation.addEnvironment('OWNER_TABLE_NAME', ownerTable.tableNam
  *   (identité SES non vérifiée), et cette notification n'a aucun effet de bord sur les données
  *   contrairement à `rating-aggregation` -- bloquer le shard `Clinic` pour un email manqué
  *   serait disproportionné.
- * - Aucune policy IAM DynamoDB : ce handler ne fait aucun appel DynamoDB (voir son en-tête),
- *   seulement `ses:SendEmail`.
+ * - `ses:SendEmail` (identité vérifiée) ET DÉSORMAIS `dynamodb:PutItem` sur la table
+ *   `Notification` (système de notifications, 2026-09-17 -- voir `handler.ts` :
+ *   `notifyAdminBadgeOfPendingClinic`, écriture broadcast `recipientGroup: "Admins"`,
+ *   best-effort indépendante de l'email). Toujours PAS de lecture/écriture sur `Clinic`
+ *   elle-même (le handler consomme le `NewImage` du flux, jamais un aller-retour DynamoDB
+ *   supplémentaire sur cette table).
  */
 const clinicVerificationNotifierLambda = backend.clinicVerificationNotifier.resources.lambda
 
@@ -382,6 +394,225 @@ clinicVerificationNotifierLambda.addToRolePolicy(
       `arn:aws:ses:${Stack.of(clinicVerificationNotifierLambda).region}:${Stack.of(clinicVerificationNotifierLambda).account}:identity/${CLINIC_VERIFICATION_SENDER_EMAIL}`,
     ],
   }),
+)
+
+/**
+ * Système de notifications (badge + email, 2026-09-17, étendu le 2026-09-18) --
+ * `notificationTable` réutilisée par TOUTES les écritures directes DynamoDB du système :
+ * celle-ci, les 4 nouvelles Lambdas de notification métier (`mission-notifier`/
+ * `request-matcher-notifier`/`animal-donor-notifier`/`animal-validation-expiry-notifier`),
+ * l'extension de `rating-aggregation`, ET la 2e fonction du pipeline
+ * `approveClinicVerification` (cette dernière via `dataSource: a.ref('Notification')` dans
+ * `amplify/data/resource.ts` -- AppSync gère lui-même les permissions de son propre resolver,
+ * aucune policy IAM à poser ici pour ce chemin d'écriture précis).
+ * `dynamodb:PutItem` seul pour CETTE Lambda (jamais `GetItem`/`UpdateItem`/`Scan` : ce handler
+ * ne fait QUE créer une ligne broadcast, jamais en lire ni en modifier une) -- les autres
+ * Lambdas ci-dessous posent leur propre policy, parfois plus large selon leur besoin réel.
+ */
+const notificationTable = backend.data.resources.tables['Notification']
+
+clinicVerificationNotifierLambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: ['dynamodb:PutItem'],
+    resources: [notificationTable.tableArn],
+  }),
+)
+
+backend.clinicVerificationNotifier.addEnvironment('NOTIFICATION_TABLE_NAME', notificationTable.tableName)
+
+/**
+ * Extension de `rating-aggregation` (système de notifications, 2026-09-18) : signalement
+ * `CLINIC_UNDER_REVIEW` (broadcast Admins) quand une Clinic franchit le seuil de modération --
+ * voir `notifyClinicUnderReview` dans son `handler.ts`. PREMIÈRE fois que cette Lambda a besoin
+ * de `ses:SendEmail`/`dynamodb:PutItem` sur `Notification` (jusqu'ici purement DynamoDB direct
+ * sur `Clinic`/`Owner`, aucun email).
+ */
+const ratingAggregationLambdaForNotifications = backend.ratingAggregation.resources.lambda
+
+ratingAggregationLambdaForNotifications.addToRolePolicy(
+  new PolicyStatement({ actions: ['dynamodb:PutItem'], resources: [notificationTable.tableArn] }),
+)
+ratingAggregationLambdaForNotifications.addToRolePolicy(
+  new PolicyStatement({
+    actions: ['ses:SendEmail'],
+    resources: [
+      `arn:aws:ses:${Stack.of(ratingAggregationLambdaForNotifications).region}:${Stack.of(ratingAggregationLambdaForNotifications).account}:identity/${CLINIC_VERIFICATION_SENDER_EMAIL}`,
+    ],
+  }),
+)
+backend.ratingAggregation.addEnvironment('NOTIFICATION_TABLE_NAME', notificationTable.tableName)
+
+/**
+ * Lambda `animal-donor-notifier` (système de notifications, 2026-09-18) -- flux DynamoDB
+ * Streams sur `Animal`, `MODIFY` uniquement (voir son `resource.ts`/`handler.ts` : la
+ * comparaison de transition `isValidatedDonor` false->true se fait DANS le handler, défense en
+ * profondeur, même discipline que `rating-aggregation`). `retryAttempts: 0` -- best-effort,
+ * même raisonnement que `clinicVerificationNotifierLambda` ci-dessus (une notification manquée
+ * n'a aucun effet de bord sur les données).
+ */
+const animalDonorNotifierLambda = backend.animalDonorNotifier.resources.lambda
+
+animalDonorNotifierLambda.addEventSource(
+  new DynamoEventSource(animalTable, {
+    startingPosition: StartingPosition.LATEST,
+    batchSize: 5,
+    maxBatchingWindow: Duration.seconds(5),
+    retryAttempts: 0,
+    filters: [FilterCriteria.filter({ eventName: FilterRule.isEqual('MODIFY') })],
+  }),
+)
+animalDonorNotifierLambda.addToRolePolicy(
+  new PolicyStatement({ actions: ['dynamodb:GetItem'], resources: [ownerTable.tableArn] }),
+)
+animalDonorNotifierLambda.addToRolePolicy(
+  new PolicyStatement({ actions: ['dynamodb:PutItem'], resources: [notificationTable.tableArn] }),
+)
+animalDonorNotifierLambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: ['ses:SendEmail'],
+    resources: [
+      `arn:aws:ses:${Stack.of(animalDonorNotifierLambda).region}:${Stack.of(animalDonorNotifierLambda).account}:identity/${CLINIC_VERIFICATION_SENDER_EMAIL}`,
+    ],
+  }),
+)
+backend.animalDonorNotifier.addEnvironment('OWNER_TABLE_NAME', ownerTable.tableName)
+backend.animalDonorNotifier.addEnvironment('NOTIFICATION_TABLE_NAME', notificationTable.tableName)
+
+/**
+ * Lambda `mission-notifier` (système de notifications, 2026-09-18) -- flux DynamoDB Streams sur
+ * `Mission`, `INSERT` + `MODIFY` (trois événements distincts démêlés DANS le handler par
+ * comparaison Old/New -- voir son en-tête). Besoin de lecture sur QUATRE tables
+ * (`Request`/`Clinic`/`Animal`/`Owner`) : la plus large policy `GetItem` de ce système, reflet
+ * direct de la résolution `Mission -> Request -> Clinic` (`Mission` ne porte pas `clinicID`,
+ * même contrainte que `mission-validation-auto-finalizer`) et `Mission -> Animal -> Owner`.
+ */
+const missionNotifierLambda = backend.missionNotifier.resources.lambda
+
+missionNotifierLambda.addEventSource(
+  new DynamoEventSource(missionTable, {
+    startingPosition: StartingPosition.LATEST,
+    batchSize: 5,
+    maxBatchingWindow: Duration.seconds(5),
+    retryAttempts: 0,
+    filters: [
+      FilterCriteria.filter({ eventName: FilterRule.isEqual('INSERT') }),
+      FilterCriteria.filter({ eventName: FilterRule.isEqual('MODIFY') }),
+    ],
+  }),
+)
+missionNotifierLambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: ['dynamodb:GetItem'],
+    resources: [requestTable.tableArn, clinicTable.tableArn, animalTable.tableArn, ownerTable.tableArn],
+  }),
+)
+missionNotifierLambda.addToRolePolicy(
+  new PolicyStatement({ actions: ['dynamodb:PutItem'], resources: [notificationTable.tableArn] }),
+)
+missionNotifierLambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: ['ses:SendEmail'],
+    resources: [
+      `arn:aws:ses:${Stack.of(missionNotifierLambda).region}:${Stack.of(missionNotifierLambda).account}:identity/${CLINIC_VERIFICATION_SENDER_EMAIL}`,
+    ],
+  }),
+)
+backend.missionNotifier.addEnvironment('REQUEST_TABLE_NAME', requestTable.tableName)
+backend.missionNotifier.addEnvironment('CLINIC_TABLE_NAME', clinicTable.tableName)
+backend.missionNotifier.addEnvironment('ANIMAL_TABLE_NAME', animalTable.tableName)
+backend.missionNotifier.addEnvironment('OWNER_TABLE_NAME', ownerTable.tableName)
+backend.missionNotifier.addEnvironment('NOTIFICATION_TABLE_NAME', notificationTable.tableName)
+
+/**
+ * Lambda `request-matcher-notifier` (système de notifications, 2026-09-18) -- flux DynamoDB
+ * Streams sur `Request`, `INSERT` uniquement. Le trou le plus critique comblé par ce système
+ * (voir son `resource.ts`) : `dynamodb:Scan` sur `Animal` ET `OwnerAvailability` (aucun GSI sur
+ * ni l'un ni l'autre, même précédent "Scan filtré, pilote" que `upsertClinicOwnerRelation`/
+ * `mission-validation-auto-finalizer`), `GetItem` sur `Clinic`/`Owner`.
+ */
+const ownerAvailabilityTable = backend.data.resources.tables['OwnerAvailability']
+const requestMatcherNotifierLambda = backend.requestMatcherNotifier.resources.lambda
+
+requestMatcherNotifierLambda.addEventSource(
+  new DynamoEventSource(requestTable, {
+    startingPosition: StartingPosition.LATEST,
+    batchSize: 5,
+    maxBatchingWindow: Duration.seconds(5),
+    retryAttempts: 0,
+    filters: [FilterCriteria.filter({ eventName: FilterRule.isEqual('INSERT') })],
+  }),
+)
+requestMatcherNotifierLambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: ['dynamodb:GetItem'],
+    resources: [clinicTable.tableArn, ownerTable.tableArn],
+  }),
+)
+requestMatcherNotifierLambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: ['dynamodb:Scan'],
+    resources: [animalTable.tableArn, ownerAvailabilityTable.tableArn],
+  }),
+)
+requestMatcherNotifierLambda.addToRolePolicy(
+  new PolicyStatement({ actions: ['dynamodb:PutItem'], resources: [notificationTable.tableArn] }),
+)
+requestMatcherNotifierLambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: ['ses:SendEmail'],
+    resources: [
+      `arn:aws:ses:${Stack.of(requestMatcherNotifierLambda).region}:${Stack.of(requestMatcherNotifierLambda).account}:identity/${CLINIC_VERIFICATION_SENDER_EMAIL}`,
+    ],
+  }),
+)
+backend.requestMatcherNotifier.addEnvironment('CLINIC_TABLE_NAME', clinicTable.tableName)
+backend.requestMatcherNotifier.addEnvironment('ANIMAL_TABLE_NAME', animalTable.tableName)
+backend.requestMatcherNotifier.addEnvironment('OWNER_TABLE_NAME', ownerTable.tableName)
+backend.requestMatcherNotifier.addEnvironment(
+  'OWNER_AVAILABILITY_TABLE_NAME',
+  ownerAvailabilityTable.tableName,
+)
+backend.requestMatcherNotifier.addEnvironment('NOTIFICATION_TABLE_NAME', notificationTable.tableName)
+
+/**
+ * Lambda PLANIFIÉE `animal-validation-expiry-notifier` (système de notifications, 2026-09-18) --
+ * AUCUN `addEventSource` (pas de flux DynamoDB, planning EventBridge Scheduler déjà posé
+ * `resource.ts` via `schedule`, même mécanisme que `missionValidationAutoFinalizer`).
+ * `dynamodb:UpdateItem` sur `Animal` SCOPÉ au champ `donorValidationExpiryNotifiedAt` par le
+ * `@auth` de champ (`donorValidationExpiryNotifiedFieldAuth`, `amplify/data/resource.ts`) --
+ * l'IAM ici ne peut pas restreindre à un CHAMP précis (limite structurelle DynamoDB : une
+ * policy IAM `UpdateItem` s'accorde au niveau de l'ITEM, jamais de l'attribut), la garde réelle
+ * contre une écriture d'un autre champ est donc le CODE du handler lui-même (`UpdateExpression`
+ * qui ne touche jamais que ce champ), pas l'IAM -- signalé plutôt que supposé fermé par la
+ * policy seule.
+ */
+const animalValidationExpiryNotifierLambda = backend.animalValidationExpiryNotifier.resources.lambda
+
+animalValidationExpiryNotifierLambda.addToRolePolicy(
+  new PolicyStatement({ actions: ['dynamodb:Scan'], resources: [animalTable.tableArn] }),
+)
+animalValidationExpiryNotifierLambda.addToRolePolicy(
+  new PolicyStatement({ actions: ['dynamodb:UpdateItem'], resources: [animalTable.tableArn] }),
+)
+animalValidationExpiryNotifierLambda.addToRolePolicy(
+  new PolicyStatement({ actions: ['dynamodb:GetItem'], resources: [ownerTable.tableArn] }),
+)
+animalValidationExpiryNotifierLambda.addToRolePolicy(
+  new PolicyStatement({ actions: ['dynamodb:PutItem'], resources: [notificationTable.tableArn] }),
+)
+animalValidationExpiryNotifierLambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: ['ses:SendEmail'],
+    resources: [
+      `arn:aws:ses:${Stack.of(animalValidationExpiryNotifierLambda).region}:${Stack.of(animalValidationExpiryNotifierLambda).account}:identity/${CLINIC_VERIFICATION_SENDER_EMAIL}`,
+    ],
+  }),
+)
+backend.animalValidationExpiryNotifier.addEnvironment('ANIMAL_TABLE_NAME', animalTable.tableName)
+backend.animalValidationExpiryNotifier.addEnvironment('OWNER_TABLE_NAME', ownerTable.tableName)
+backend.animalValidationExpiryNotifier.addEnvironment(
+  'NOTIFICATION_TABLE_NAME',
+  notificationTable.tableName,
 )
 
 /**

@@ -1139,6 +1139,42 @@
     "description": "Cette page n'existe pas ou plus. Vérifiez l'adresse ou revenez à l'accueil.",
     "cta": "Retour à l'accueil"
   },
+  "notifications": {
+    "bell_aria": "Notifications ({count} non lues)",
+    "title": "Notifications",
+    "unread": "Non lu",
+    "empty": "Aucune notification pour le moment.",
+    "load_error": "Impossible de charger les notifications — réessayez.",
+    "types": {
+      "CLINIC_PENDING_VERIFICATION": {
+        "title": "Nouvelle clinique en attente de vérification : {clinicName}"
+      },
+      "CLINIC_VERIFIED": {
+        "title": "Votre clinique {clinicName} a été activée !"
+      },
+      "NEW_COMPATIBLE_REQUEST": {
+        "title": "Nouvelle demande compatible chez {clinicName}"
+      },
+      "MISSION_ACCEPTED": {
+        "title": "Un donneur a été proposé — {animalName}"
+      },
+      "MISSION_VALIDATION_REMINDER": {
+        "title": "Confirmez le don — {animalName}"
+      },
+      "MISSION_DISPUTED": {
+        "title": "Litige sur une mission ({missionId})"
+      },
+      "CLINIC_UNDER_REVIEW": {
+        "title": "Clinique signalée à la modération : {clinicName}"
+      },
+      "ANIMAL_VALIDATED": {
+        "title": "{animalName} est maintenant donneur validé"
+      },
+      "ANIMAL_VALIDATION_EXPIRED": {
+        "title": "La validation de {animalName} a expiré"
+      }
+    }
+  },
   "pendingVerification": {
     "title": "Compte en cours de vérification",
     "description": "Votre inscription est bien enregistrée. Notre équipe vérifie actuellement le RPPS de votre clinique et votre numéro d'ordre auprès de l'Ordre National des Vétérinaires. Vous recevrez un accès complet dès que cette vérification sera terminée."

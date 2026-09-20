@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useDark, useToggle } from '@vueuse/core'
 import { useAuthStore } from '@/stores/auth'
+import NotificationBell from '@/components/common/NotificationBell.vue'
 
 const { t, locale } = useI18n()
 const router = useRouter()
@@ -137,6 +138,7 @@ const toggleMenu = (event) => {
       </nav>
 
       <div class="flex items-center gap-2">
+        <NotificationBell v-if="auth.isAuthenticated" />
         <div v-if="auth.isAuthenticated" class="flex items-center gap-3">
           <div class="flex flex-col items-end text-right">
             <span class="text-sm font-bold text-zinc-800 dark:text-white leading-none">

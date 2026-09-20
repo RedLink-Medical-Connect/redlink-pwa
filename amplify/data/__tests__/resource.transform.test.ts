@@ -194,7 +194,7 @@ describe('amplify/data/resource.ts — Animal, garde-fou de régression sur le r
   // auth) plutôt que de supposer un seul bloc contigu comme avant ce correctif. Part de
   // `name:` pour exclure le `@auth` de niveau TYPE (`type Animal @model @auth(rules:
   // [...])`), légitime et hors du périmètre de ce test.
-  it("aucun champ hors species/weight/bloodGroup/isVaccinated/lastDonationDate/isValidatedDonor/validationExpiresAt (name, breed, sex, birthDate, isSterilized, donationFrequency, ownerID, ownerProfile, missions...) ne porte de @auth au niveau champ", () => {
+  it("aucun champ hors species/weight/bloodGroup/isVaccinated/lastDonationDate/isValidatedDonor/validationExpiresAt/donorValidationExpiryNotifiedAt (name, breed, sex, birthDate, isSterilized, donationFrequency, ownerID, ownerProfile, missions...) ne porte de @auth au niveau champ", () => {
     const animalType = extractType('Animal')
     const nameFieldIdx = animalType.indexOf('name: String!')
 
@@ -206,6 +206,8 @@ describe('amplify/data/resource.ts — Animal, garde-fou de régression sur le r
       'lastDonationDate',
       'isValidatedDonor',
       'validationExpiresAt',
+      // Système de notifications, 2026-09-18 -- voir donorValidationExpiryNotifiedFieldAuth.
+      'donorValidationExpiryNotifiedAt',
     ]
 
     let restOfType = animalType.slice(nameFieldIdx)
@@ -267,6 +269,22 @@ describe('amplify/data/resource.ts — Animal.lastDonationDate (équivalent Gen2
     expect(block).toContain(
       '{allow: groups, operations: [read, update], groups: ["Veterinarians"]}',
     )
+  })
+})
+
+describe('amplify/data/resource.ts — Animal.donorValidationExpiryNotifiedAt (système de notifications, 2026-09-18)', () => {
+  const animalType = extractType('Animal')
+
+  it('donorValidationExpiryNotifiedAt est nullable (AWSDateTime, pas AWSDateTime!)', () => {
+    expect(animalType).toContain('donorValidationExpiryNotifiedAt: AWSDateTime @auth(')
+  })
+
+  it('Owner ET Veterinarians ont SEULEMENT read -- aucun rôle Cognito ne peut écrire ce champ', () => {
+    const block = extractFieldAuthBlock(animalType, 'donorValidationExpiryNotifiedAt')
+    expect(block).toContain('{allow: owner, operations: [read]')
+    expect(block).toContain('{allow: groups, operations: [read], groups: ["Veterinarians"]}')
+    expect(block).not.toContain('update')
+    expect(block).not.toContain('create')
   })
 })
 
@@ -903,6 +921,117 @@ describe('amplify/data/resource.ts — double validation de Mission + notation (
       const pipeline = jsFunctions.find((fn) => fn.fieldName === 'submitMissionValidation')
 
       expect(pipeline!.handlers.length).toBeLessThanOrEqual(10)
+    })
+  })
+
+  describe('NotificationType — 9 valeurs, une par événement réellement câblé (système de notifications, 2026-09-17, étendu le 2026-09-18)', () => {
+    it('enum NotificationType { ... } -- les 2 valeurs initiales + les 7 notifications métier', () => {
+      expect(compiledSdl).toContain(
+        'enum NotificationType {\n' +
+          '  CLINIC_PENDING_VERIFICATION\n' +
+          '  CLINIC_VERIFIED\n' +
+          '  NEW_COMPATIBLE_REQUEST\n' +
+          '  MISSION_ACCEPTED\n' +
+          '  MISSION_VALIDATION_REMINDER\n' +
+          '  MISSION_DISPUTED\n' +
+          '  CLINIC_UNDER_REVIEW\n' +
+          '  ANIMAL_VALIDATED\n' +
+          '  ANIMAL_VALIDATION_EXPIRED\n' +
+          '}',
+      )
+    })
+  })
+
+  describe('Notification — adressage double (personnel via ownerDefinedIn + broadcast via groupDefinedIn), AUCUNE écriture cliente (système de notifications, 2026-09-17)', () => {
+    const notificationType = extractType('Notification')
+    const contentFields = ['recipientID', 'recipientGroup', 'type', 'titleKey', 'bodyKey', 'data', 'link']
+
+    it('compile avec les 8 champs attendus, tous nullable sauf type/titleKey/read', () => {
+      expect(notificationType).toContain('recipientID: String @auth(')
+      expect(notificationType).toContain('recipientGroup: String @auth(')
+      expect(notificationType).toContain('type: NotificationType! @auth(')
+      expect(notificationType).toContain('titleKey: String! @auth(')
+      expect(notificationType).toContain('bodyKey: String @auth(')
+      expect(notificationType).toContain('data: AWSJSON @auth(')
+      expect(notificationType).toContain('link: String @auth(')
+      expect(notificationType).toContain('read: Boolean!\n')
+    })
+
+    // Format compilé vérifié empiriquement (`schema.transform().schema`), pas deviné : la clé
+    // du champ dynamique de `groupDefinedIn()` est `groupsField` (PLURIEL, comme pour
+    // `groupsDefinedIn()`) même quand le champ ne porte qu'un SEUL nom de groupe -- ce n'est
+    // PAS `groupField` (singulier), contrairement à la symétrie qu'on pourrait attendre avec
+    // `ownerField` sur `ownerDefinedIn()`. Piège à ne pas reproduire en copiant `ownerField`
+    // par analogie sur un futur `groupDefinedIn()`.
+    it('règle de niveau MODÈLE : deux règles dynamiques avec update (marquer "lu"), aucune règle statique (allow.group/allow.owner) — ownerField: "recipientID" ET groupsField: "recipientGroup" (pas "groupField", vérifié dans le SDL compilé)', () => {
+      const typeAuthStart = compiledSdl.indexOf('type Notification @model @auth(')
+      const typeAuthEnd = compiledSdl.indexOf('])\n{', typeAuthStart)
+      const typeAuthBlock = compiledSdl.slice(typeAuthStart, typeAuthEnd)
+      expect(typeAuthBlock).toContain(
+        '{allow: owner, operations: [read, update], ownerField: "recipientID"}',
+      )
+      expect(typeAuthBlock).toContain(
+        '{allow: groups, operations: [read, update], groupsField: "recipientGroup"}',
+      )
+    })
+
+    it("aucune des deux règles n'accorde create ni delete, au niveau modèle NI au niveau champ — toute écriture passe par une Lambda/un resolver en écriture directe DynamoDB (bypass @auth)", () => {
+      expect(notificationType).not.toContain('create')
+      expect(notificationType).not.toContain('delete')
+    })
+
+    // Correctif graphql-schema-reviewer (2026-09-17, ÉLEVÉ) : sans ce scoping de champ, la
+    // règle de modèle ci-dessus (`update` SANS restriction) permettait à un destinataire
+    // légitime de sa propre ligne de la réécrire avec le champ d'adressage OPPOSÉ renseigné
+    // (ex. un vétérinaire ajoutant `recipientGroup: "Admins"` à sa notification personnelle),
+    // la transformant en broadcast à contenu forgé -- voir `notificationContentFieldsReadOnly`
+    // en tête de fichier pour le détail complet du scénario.
+    it.each(contentFields)(
+      '%s : les 7 champs de CONTENU sont restreints à [read] seul, pour les DEUX règles (update retiré)',
+      (fieldName) => {
+        const block = extractFieldAuthBlock(notificationType, fieldName)
+        expect(block).toContain('{allow: owner, operations: [read], ownerField: "recipientID"}')
+        expect(block).toContain('{allow: groups, operations: [read], groupsField: "recipientGroup"}')
+        expect(block).not.toContain('update')
+      },
+    )
+
+    it('read (le booléen "lu/non-lu") est le SEUL champ SANS @auth dédiée — il hérite donc du update de la règle de modèle (markAsRead, useNotifications.js)', () => {
+      expect(notificationType).toContain('read: Boolean!\n')
+      expect(notificationType).not.toContain('read: Boolean! @auth(')
+    })
+  })
+
+  describe('approveClinicVerification — passé en pipeline (2 fonctions, système de notifications, 2026-09-17)', () => {
+    it("l'argument/le retour/l'autorisation de la mutation elle-même sont INCHANGÉS par le passage en pipeline", () => {
+      const mutationType = extractType('Mutation')
+      expect(mutationType).toContain(
+        'approveClinicVerification(id: ID!): Clinic @aws_cognito_user_pools(cognito_groups: ["Admins"])',
+      )
+    })
+
+    // Même méthode que `submitMissionValidation` ci-dessus (`schema.transform().jsFunctions`,
+    // le SDL compilé ne dit rien du pipeline d'une mutation custom) : ce qui distingue un
+    // pipeline d'un unit resolver, c'est UNIQUEMENT cette structure, jamais le SDL.
+    it('2 fonctions dans l’ordre exact Clinic (écriture conditionnelle) -> Notification (notification personnelle du vétérinaire référent), chacune sur la bonne source de données', () => {
+      const jsFunctions = (
+        schema.transform() as unknown as {
+          jsFunctions: {
+            typeName: string
+            fieldName: string
+            handlers: { dataSource: string; entry: { relativePath: string } }[]
+          }[]
+        }
+      ).jsFunctions
+
+      const pipeline = jsFunctions.find(
+        (fn) => fn.typeName === 'Mutation' && fn.fieldName === 'approveClinicVerification',
+      )
+
+      expect(pipeline?.handlers.map((h) => [h.entry.relativePath, h.dataSource])).toEqual([
+        ['./resolvers/approve-clinic-verification.js', 'ClinicTable'],
+        ['./resolvers/approve-clinic-verification-notify-vet.js', 'NotificationTable'],
+      ])
     })
   })
 })

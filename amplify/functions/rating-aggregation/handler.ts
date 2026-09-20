@@ -1,6 +1,7 @@
 import type { DynamoDBRecord, DynamoDBStreamEvent, Handler } from 'aws-lambda'
 import { ConditionalCheckFailedException, DynamoDBClient } from '@aws-sdk/client-dynamodb'
 import { DynamoDBDocumentClient, QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb'
+import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses'
 import {
   collectAggregationTargets,
   computeRatingAggregate,
@@ -11,6 +12,8 @@ import {
   type RatingAggregationTarget,
   type RatingStreamRecordSnapshot,
 } from './resolve-rating-aggregation'
+import { buildClinicUnderReviewEmail } from '../custom-message/templates/clinic-under-review-email'
+import { writeNotification } from '../shared/write-notification'
 
 /**
  * Handler de la Lambda `rating-aggregation`, déclenchée par le flux DynamoDB Streams de la table
@@ -75,6 +78,7 @@ const CLINIC_ROLE = 'CLINIC'
 const UNDER_REVIEW = 'UNDER_REVIEW'
 
 const documentClient = DynamoDBDocumentClient.from(new DynamoDBClient({}))
+const sesClient = new SESClient({})
 
 /** Exporté pour le test du handler (`handler.test.ts`), jamais consommé en production. */
 export type RatingAggregationSummary = {
@@ -250,18 +254,21 @@ async function updateTargetAggregate(
  * automatique dès que la moyenne remonte supprimerait la trace même que la modération doit
  * examiner -- voir `exceedsModerationThreshold` (module pur) et ADR-0017 §4.
  *
- * @returns `true` si la clinique vient d'être signalée, `false` si elle l'était déjà (ou si la
- *   ligne n'existe pas -- les deux se traduisent par la même condition non satisfaite, et
- *   appellent la même absence d'action : le cas "ligne absente" a de toute façon déjà été détecté
- *   et logué par `updateTargetAggregate`, qui s'exécute avant).
+ * @returns `{ flagged: true, name }` si la clinique vient d'être signalée (`name`, système de
+ *   notifications 2026-09-18 : récupéré via `ReturnValues: 'ALL_NEW'` SUR CETTE MÊME écriture,
+ *   pas un `GetItem` séparé -- coût IAM/réseau nul, l'attribut est déjà dans la réponse
+ *   `UpdateItem`), `{ flagged: false }` si elle l'était déjà (ou si la ligne n'existe pas -- les
+ *   deux se traduisent par la même condition non satisfaite, et appellent la même absence
+ *   d'action : le cas "ligne absente" a de toute façon déjà été détecté et logué par
+ *   `updateTargetAggregate`, qui s'exécute avant).
  */
 async function flagClinicForAdminReview(
   tableName: string,
   clinicId: string,
   nowIso: string,
-): Promise<boolean> {
+): Promise<{ flagged: boolean; name?: string }> {
   try {
-    await documentClient.send(
+    const result = await documentClient.send(
       new UpdateCommand({
         TableName: tableName,
         Key: { id: clinicId },
@@ -281,12 +288,79 @@ async function flagClinicForAdminReview(
           ':underReview': UNDER_REVIEW,
           ':now': nowIso,
         },
+        ReturnValues: 'ALL_NEW',
       }),
     )
-    return true
+    return { flagged: true, name: result.Attributes?.name as string | undefined }
   } catch (error) {
-    if (isConditionalCheckFailed(error)) return false
+    if (isConditionalCheckFailed(error)) return { flagged: false }
     throw error
+  }
+}
+
+/**
+ * Notification (badge + email) du signalement d'une clinique à la modération -- système de
+ * notifications, 2026-09-18. PREMIÈRE fois que cette Lambda écrit `Notification`/envoie un
+ * email (jusqu'ici purement DynamoDB direct sur `Clinic`/`Owner`, voir l'en-tête du fichier) :
+ * même famille que l'extension de `clinic-verification-notifier` (badge + email best-effort,
+ * indépendants l'un de l'autre).
+ *
+ * ⚠️ VOLONTAIREMENT hors de la comptabilité `summary.failures`/fail-loud de ce handler
+ * (contrairement à `updateTargetAggregate`/`flagClinicForAdminReview`, dont un échec DOIT
+ * rejouer le lot -- voir "IDEMPOTENCE ET REJEU" en tête de fichier) : un rejeu déclenché par un
+ * échec SES/Notification recalculerait un agrégat déjà correct pour rien, et --pire--
+ * `flagClinicForAdminReview` est déjà passé (condition satisfaite UNE fois), donc un rejeu ne
+ * retenterait même pas la notification manquée (la condition `attribute_not_exists(...)
+ * OR = false` échouerait la seconde fois, la clinique étant déjà signalée) -- rejouer n'aiderait
+ * jamais cette étape précise. D'où son propre `try/catch` local, jamais compté dans
+ * `summary.failures`.
+ */
+async function notifyClinicUnderReview(
+  clinicId: string,
+  clinicName: string | undefined,
+  aggregate: RatingAggregate,
+  notificationTableName: string,
+): Promise<void> {
+  if (!clinicName) {
+    console.error(
+      `rating-aggregation: Clinic ${clinicId} signalée mais son nom est absent de la réponse UpdateItem, notification ignorée`,
+    )
+    return
+  }
+
+  try {
+    await writeNotification(documentClient, notificationTableName, {
+      recipientGroup: 'Admins',
+      type: 'CLINIC_UNDER_REVIEW',
+      titleKey: 'notifications.types.CLINIC_UNDER_REVIEW.title',
+      data: { clinicName },
+    })
+  } catch (err) {
+    console.error(`rating-aggregation: échec écriture badge CLINIC_UNDER_REVIEW (Clinic ${clinicId})`, err)
+  }
+
+  try {
+    const { subject, html } = buildClinicUnderReviewEmail({
+      clinicId,
+      clinicName,
+      average: aggregate.average,
+      count: aggregate.count,
+    })
+    const senderEmail = requiredEnv('SES_SENDER_EMAIL')
+    const adminEmail = requiredEnv('ADMIN_NOTIFICATION_EMAIL')
+
+    await sesClient.send(
+      new SendEmailCommand({
+        Source: senderEmail,
+        Destination: { ToAddresses: [adminEmail] },
+        Message: {
+          Subject: { Data: subject, Charset: 'UTF-8' },
+          Body: { Html: { Data: html, Charset: 'UTF-8' } },
+        },
+      }),
+    )
+  } catch (err) {
+    console.error(`rating-aggregation: échec envoi email CLINIC_UNDER_REVIEW (Clinic ${clinicId})`, err)
   }
 }
 
@@ -318,6 +392,7 @@ export const handler: Handler<DynamoDBStreamEvent, RatingAggregationSummary> = a
   const ratingTargetIndex = requiredEnv('RATING_TARGET_INDEX_NAME')
   const clinicTable = requiredEnv('CLINIC_TABLE_NAME')
   const ownerTable = requiredEnv('OWNER_TABLE_NAME')
+  const notificationTable = requiredEnv('NOTIFICATION_TABLE_NAME')
 
   // Une seule horloge pour toute l'invocation : deux cibles traitées dans le même lot doivent
   // porter le même `updatedAt`, et deux cliniques signalées le même `needsAdminReviewSince`.
@@ -372,12 +447,19 @@ export const handler: Handler<DynamoDBStreamEvent, RatingAggregationSummary> = a
       // du plan). Gated par la RÉUSSITE de l'écriture d'agrégat ci-dessus -- signaler une
       // clinique dont on n'a pas pu écrire la moyenne afficherait un flag que rien n'explique.
       if (isClinic && exceedsModerationThreshold(aggregate, thresholds)) {
-        const flagged = await flagClinicForAdminReview(clinicTable, target.targetID, nowIso)
+        const { flagged, name: clinicName } = await flagClinicForAdminReview(
+          clinicTable,
+          target.targetID,
+          nowIso,
+        )
         if (flagged) {
           summary.clinicsFlaggedForReview += 1
           console.warn(
             `Clinique ${target.targetID} signalée à la modération : moyenne ${aggregate.average} sur ${aggregate.count} avis (seuils ${thresholds.averageThreshold}/${thresholds.minRatingCount}).`,
           )
+          // Best-effort, HORS comptabilité failures/fail-loud -- voir l'en-tête de
+          // `notifyClinicUnderReview`.
+          await notifyClinicUnderReview(target.targetID, clinicName, aggregate, notificationTable)
         }
       }
     } catch (error) {

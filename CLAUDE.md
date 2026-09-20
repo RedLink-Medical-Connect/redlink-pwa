@@ -254,6 +254,51 @@ architecturales) et `.cursorrules` (conventions détaillées pour l'éditeur).
   vérifier manuellement en console AWS avant le premier déploiement réel, repointer vers un
   `no-reply@` dédié le jour où un domaine est vérifié (un changement d'une ligne, voir
   `CLINIC_VERIFICATION_SENDER_EMAIL`, `amplify/functions/clinic-verification-notifier/resource.ts`).
+  **Étendue le 2026-09-17 (système de notifications, badge + email)** : cette même Lambda écrit
+  DÉSORMAIS aussi, best-effort et dans un `try/catch` INDÉPENDANT de l'email, une ligne
+  `Notification` broadcast (`recipientGroup: "Admins"`, voir l'idiome `@auth` plus bas) via
+  `dynamodb:PutItem` direct — réutilisation de la Lambda existante (même déclencheur exact)
+  plutôt qu'une nouvelle fonction dédiée à chaque nouveau canal de notification.
+- **Système de notifications métier — 4 nouvelles Lambdas + 1 étendue (2026-09-18)** : le trou le
+  plus critique de l'app comblé par `request-matcher-notifier/` (flux `Request` `INSERT`,
+  fan-out vers chaque Owner compatible — espèce/groupe sanguin/Frequency Rule/distance/
+  disponibilité RDV pour les Requests `APPOINTMENT`), plus `mission-notifier/` (flux `Mission`
+  `INSERT`+`MODIFY`, TROIS événements démêlés par comparaison Old/New DANS le handler —
+  acceptation, relance de double validation, litige), `animal-donor-notifier/` (flux `Animal`
+  `MODIFY`, transition `isValidatedDonor` false→true) et `animal-validation-expiry-notifier/`
+  (PLANIFIÉE, ADR-0016 — aucune écriture native ne signale une expiration, état purement
+  virtuel côté front). `rating-aggregation/` étendue de la même façon que
+  `clinic-verification-notifier/` ci-dessus (badge + email au premier signalement `UNDER_REVIEW`,
+  hors comptabilité fail-loud du handler — une notification manquée ne doit jamais déclencher un
+  rejeu). **Modules partagés** (`amplify/functions/shared/`, première fois qu'un module est
+  réutilisé ENTRE plusieurs Lambdas dans ce repo, pas seulement dupliqué comme jusque-là) :
+  `write-notification.ts` (le `PutCommand` `Notification`, identique dans les 6 Lambdas) et
+  `eligibility.ts` (port TS d'un sous-ensemble de `src/services/eligibility-service.js` —
+  `src/` n'est jamais bundlé par une Lambda, ADR-0007 — duplication ASSUMÉE, même raisonnement
+  que `mission-validation-auto-finalizer` vis-à-vis de `useMissionClosure.js`). **Idiome anti-
+  double-notification par CYCLE** (`Animal.donorValidationExpiryNotifiedAt`, `amplify/data/
+  resource.ts`) : une `FilterExpression`/`ConditionExpression` DynamoDB peut comparer DEUX
+  ATTRIBUTS DU MÊME ITEM directement (`donorValidationExpiryNotifiedAt < validationExpiresAt`),
+  pas seulement un attribut à une valeur littérale — nécessaire ici parce qu'une simple
+  `attribute_not_exists` empêcherait de re-notifier après une REVALIDATION (cycle annuel normal,
+  pas un cas limite) suivie d'une nouvelle expiration. ⚠️ Contrairement à
+  `clinic-verification-notifier`/`rating-aggregation` (destinataire = LA SEULE adresse SES
+  vérifiée), ces 4 nouvelles Lambdas envoient vers l'adresse RÉELLE de l'Owner/de la Clinic
+  concerné(e) (lue en base) — en mode SES sandbox, CHAQUE envoi échoue avec `MessageRejected`
+  tant que le compte n'en est pas sorti (décision repo owner) ; le badge (écriture
+  `Notification`) reste, lui, pleinement fonctionnel dans tous les cas. **Résidu ASSUMÉ signalé
+  en revue devsecops-aws (2026-09-18), décision repo owner à prendre AVANT/PEU APRÈS la sortie
+  du mode sandbox SES** (sans effet réel tant que les envois échouent silencieusement) :
+  `Owner.email`/`Clinic.email` n'ont aucune règle `@auth` de champ dédiée (donc écrits librement
+  par leur propriétaire, jamais revérifiés contre l'email confirmé côté Cognito) et servent
+  désormais de destinataire SES réel — un Owner pourrait rediriger ses propres notifications
+  vers un tiers en modifiant son `email` juste avant un match attendu. Pas une faille
+  d'injection (tout le contenu interpolé passe par `escapeHtml()`, `Source` reste toujours
+  l'identité SES fixe/vérifiée, jamais falsifiable) : un risque de détournement du destinataire,
+  pas du contenu ni de l'expéditeur. Alternative non implémentée ici (changement
+  d'architecture touchant les 4 Lambdas + permission `cognito-idp:GetUser`, disproportionné
+  pour ce lot) : résoudre l'email via le claim Cognito confirmé de l'appelant plutôt que le
+  champ DynamoDB mutable, même pattern que `GetUserCommand` dans `clinic-routes.ts`.
 - DynamoDB via les modèles `defineData` (`@model`/`a.model()`).
 - **Champ auto-déclaré à la création, jamais modifiable ensuite (même par qui l'a écrit)** :
   cinquième idiome `@auth` de ce schéma — `.authorization()` de champ accordant `create`+`read`
@@ -267,6 +312,21 @@ architecturales) et `.cursorrules` (conventions détaillées pour l'éditeur).
   navigation Vue, pas ce champ). La seule voie légitime de transition (`PENDING` → `ACTIVE`) est
   une mutation custom dédiée réservée à `allow.group('Admins')` (`approveClinicVerification`,
   idiome ADR-0011), jamais un `update` généré.
+- **Adressage double personnel/broadcast par groupe, AUCUNE écriture cliente** : sixième idiome
+  `@auth` de ce schéma, au niveau MODÈLE (pas champ) — `Notification`
+  (système de notifications, badge + email, 2026-09-17) combine `allow.ownerDefinedIn('recipientID')
+  .to(['read', 'update'])` (une notification PERSONNELLE, un seul destinataire) ET
+  `allow.groupDefinedIn('recipientGroup').to(['read', 'update'])` (une notification BROADCAST lue
+  par tout un groupe Cognito, ex. `"Admins"` — une seule ligne, pas une par membre) sur le MÊME
+  modèle, chaque ligne n'utilisant qu'UN SEUL des deux champs. Piège vérifié dans le SDL compilé,
+  pas deviné (`resource.transform.test.ts`) : la clé du champ dynamique de `groupDefinedIn()` est
+  `groupsField` (PLURIEL) même pour un champ à un seul nom de groupe — PAS `groupField` par
+  analogie avec `ownerField`. `create`/`delete` accordés à PERSONNE : toute écriture passe par une
+  Lambda/un resolver en accès direct à la table (`clinic-verification-notifier/handler.ts`
+  pour le broadcast, la 2e fonction du pipeline `approveClinicVerification` pour le personnel,
+  voir `amplify/data/resolvers/approve-clinic-verification-notify-vet.js` — PREMIÈRE utilisation
+  de `ddb.put()`/`util.autoId()` dans ce dépôt, tous les resolvers précédents ne faisaient que des
+  `update()`/`get()`).
 - **Champ dénormalisé calculé côté serveur (agrégat)** : quatrième idiome `@auth` de ce
   schéma — `.authorization()` de CHAMP n'accordant que `read`, à personne `create`/
   `update` (`clinicRatingAndModerationFieldsReadOnly`/`ownerRatingAggregateFieldsReadOnly`,

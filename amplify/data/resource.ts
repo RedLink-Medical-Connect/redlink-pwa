@@ -54,6 +54,21 @@ const ownerReadOnlyVetReadUpdate = (allow: any) => [
   allow.owner().to(['read']),
   allow.group('Veterinarians').to(['read', 'update']),
 ]
+// Champ de BOOKKEEPING pur (jamais consommé par aucune UI, jamais écrit par aucune mutation
+// générée) -- système de notifications, 2026-09-18. `Animal.donorValidationExpiryNotifiedAt`
+// marque qu'une notification d'expiration a déjà été envoyée pour la validation EN COURS,
+// pour que la Lambda planifiée `animal-validation-expiry-notifier` ne notifie jamais deux fois
+// la même expiration (voir ce fichier). Owner+Veterinarians gardent `read` (cohérent avec le
+// reste des champs de validation sur ce modèle, `ownerReadOnlyVetReadUpdate` ci-dessus) mais
+// PERSONNE n'a `update`/`create` -- seule la Lambda planifiée (SDK direct, IAM) peut l'écrire.
+// PAS `Admins` : contrairement à `clinicRatingAndModerationFieldsReadOnly` (qui les ajoute),
+// la règle de niveau MODÈLE d'`Animal` n'accorde `Admins` nulle part -- l'ajouter au niveau
+// champ donnerait au groupe un accès qu'il n'a nulle part ailleurs sur ce modèle (même
+// raisonnement que le commentaire sur `ownerRatingAggregateFieldsReadOnly`, plus bas).
+const donorValidationExpiryNotifiedFieldAuth = (allow: any) => [
+  allow.owner().to(['read']),
+  allow.group('Veterinarians').to(['read']),
+]
 // Owner écrit UNE FOIS à la création puis lecture seule (jamais `update`), correction
 // réservée aux Veterinarians (read+update) -- Animal, champs médicaux critiques
 // (species/bloodGroup/weight/isVaccinated). Demande produit 2026-08-23 : contrairement à
@@ -213,7 +228,7 @@ const clinicRatingAndModerationFieldsReadOnly = (allow: any) => [
 // `update`, `Admins` INCLUS : la Clinic déclare `PENDING` UNE SEULE FOIS, à sa propre
 // création (`useRegistrationCompletion.js`), et la SEULE voie légitime PENDING -> ACTIVE est
 // `approveClinicVerification` (mutation custom, `allow.group('Admins')`, écriture directe
-// DynamoDB -- idiome ADR-0011, section 5 plus bas), jamais un `update` généré.
+// DynamoDB -- idiome ADR-0011, section 6 plus bas), jamais un `update` généré.
 //
 // RÉSIDU ASSUMÉ, même famille que `missionStatusFieldAuth` ci-dessus : le composable envoie
 // toujours `'PENDING'` en dur (jamais une valeur choisie par l'utilisateur), mais un appel
@@ -255,6 +270,35 @@ const clinicVerificationStatusFieldAuth = (allow: any) => [
 const ownerRatingAggregateFieldsReadOnly = (allow: any) => [
   allow.owner().to(['read']),
   allow.group('Veterinarians').to(['read']),
+]
+
+// Correctif graphql-schema-reviewer (2026-09-17, ÉLEVÉ) sur le modèle `Notification` (système
+// de notifications, section 5 plus bas) : la règle de niveau MODÈLE de `Notification`
+// (`allow.ownerDefinedIn('recipientID').to(['read', 'update']), allow.groupDefinedIn
+// ('recipientGroup').to(['read', 'update'])`) accordait `update` SANS restriction de champ --
+// un destinataire légitime de SA PROPRE ligne personnelle pouvait la réécrire avec
+// `recipientGroup: 'Admins'` (ou tout autre groupe), la transformant en broadcast diffusé à un
+// rôle entier avec un contenu forgé -- et symétriquement, un Admin pouvait réécrire
+// `recipientGroup` d'une ligne broadcast existante vers `'Veterinarians'`/`'Owners'`, un
+// spoofing/diffusion de masse vers un rôle sur lequel il n'a par ailleurs AUCUN droit
+// d'écriture. `.authorization()` ne contraint jamais une VALEUR (limite documentée partout
+// ailleurs dans ce fichier) -- mais ici la valeur en question était le CHAMP D'ADRESSAGE
+// LUI-MÊME, rendant le résidu bien plus grave que les résidus "falsifier son propre contenu"
+// déjà acceptés ailleurs (ex. `Clinic.verificationStatus`) : celui-ci permet un PIVOT
+// personnel <-> broadcast, pas juste une falsification locale sans tiers impacté.
+//
+// Correctif : même idiome que `missionValidationFieldsReadOnly`/
+// `clinicRatingAndModerationFieldsReadOnly` -- un `.authorization()` de CHAMP qui REMPLACE la
+// règle de modèle (ADR-0009) sur les 7 champs de CONTENU (`recipientID`/`recipientGroup`/
+// `type`/`titleKey`/`bodyKey`/`data`/`link`), restreints à `[read]` seul pour les deux règles
+// dynamiques -- `update` disparaît de ces 7 champs, `create`/`delete` restent fermés à tous
+// (déjà le cas). SEUL `Notification.read` (le booléen "lu/non-lu", non listé ci-dessous, donc
+// sans `.authorization()` de champ dédiée) hérite encore du `update` de la règle de modèle --
+// c'est le SEUL champ qu'un client doit pouvoir écrire (`markAsRead`, `useNotifications.js`), et
+// réécrire `read` seul ne permet aucun pivot d'adressage ni falsification de contenu.
+const notificationContentFieldsReadOnly = (allow: any) => [
+  allow.ownerDefinedIn('recipientID').to(['read']),
+  allow.groupDefinedIn('recipientGroup').to(['read']),
 ]
 
 /**
@@ -300,7 +344,7 @@ export const schema = a.schema({
   // 'PENDING_VALIDATION'/'COMPLETED_AUTO'/'DISPUTED' (2026-08-26, double validation de
   // Mission) : les valeurs existantes ne changent PAS de sens. 'PENDING_VALIDATION' est le
   // statut intermédiaire une fois qu'un des deux côtés (Owner/Clinic) a soumis sa validation
-  // via `submitMissionValidation` mais pas l'autre (voir la mutation custom, section 5, et
+  // via `submitMissionValidation` mais pas l'autre (voir la mutation custom, section 6, et
   // son resolver `amplify/data/resolvers/submit-mission-validation-*.js`) -- succède à
   // `ARRIVED`/`PENDING_ARRIVAL` dans le cycle de vie réel, pas câblé ici dans une machine à
   // états formelle (aucune des valeurs `MissionStatus` existantes ne l'était déjà).
@@ -373,6 +417,52 @@ export const schema = a.schema({
   // création envoie 'PENDING' en dur).
   ClinicVerificationStatus: a.enum(['PENDING', 'ACTIVE']),
 
+  // Système de notifications (badge + email), 2026-09-17 -- voir le modèle `Notification`
+  // plus bas pour l'idiome `@auth` complet. Une valeur par événement réel déjà câblé, aucune
+  // valeur spéculative :
+  // - `CLINIC_PENDING_VERIFICATION` : notification ADMIN (broadcast, `recipientGroup:
+  //   "Admins"`) à la création d'une nouvelle Clinic `PENDING` -- écrite par
+  //   `clinic-verification-notifier` (même Lambda que l'email existant, voir son `handler.ts`),
+  //   pas une nouvelle Lambda dédiée.
+  // - `CLINIC_VERIFIED` : notification PERSONNELLE (`recipientID` = `Clinic.owner`, le
+  //   vétérinaire référent) quand `approveClinicVerification` fait passer sa Clinic à `ACTIVE`
+  //   -- écrite par la 2e fonction du pipeline de cette mutation (section 6 plus bas).
+  //
+  // 7 valeurs AJOUTÉES le 2026-09-18 (notifications métier, cœur du flux de don) :
+  // - `NEW_COMPATIBLE_REQUEST` : personnelle (Owner) -- nouvelle Clinic Request compatible
+  //   avec un de ses Animals (espèce/groupe/distance/Frequency Rule/disponibilité RDV le cas
+  //   échéant). Écrite par la nouvelle Lambda `request-matcher-notifier` (flux `Request`,
+  //   `INSERT`).
+  // - `MISSION_ACCEPTED` : personnelle (Clinic, `Clinic.owner`) -- un Owner vient d'accepter sa
+  //   Request. Écrite par la nouvelle Lambda `mission-notifier` (flux `Mission`, `INSERT`).
+  // - `MISSION_VALIDATION_REMINDER` : personnelle (Owner OU Clinic, selon lequel des deux n'a
+  //   pas encore voté) -- un côté de la double validation a soumis son vote, relance l'autre.
+  //   Écrite par `mission-notifier` (flux `Mission`, `MODIFY`, transition vers
+  //   `PENDING_VALIDATION`).
+  // - `MISSION_DISPUTED` : broadcast Admins -- les deux côtés ont voté en désaccord. Écrite par
+  //   `mission-notifier` (flux `Mission`, `MODIFY`, transition vers `DISPUTED`).
+  // - `CLINIC_UNDER_REVIEW` : broadcast Admins -- une Clinic vient de franchir le seuil de
+  //   modération (ADR-0017). Écrite par `rating-aggregation` (Lambda existante, étendue --
+  //   même famille que l'extension de `clinic-verification-notifier` ci-dessus).
+  // - `ANIMAL_VALIDATED` : personnelle (Owner) -- un vétérinaire vient de valider son Animal
+  //   comme donneur. Écrite par la nouvelle Lambda `animal-donor-notifier` (flux `Animal`,
+  //   `MODIFY`, transition `isValidatedDonor` vers `true`).
+  // - `ANIMAL_VALIDATION_EXPIRED` : personnelle (Owner) -- la validation d'un Animal vient
+  //   d'expirer (aucune écriture n'existe nativement pour ce cas -- état purement virtuel,
+  //   voir `Animal.donorValidationExpiryNotifiedAt` plus bas). Écrite par la nouvelle Lambda
+  //   PLANIFIÉE `animal-validation-expiry-notifier` (même famille qu'ADR-0016).
+  NotificationType: a.enum([
+    'CLINIC_PENDING_VERIFICATION',
+    'CLINIC_VERIFIED',
+    'NEW_COMPATIBLE_REQUEST',
+    'MISSION_ACCEPTED',
+    'MISSION_VALIDATION_REMINDER',
+    'MISSION_DISPUTED',
+    'CLINIC_UNDER_REVIEW',
+    'ANIMAL_VALIDATED',
+    'ANIMAL_VALIDATION_EXPIRED',
+  ]),
+
   // 1. CLINIQUE & VÉTÉRINAIRES
   // ---------------------------------------------------------
 
@@ -423,8 +513,9 @@ export const schema = a.schema({
       // Vérification d'identité (RPPS + numéro d'ordre) -- voir
       // `clinicVerificationStatusFieldAuth` en tête de fichier. Écrit 'PENDING' en dur par
       // `useRegistrationCompletion.js` à la création de la Clinic ; seule
-      // `approveClinicVerification` (mutation custom, section 5) peut le faire passer à
-      // 'ACTIVE'.
+      // `approveClinicVerification` (mutation custom, section 6) peut le faire passer à
+      // 'ACTIVE'. Cette même mutation écrit aussi une `Notification` personnelle pour le
+      // vétérinaire référent (`Clinic.owner`, section 5) -- voir le pipeline de la mutation.
       verificationStatus: a
         .ref('ClinicVerificationStatus')
         .authorization(clinicVerificationStatusFieldAuth),
@@ -646,6 +737,24 @@ export const schema = a.schema({
         .datetime()
         .authorization(ownerReadOnlyVetReadUpdate),
 
+      // Système de notifications (badge + email), 2026-09-18 -- voir
+      // `donorValidationExpiryNotifiedFieldAuth` en tête de fichier. Marque la date à laquelle
+      // la notification d'expiration a été envoyée POUR LE CYCLE DE VALIDATION COURANT (pas
+      // "pour toujours") : la Lambda planifiée `animal-validation-expiry-notifier` compare ce
+      // champ à `validationExpiresAt` LUI-MÊME (pas une simple présence/absence) -- un Animal
+      // est notifiable si `donorValidationExpiryNotifiedAt` est absent OU strictement
+      // ANTÉRIEUR à `validationExpiresAt` courant. Sans cette comparaison (une simple
+      // `attribute_not_exists`, plus simple mais fausse), un Animal REVALIDÉ après une
+      // première expiration (`validateAnimal()`, `validationExpiresAt` repoussée dans le
+      // futur) ne serait plus JAMAIS notifié à sa prochaine expiration -- la validation dure 1
+      // an, renouvelable, ce cycle est le cas NORMAL, pas un cas limite rare. Voir
+      // `animal-validation-expiry-notifier/handler.ts` pour la condition DynamoDB exacte
+      // (comparaison de deux attributs du même item, syntaxe FilterExpression/
+      // ConditionExpression standard).
+      donorValidationExpiryNotifiedAt: a
+        .datetime()
+        .authorization(donorValidationExpiryNotifiedFieldAuth),
+
       ownerID: a.id().required(),
       ownerProfile: a.belongsTo('Owner', 'ownerID'),
       missions: a.hasMany('Mission', 'animalID'),
@@ -841,7 +950,7 @@ export const schema = a.schema({
       activeForRequest: a.hasOne('Request', 'activeMissionID'),
 
       // Double validation de Mission (2026-08-26) -- écrits UNIQUEMENT par la mutation custom
-      // `submitMissionValidation` (section 5, resolver `submit-mission-validation-*.js`, bypass
+      // `submitMissionValidation` (section 6, resolver `submit-mission-validation-*.js`, bypass
       // `@auth` comme `linkRequestToMission`/ADR-0011). `.authorization()` de champ
       // (`missionValidationFieldsReadOnly`, voir ce helper en tête de fichier pour l'écart
       // assumé par rapport au plan initial) : Owner ET Veterinarians en lecture seule sur les
@@ -1151,7 +1260,110 @@ export const schema = a.schema({
     // exigence produit explicite, appliquée ici au niveau `@auth`, pas seulement dans l'UI.
     .authorization((allow) => [allow.group('Veterinarians').to(['create', 'read'])]),
 
-  // 5. MUTATIONS CUSTOM (logique non couverte par les mutations générées par défaut)
+  // 5. NOTIFICATIONS (badge + email, 2026-09-17)
+  // ---------------------------------------------------------
+  // Un seul modèle générique pour les DEUX destinataires possibles d'une notification, plutôt
+  // qu'un modèle par rôle -- les deux événements câblés à ce jour (`NotificationType`
+  // ci-dessus) partagent la même forme (titre/corps i18n + lien + lu/non-lu), et un futur
+  // événement (nouvelle Request compatible pour un Owner, nouveau match...) aura la même forme.
+  //
+  // DEUX modes d'adressage MUTUELLEMENT EXCLUSIFS sur une même ligne (jamais les deux à la
+  // fois) :
+  // - PERSONNEL (`recipientID` renseigné, `recipientGroup` null) : un seul destinataire précis
+  //   (ex. le vétérinaire référent d'une Clinic qui vient d'être activée). `recipientID` porte
+  //   le MÊME format composite `"$sub::$username"` que le champ caché `owner` auto-injecté
+  //   ailleurs dans ce schéma (voir l'en-tête de fichier, section "identityClaim") -- c'est ce
+  //   format qu'`allow.ownerDefinedIn()` compare à l'identité de l'appelant. Concrètement :
+  //   `Clinic.owner` (déjà dans ce format, écrit par `useRegistrationCompletion.js` à la
+  //   création de la Clinic) est recopié tel quel par le resolver qui écrit la notification --
+  //   jamais reconstruit à la main à partir du seul `sub`.
+  // - BROADCAST PAR GROUPE (`recipientGroup` renseigné, `recipientID` null) : une seule ligne
+  //   lue par TOUS les membres d'un groupe Cognito (ex. `"Admins"`, notification de nouvelle
+  //   Clinic `PENDING`) -- pas une ligne par membre du groupe, qui obligerait à énumérer les
+  //   comptes `Admins` (aucune API applicative pour ça, seulement `AdminListGroupsForUser`
+  //   côté Cognito, un aller-retour par utilisateur).
+  //
+  // `allow.groupDefinedIn(champ)` -- PAS `allow.group('Admins')` (statique, câblé ailleurs dans
+  // ce fichier) : vérifié dans les types installés, pas deviné (même méthode que le reste de ce
+  // fichier) -- `node_modules/@aws-amplify/data-schema/dist/esm/Authorization.d.ts`,
+  // `groupDefinedIn(groupsField)`/`groupsDefinedIn(groupsField)` ("Authorize if a user is part
+  // of a group defined in a data model field"). `groupDefinedIn` (singulier, pas
+  // `groupsDefinedIn`) parce que `recipientGroup` porte UN SEUL nom de groupe par ligne, jamais
+  // une liste -- `groupsDefinedIn` attend un champ LISTE, ce que ce modèle n'a pas besoin
+  // d'être : chaque ligne cible un seul groupe, une future notification "Admins ET
+  // Veterinarians" serait deux lignes, pas une liste sur une ligne.
+  //
+  // AUCUN rôle Cognito n'a `create` NI `delete` -- CINQUIÈME idiome `@auth` de ce schéma (à
+  // côté de `clinicRatingAndModerationFieldsReadOnly`/`missionValidationFieldsReadOnly`, les
+  // deux plus proches par l'esprit : "aucune écriture cliente possible"), mais au niveau
+  // MODÈLE plutôt que champ, et avec DEUX règles dynamiques (owner + group) plutôt qu'une seule
+  // combinaison group/owner statique. Toute création passe exclusivement par une écriture
+  // directe DynamoDB (SDK, hors AppSync) : `clinic-verification-notifier/handler.ts` pour le
+  // broadcast Admins (même Lambda que l'email existant, PutItem ajouté à côté du SendEmail
+  // existant, best-effort indépendant l'un de l'autre) et la 2e fonction du pipeline
+  // `approveClinicVerification` (resolver JS, `ddb.put()`, section 6 plus bas) pour la
+  // notification personnelle -- même famille que "champ dénormalisé calculé côté serveur"
+  // (`clinicRatingAndModerationFieldsReadOnly`, `rating-aggregation`), généralisée ici à tout
+  // le modèle plutôt qu'à un sous-ensemble de champs, puisqu'AUCUN champ de ce modèle n'est
+  // légitimement écrit par un client à la création.
+  //
+  // `update` accordé au niveau MODÈLE (marquer "lu") : `.to(['read', 'update'])` sur les deux
+  // règles -- mais `notificationContentFieldsReadOnly` (voir ce helper en tête de fichier,
+  // correctif graphql-schema-reviewer ÉLEVÉ du 2026-09-17) REMPLACE cette règle sur les 7
+  // champs de CONTENU juste en dessous, ne leur laissant que `read`. Seul `Notification.read`
+  // (le booléen, SANS `.authorization()` de champ dédiée) hérite encore du `update` de niveau
+  // modèle -- c'est le seul champ qu'un client doit pouvoir écrire (`markAsRead`,
+  // `useNotifications.js`). Sans ce scoping, un destinataire légitime de SA PROPRE ligne
+  // personnelle aurait pu la réécrire avec `recipientGroup: 'Admins'` (ou tout autre groupe),
+  // la transformant en broadcast diffusé à un rôle entier avec un contenu forgé -- résidu bien
+  // plus grave qu'une simple falsification locale, voir le commentaire du helper pour le détail
+  // complet du scénario et pourquoi ce n'est PAS la même famille que le résidu accepté sur
+  // `Clinic.verificationStatus`.
+  //
+  // Pas de `.secondaryIndexes()` : `client.models.Notification.list()` s'appuie sur le filtre
+  // `@auth` lui-même (Scan + filtre serveur, même mécanisme que `Owner`/`Animal`/tout modèle à
+  // `allow.owner()` de ce schéma, AUCUN GSI nécessaire nulle part ailleurs pour ce filtrage) --
+  // à l'échelle de ce pilote, un Scan filtré par notification est négligeable (même
+  // raisonnement d'échelle que l'absence de GSI sur `ConsentRecord`/`DonorValidationAttestation`).
+  // Le tri par récence se fait CÔTÉ CLIENT (`useNotifications.js`, sur `createdAt`), pas via
+  // une sort key dédiée.
+  Notification: a
+    .model({
+      recipientID: a.string().authorization(notificationContentFieldsReadOnly),
+      recipientGroup: a.string().authorization(notificationContentFieldsReadOnly),
+      type: a.ref('NotificationType').required().authorization(notificationContentFieldsReadOnly),
+      // Clé i18n, JAMAIS de texte en dur (CLAUDE.md, convention i18n) -- résolue côté front
+      // via `$t(notification.titleKey, notification.data)` (`src/locales/{fr,en}.json`,
+      // namespace `notifications.types.<TYPE>`). `bodyKey` optionnel : `CLINIC_VERIFIED` n'a
+      // besoin que d'un titre, pas d'un corps détaillé.
+      titleKey: a.string().required().authorization(notificationContentFieldsReadOnly),
+      bodyKey: a.string().authorization(notificationContentFieldsReadOnly),
+      // Paramètres d'interpolation i18n (ex. `{ clinicName: "..." }`) -- PAS le texte final :
+      // le composant appelant fait `$t(titleKey, data)`, jamais ce modèle lui-même (qui ne
+      // connaît pas la locale de l'appelant).
+      data: a.json().authorization(notificationContentFieldsReadOnly),
+      // CHEMIN (path, ex. `/dashboard`) vers lequel naviguer au clic -- PAS un nom de route
+      // Vue Router : plusieurs routes de `src/router/index.js` (ex. `/dashboard/requests`,
+      // point d'atterrissage réel du vétérinaire) n'ont pas de `name` du tout, contrairement à
+      // ce qu'un premier réflexe pourrait supposer -- `router.push(link)` (chemin brut) plutôt
+      // que `router.push({ name: link })` évite de dépendre d'un nommage qui n'est pas
+      // systématique dans ce routeur. Nullable : `CLINIC_PENDING_VERIFICATION` (broadcast
+      // Admins) n'a aujourd'hui aucune interface admin à cibler (voir `approveClinicVerification`,
+      // appelé via la console AppSync), donc `link: null` pour ce type précis, contrairement à
+      // `CLINIC_VERIFIED` (`link: '/dashboard'`, qui redirige déjà vers `/dashboard/requests`).
+      link: a.string().authorization(notificationContentFieldsReadOnly),
+      // SEUL champ SANS `.authorization()` dédiée -- hérite donc du `update` de la règle de
+      // niveau modèle juste en dessous (`markAsRead`, `useNotifications.js`). Voir le
+      // commentaire au-dessus du modèle pour le correctif graphql-schema-reviewer que ce
+      // scoping ferme.
+      read: a.boolean().required(),
+    })
+    .authorization((allow) => [
+      allow.ownerDefinedIn('recipientID').to(['read', 'update']),
+      allow.groupDefinedIn('recipientGroup').to(['read', 'update']),
+    ]),
+
+  // 6. MUTATIONS CUSTOM (logique non couverte par les mutations générées par défaut)
   // ---------------------------------------------------------
 
   // Prérequis Phase 8, lot 3/3 sous-tâche 5 (voir
@@ -1335,32 +1547,53 @@ export const schema = a.schema({
     ]),
 
   // Vérification d'identité du vétérinaire référent (RPPS + numéro d'ordre) -- plan de
-  // durcissement sécurité "Différé 1" (2026-09-02/04). Même famille que
-  // `linkRequestToMission` ci-dessus : un seul `dataSource`, un seul aller-retour DynamoDB
-  // (unit resolver, pas de pipeline nécessaire) -- écriture conditionnelle simple, pas de
-  // vérification multi-modèle ni d'écriture cross-table.
+  // durcissement sécurité "Différé 1" (2026-09-02/04).
   //
-  // `allow.group('Admins')` : seule vraie garde de cette mutation, aucune interface admin ne
-  // consomme encore ce droit (voir `PendingVerificationView.vue`/le plan différé) -- un Admin
-  // l'appelle directement (console AppSync/client GraphQL) après avoir vérifié manuellement
-  // le RPPS/numéro d'ordre auprès de l'Ordre National des Vétérinaires (aucune API de
-  // vérification automatisée confirmée disponible à ce jour). Le resolver cible directement
-  // la table managée de `Clinic` (`dataSource: a.ref('Clinic')`) et BYPASSE entièrement le
-  // `@auth` de `Clinic` (type ET champ, y compris `clinicVerificationStatusFieldAuth` qui
-  // n'accorde `update` à personne, `Admins` inclus) -- exactement le même raisonnement
-  // qu'ADR-0011 : la seule garde d'autorisation est celle posée directement sur CETTE
-  // mutation, pas les règles du modèle qu'elle cible.
+  // PASSÉ EN PIPELINE le 2026-09-17 (système de notifications, voir `Notification` section 5
+  // ci-dessus) -- était un unit resolver jusque-là (un seul `dataSource`, un seul aller-retour
+  // DynamoDB, même famille que
+  // `linkRequestToMission`). Même raison de bascule que `submitMissionValidation` plus haut :
+  // un besoin métier qu'un seul `ddb.update()` ne couvre plus -- écrire `Clinic.
+  // verificationStatus` PUIS dériver une `Notification` personnelle pour le vétérinaire
+  // référent (`Clinic.owner`, connu seulement APRÈS la première écriture, voir le `response()`
+  // de la fonction 1). 2 fonctions seulement (pas 10, largement sous le plafond AppSync) :
+  // 1. `approve-clinic-verification.js` (`Clinic`) -- INCHANGÉE dans sa logique d'écriture
+  //    (même `ddb.update()`/`condition`/`update` qu'avant), gagne seulement un `response()` qui
+  //    range `owner`/`name`/`id` de la Clinic mise à jour dans `ctx.stash` pour la fonction 2.
+  // 2. `approve-clinic-verification-notify-vet.js` (`Notification`) -- écrit la ligne
+  //    personnelle (`ddb.put()`, `recipientID: ctx.stash.clinicOwner`) puis DOIT renvoyer
+  //    `ctx.prev.result` (la Clinic de la fonction 1), pas son propre résultat (`.returns(a.ref
+  //    ('Clinic'))` -- piège documenté en tête de fichier pour tout pipeline). `runtime.
+  //    earlyReturn(ctx.prev.result)` si `ctx.stash.clinicOwner` est absent (résidu très ancien,
+  //    pas un cas normal -- voir ce resolver) : no-op plutôt qu'un PutItem avec `recipientID:
+  //    null` qui écrirait une ligne que personne ne pourrait jamais lire.
+  //
+  // `allow.group('Admins')` INCHANGÉ : seule vraie garde de cette mutation, aucune interface
+  // admin ne consomme encore ce droit (voir `PendingVerificationView.vue`/le plan différé) --
+  // un Admin l'appelle directement (console AppSync/client GraphQL) après avoir vérifié
+  // manuellement le RPPS/numéro d'ordre auprès de l'Ordre National des Vétérinaires (aucune API
+  // de vérification automatisée confirmée disponible à ce jour). Les DEUX resolvers ciblent
+  // directement la table managée de leur modèle (`dataSource: a.ref('Clinic')`/`a.ref
+  // ('Notification')`) et BYPASSENT entièrement le `@auth` de ces deux modèles (type ET champ,
+  // y compris `clinicVerificationStatusFieldAuth` qui n'accorde `update` à personne, `Admins`
+  // inclus, et le modèle `Notification` qui n'accorde `create` à personne) -- exactement le
+  // même raisonnement qu'ADR-0011 : la seule garde d'autorisation est celle posée directement
+  // sur CETTE mutation, pas les règles des modèles qu'elle cible.
   approveClinicVerification: a
     .mutation()
     .arguments({ id: a.id().required() })
     .returns(a.ref('Clinic'))
     .authorization((allow) => [allow.group('Admins')])
-    .handler(
+    .handler([
       a.handler.custom({
         dataSource: a.ref('Clinic'),
         entry: './resolvers/approve-clinic-verification.js',
       }),
-    ),
+      a.handler.custom({
+        dataSource: a.ref('Notification'),
+        entry: './resolvers/approve-clinic-verification-notify-vet.js',
+      }),
+    ]),
 })
 
 export type Schema = ClientSchema<typeof schema>

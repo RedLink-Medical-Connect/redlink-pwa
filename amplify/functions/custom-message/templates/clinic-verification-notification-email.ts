@@ -1,4 +1,5 @@
 import { renderLayout } from './layout'
+import { escapeHtml, row } from './email-helpers'
 
 /**
  * Email de notification ADMIN (pas un email transactionnel envoyé à un utilisateur final,
@@ -34,28 +35,15 @@ import { renderLayout } from './layout'
  * elle-même au formulaire d'inscription -- un input externe non fiable, contrairement au code
  * de vérification Cognito (généré serveur) que les deux autres templates interpolent sans
  * échappement. Une clinique qui saisirait `<script>`/balises HTML dans son nom ne doit pas
- * pouvoir injecter du HTML dans l'email lu par l'admin.
+ * pouvoir injecter du HTML dans l'email lu par l'admin. `escapeHtml`/`row` extraits vers
+ * `./email-helpers.ts` le 2026-09-18 (système de notifications) -- ce fichier en était
+ * l'implémentation d'origine, voir ce module pour le pourquoi de l'extraction.
  */
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
-}
 
 export interface ClinicVerificationNotificationEmailData {
   clinicId: string
   clinicName: string
   clinicRpps: string
-}
-
-function row(label: string, value: string): string {
-  return `<tr>
-    <td style="padding:8px 12px; background-color:#fafafa; border-bottom:1px solid #e4e4e7; color:#71717a; font-size:12px; font-weight:600; white-space:nowrap;">${label}</td>
-    <td style="padding:8px 12px; border-bottom:1px solid #e4e4e7; color:#18181b; font-size:13px;">${escapeHtml(value)}</td>
-  </tr>`
 }
 
 export function buildClinicVerificationNotificationEmail(
