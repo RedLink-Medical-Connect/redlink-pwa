@@ -27,7 +27,7 @@ import { handler, type RatingAggregationSummary } from './handler'
  * de l'implémentation.
  */
 
-const { sendMock } = vi.hoisted(() => ({ sendMock: vi.fn() }))
+const { sendMock, sesSendMock } = vi.hoisted(() => ({ sendMock: vi.fn(), sesSendMock: vi.fn() }))
 
 vi.mock('@aws-sdk/client-dynamodb', () => ({
   DynamoDBClient: class {},
@@ -49,12 +49,33 @@ vi.mock('@aws-sdk/lib-dynamodb', () => ({
     readonly commandName = 'Update'
     constructor(readonly input: Record<string, unknown>) {}
   },
+  PutCommand: class {
+    readonly commandName = 'Put'
+    constructor(readonly input: Record<string, unknown>) {}
+  },
+}))
+
+// Système de notifications (badge + email, 2026-09-18) -- `sesSendMock` mocké au niveau
+// MODULE (le vrai `SESClient` tenterait un appel réseau réel sinon) : ce fichier ne teste pas
+// le CONTENU de l'email (déjà couvert par `clinic-under-review-email` via son propre patron),
+// seulement que le signalement d'une clinique déclenche bien un envoi, best-effort.
+vi.mock('@aws-sdk/client-ses', () => ({
+  SESClient: class {
+    send = sesSendMock
+  },
+  SendEmailCommand: class {
+    readonly commandName = 'SendEmail'
+    constructor(readonly input: Record<string, unknown>) {}
+  },
 }))
 
 const RATING_TABLE = 'Rating-test-table'
 const RATING_INDEX = 'ratingsByTarget'
 const CLINIC_TABLE = 'Clinic-test-table'
 const OWNER_TABLE = 'Owner-test-table'
+const NOTIFICATION_TABLE = 'Notification-test-table'
+const SENDER_EMAIL = 'sender@test.example'
+const ADMIN_EMAIL = 'admin@test.example'
 
 type SentCommand = { commandName: string; input: Record<string, any> }
 
@@ -93,10 +114,15 @@ const conditionalCheckFailed = () =>
 
 beforeEach(() => {
   sendMock.mockReset()
+  sesSendMock.mockReset()
+  sesSendMock.mockResolvedValue({})
   vi.stubEnv('RATING_TABLE_NAME', RATING_TABLE)
   vi.stubEnv('RATING_TARGET_INDEX_NAME', RATING_INDEX)
   vi.stubEnv('CLINIC_TABLE_NAME', CLINIC_TABLE)
   vi.stubEnv('OWNER_TABLE_NAME', OWNER_TABLE)
+  vi.stubEnv('NOTIFICATION_TABLE_NAME', NOTIFICATION_TABLE)
+  vi.stubEnv('SES_SENDER_EMAIL', SENDER_EMAIL)
+  vi.stubEnv('ADMIN_NOTIFICATION_EMAIL', ADMIN_EMAIL)
   vi.stubEnv('CLINIC_MODERATION_AVERAGE_THRESHOLD', '3')
   vi.stubEnv('CLINIC_MODERATION_MIN_RATING_COUNT', '5')
   vi.spyOn(console, 'log').mockImplementation(() => {})
@@ -210,7 +236,11 @@ describe('rating-aggregation handler — écriture des agrégats', () => {
 
 describe('rating-aggregation handler — modération clinique', () => {
   it('signale la clinique quand la moyenne passe sous le seuil avec assez d’avis', async () => {
-    respondWith(starsPage([1, 2, 3, 2, 2]), {}, {})
+    // 3e réponse (le flag `Update`) porte désormais `Attributes` (ReturnValues: 'ALL_NEW',
+    // système de notifications 2026-09-18) : c'est de LÀ que `notifyClinicUnderReview` tire le
+    // nom de la clinique, sans `GetItem` supplémentaire. 4e réponse : le `PutCommand` de
+    // `writeNotification` (même `documentClient`/`sendMock` que le reste de ce handler).
+    respondWith(starsPage([1, 2, 3, 2, 2]), {}, { Attributes: { name: 'Clinique Alfort' } }, {})
 
     const summary = await invoke(streamEvent(insertRecord('clinic-1', 'CLINIC')))
 
@@ -227,6 +257,19 @@ describe('rating-aggregation handler — modération clinique', () => {
     expect(flag.input.ConditionExpression).toContain('attribute_not_exists(#needsAdminReview)')
     expect(flag.input.ConditionExpression).toContain('#needsAdminReview = :false')
     expect(summary.clinicsFlaggedForReview).toBe(1)
+
+    // Badge (broadcast Admins) + email admin -- best-effort, hors comptabilité `failures`.
+    const puts = sentCommands().filter((command) => command.commandName === 'Put')
+    expect(puts).toHaveLength(1)
+    expect(puts[0].input.Item).toMatchObject({
+      recipientGroup: 'Admins',
+      recipientID: null,
+      type: 'CLINIC_UNDER_REVIEW',
+      data: { clinicName: 'Clinique Alfort' },
+    })
+    expect(sesSendMock).toHaveBeenCalledTimes(1)
+    expect(sesSendMock.mock.calls[0][0].input.Destination).toEqual({ ToAddresses: [ADMIN_EMAIL] })
+    expect(summary.failures).toBe(0)
   })
 
   it('ne signale PAS une clinique sous le seuil avec trop peu d’avis (4 avis à 2,0)', async () => {

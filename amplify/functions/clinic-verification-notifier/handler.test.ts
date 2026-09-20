@@ -17,7 +17,10 @@ import { handler } from './handler'
  * `handler.ts`) -- pas un décalque de l'implémentation.
  */
 
-const { sendMock } = vi.hoisted(() => ({ sendMock: vi.fn() }))
+const { sendMock, dynamoSendMock } = vi.hoisted(() => ({
+  sendMock: vi.fn(),
+  dynamoSendMock: vi.fn(),
+}))
 
 vi.mock('@aws-sdk/client-ses', () => ({
   SESClient: class {
@@ -29,8 +32,24 @@ vi.mock('@aws-sdk/client-ses', () => ({
   },
 }))
 
+// Mocks du système de notifications (badge Admins, 2026-09-17) -- même forme que
+// `rating-aggregation/handler.test.ts` (SDK mocké au niveau MODULE, le handler instancie son
+// `DynamoDBDocumentClient` au chargement du module).
+vi.mock('@aws-sdk/client-dynamodb', () => ({
+  DynamoDBClient: class {},
+}))
+
+vi.mock('@aws-sdk/lib-dynamodb', () => ({
+  DynamoDBDocumentClient: { from: () => ({ send: dynamoSendMock }) },
+  PutCommand: class {
+    readonly commandName = 'Put'
+    constructor(readonly input: Record<string, unknown>) {}
+  },
+}))
+
 const SENDER_EMAIL = 'admin@test.example'
 const ADMIN_EMAIL = 'admin@test.example'
+const NOTIFICATION_TABLE = 'Notification-test-table'
 
 type SentCommand = { commandName: string; input: Record<string, any> }
 
@@ -61,13 +80,17 @@ describe('clinic-verification-notifier handler', () => {
   beforeEach(() => {
     sendMock.mockReset()
     sendMock.mockResolvedValue({})
+    dynamoSendMock.mockReset()
+    dynamoSendMock.mockResolvedValue({})
     process.env.SES_SENDER_EMAIL = SENDER_EMAIL
     process.env.ADMIN_NOTIFICATION_EMAIL = ADMIN_EMAIL
+    process.env.NOTIFICATION_TABLE_NAME = NOTIFICATION_TABLE
   })
 
   afterEach(() => {
     delete process.env.SES_SENDER_EMAIL
     delete process.env.ADMIN_NOTIFICATION_EMAIL
+    delete process.env.NOTIFICATION_TABLE_NAME
   })
 
   it('envoie un seul email SES pour un INSERT Clinic, vers ADMIN_NOTIFICATION_EMAIL, depuis SES_SENDER_EMAIL', async () => {
@@ -118,6 +141,7 @@ describe('clinic-verification-notifier handler', () => {
 
     await expect(invoke(streamEvent(incompleteRecord))).resolves.not.toThrow()
     expect(sendMock).not.toHaveBeenCalled()
+    expect(dynamoSendMock).not.toHaveBeenCalled()
   })
 
   it("best-effort : un échec SES est logué mais ne fait jamais rejeter le handler (pas de retry côté EventSourceMapping, voir amplify/backend.ts)", async () => {
@@ -128,5 +152,46 @@ describe('clinic-verification-notifier handler', () => {
 
     expect(consoleErrorSpy).toHaveBeenCalled()
     consoleErrorSpy.mockRestore()
+  })
+
+  // Système de notifications (badge Admins, 2026-09-17) -- voir `amplify/data/resource.ts`
+  // (modèle `Notification`) pour l'idiome `@auth` (`recipientGroup`, `groupDefinedIn`).
+  describe('badge admin (Notification broadcast "Admins")', () => {
+    it('écrit une Notification broadcast pour le groupe Admins, sur la table NOTIFICATION_TABLE_NAME', async () => {
+      await invoke(streamEvent(insertRecord('clinic-1', 'Clinique Alfort')))
+
+      expect(dynamoSendMock).toHaveBeenCalledTimes(1)
+      const [command] = dynamoSendMock.mock.calls[0]
+      expect((command as SentCommand).commandName).toBe('Put')
+      const item = (command as SentCommand).input.Item as Record<string, unknown>
+      expect((command as SentCommand).input.TableName).toBe(NOTIFICATION_TABLE)
+      expect(item.recipientID).toBeNull()
+      expect(item.recipientGroup).toBe('Admins')
+      expect(item.type).toBe('CLINIC_PENDING_VERIFICATION')
+      expect(item.read).toBe(false)
+      expect(item.data).toEqual({ clinicName: 'Clinique Alfort' })
+      expect(item.__typename).toBe('Notification')
+    })
+
+    it("best-effort INDÉPENDANT de l'email : un échec DynamoDB n'empêche pas l'envoi SES", async () => {
+      dynamoSendMock.mockRejectedValue(new Error('ProvisionedThroughputExceededException'))
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+      await expect(invoke(streamEvent(insertRecord('clinic-1', 'Clinique Alfort')))).resolves.not.toThrow()
+
+      expect(sendMock).toHaveBeenCalledTimes(1)
+      expect(consoleErrorSpy).toHaveBeenCalled()
+      consoleErrorSpy.mockRestore()
+    })
+
+    it("best-effort INDÉPENDANT du badge : un échec SES n'empêche pas l'écriture DynamoDB", async () => {
+      sendMock.mockRejectedValue(new Error('Email address is not verified'))
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+      await expect(invoke(streamEvent(insertRecord('clinic-1', 'Clinique Alfort')))).resolves.not.toThrow()
+
+      expect(dynamoSendMock).toHaveBeenCalledTimes(1)
+      consoleErrorSpy.mockRestore()
+    })
   })
 })

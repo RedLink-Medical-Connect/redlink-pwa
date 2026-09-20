@@ -1,4 +1,8 @@
 import { defineFunction } from '@aws-amplify/backend'
+import {
+  CLINIC_VERIFICATION_SENDER_EMAIL,
+  CLINIC_VERIFICATION_ADMIN_EMAIL,
+} from '../clinic-verification-notifier/resource'
 
 /**
  * Lambda d'AGRÉGATION DES NOTATIONS, déclenchée par le flux DynamoDB Streams de la table `Rating`
@@ -46,9 +50,17 @@ import { defineFunction } from '@aws-amplify/backend'
  * 300s de la Lambda planifiée : un lot est plafonné à `batchSize` (voir `amplify/backend.ts`), et
  * un handler de flux qui traîne bloque la progression de son shard.
  *
- * Les autres variables d'environnement (noms des 3 tables DynamoDB managées + nom du GSI) sont
- * injectées depuis `amplify/backend.ts` via `addEnvironment()` : ce sont des tokens CDK résolus
- * seulement à la synthèse, impossibles à écrire ici en statique.
+ * Les autres variables d'environnement (noms des 4 tables DynamoDB managées -- `Rating`/
+ * `Clinic`/`Owner`/`Notification` depuis le 2026-09-18 -- + nom du GSI) sont injectées depuis
+ * `amplify/backend.ts` via `addEnvironment()` : ce sont des tokens CDK résolus seulement à la
+ * synthèse, impossibles à écrire ici en statique.
+ *
+ * ÉTENDUE le 2026-09-18 (système de notifications) : quand une Clinic est signalée à la
+ * modération pour la première fois, cette Lambda écrit DÉSORMAIS aussi, best-effort et hors de
+ * la comptabilité fail-loud du handler (voir `notifyClinicUnderReview` dans `handler.ts`), une
+ * ligne `Notification` broadcast Admins + un email -- PREMIÈRE fois que cette Lambda envoie un
+ * email (`ses:SendEmail`, même identité SES vérifiée que `clinic-verification-notifier`,
+ * importée ci-dessous plutôt que redupliquée).
  *
  * `resourceGroupName: 'data'` -- même correctif et même raison que
  * `mission-validation-auto-finalizer/resource.ts` (voir son commentaire dédié) : sans lui, cette
@@ -66,5 +78,7 @@ export const ratingAggregation = defineFunction({
   environment: {
     CLINIC_MODERATION_AVERAGE_THRESHOLD: '3',
     CLINIC_MODERATION_MIN_RATING_COUNT: '5',
+    SES_SENDER_EMAIL: CLINIC_VERIFICATION_SENDER_EMAIL,
+    ADMIN_NOTIFICATION_EMAIL: CLINIC_VERIFICATION_ADMIN_EMAIL,
   },
 })

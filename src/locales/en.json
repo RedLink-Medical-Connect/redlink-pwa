@@ -1139,6 +1139,42 @@
     "description": "This page doesn't exist or has been moved. Check the address or go back home.",
     "cta": "Back to home"
   },
+  "notifications": {
+    "bell_aria": "Notifications ({count} unread)",
+    "title": "Notifications",
+    "unread": "Unread",
+    "empty": "No notifications yet.",
+    "load_error": "Couldn't load notifications — try again.",
+    "types": {
+      "CLINIC_PENDING_VERIFICATION": {
+        "title": "New clinic pending verification: {clinicName}"
+      },
+      "CLINIC_VERIFIED": {
+        "title": "Your clinic {clinicName} has been activated!"
+      },
+      "NEW_COMPATIBLE_REQUEST": {
+        "title": "New compatible request at {clinicName}"
+      },
+      "MISSION_ACCEPTED": {
+        "title": "A donor has been proposed — {animalName}"
+      },
+      "MISSION_VALIDATION_REMINDER": {
+        "title": "Confirm the donation — {animalName}"
+      },
+      "MISSION_DISPUTED": {
+        "title": "Dispute on a mission ({missionId})"
+      },
+      "CLINIC_UNDER_REVIEW": {
+        "title": "Clinic flagged for review: {clinicName}"
+      },
+      "ANIMAL_VALIDATED": {
+        "title": "{animalName} is now a validated donor"
+      },
+      "ANIMAL_VALIDATION_EXPIRED": {
+        "title": "{animalName}'s validation has expired"
+      }
+    }
+  },
   "pendingVerification": {
     "title": "Account under verification",
     "description": "Your registration has been received. Our team is currently verifying your clinic's RPPS number and your veterinary order number with the National Veterinary Order. You'll get full access as soon as this verification is complete."

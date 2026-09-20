@@ -11,6 +11,15 @@ import { defineFunction } from '@aws-amplify/backend'
  * (`amplify/functions/custom-message/`) ne le fait jamais lui-même, c'est Cognito qui envoie
  * l'email à partir du HTML retourné.
  *
+ * ÉTENDUE le 2026-09-17 (système de notifications, badge + email) : cette Lambda écrit
+ * DÉSORMAIS aussi, best-effort et INDÉPENDAMMENT de l'email SES, une ligne `Notification`
+ * broadcast (`recipientGroup: "Admins"`, `amplify/data/resource.ts`) directement dans la table
+ * `Notification` -- réutilisation de cette Lambda existante plutôt qu'une nouvelle (même
+ * déclencheur exact : flux `Clinic` sur `INSERT`), pas une nouvelle fonction dédiée. Policy IAM
+ * `dynamodb:PutItem` (scopée à cette seule table) et variable d'environnement
+ * `NOTIFICATION_TABLE_NAME` posées dans `amplify/backend.ts` -- pas ici, voir le commentaire
+ * plus bas sur les tokens CDK résolus à la synthèse.
+ *
  * `resourceGroupName: 'data'` -- même correctif et même raison que `rating-aggregation/` :
  * sans lui, cette fonction rejoint par défaut la stack imbriquée partagée de
  * `post-confirmation`, dont `auth` a besoin (trigger Cognito), alors que ses propres policies

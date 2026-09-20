@@ -1,6 +1,9 @@
 import type { DynamoDBRecord, DynamoDBStreamEvent, Handler } from 'aws-lambda'
 import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses'
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
+import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb'
 import { buildClinicVerificationNotificationEmail } from '../custom-message/templates/clinic-verification-notification-email'
+import { writeNotification } from '../shared/write-notification'
 
 /**
  * Handler de la Lambda `clinic-verification-notifier`, déclenchée par le flux DynamoDB
@@ -16,9 +19,12 @@ import { buildClinicVerificationNotificationEmail } from '../custom-message/temp
  * handler n'a besoin d'AUCUNE donnée hors de l'enregistrement `Clinic` qui vient d'être créé
  * -- `name`/`rpps`/`id` suffisent au contenu de l'email (voir
  * `../custom-message/templates/clinic-verification-notification-email.ts` pour la raison de
- * ne PAS inclure les champs du `Veterinarian` référent ici). Ce handler ne fait donc aucun
- * appel DynamoDB, seulement un appel SES -- pas de policy IAM DynamoDB nécessaire pour cette
- * fonction (voir `amplify/backend.ts`).
+ * ne PAS inclure les champs du `Veterinarian` référent ici). Ce handler ne fait donc AUCUNE
+ * LECTURE DynamoDB, ni sur `Clinic` ni sur `Notification` -- corrigé le 2026-09-17 (revue
+ * devsecops-aws, système de notifications) : cette section décrivait encore "pas de policy IAM
+ * DynamoDB nécessaire" après l'ajout de `notifyAdminBadgeOfPendingClinic` plus bas (`PutItem`
+ * sur `Notification`, policy posée dans `amplify/backend.ts`) -- ce handler a bien BESOIN d'une
+ * policy IAM DynamoDB désormais, seulement pas pour une LECTURE.
  *
  * Lecture directe des `AttributeValue` (`NewImage.name.S`), même choix que
  * `rating-aggregation/handler.ts` (`toSnapshot`) : les champs lus sont tous des chaînes,
@@ -43,6 +49,7 @@ import { buildClinicVerificationNotificationEmail } from '../custom-message/temp
  */
 
 const sesClient = new SESClient({})
+const documentClient = DynamoDBDocumentClient.from(new DynamoDBClient({}))
 
 function requireEnv(name: string): string {
   const value = process.env[name]
@@ -98,6 +105,37 @@ async function notifyAdminOfPendingClinic(snapshot: ClinicInsertSnapshot): Promi
   )
 }
 
+/**
+ * Écrit la notification BADGE (broadcast `recipientGroup: "Admins"`, système de
+ * notifications, 2026-09-17) -- voir `amplify/data/resource.ts` (modèle `Notification`) pour
+ * l'idiome `@auth` complet (`allow.groupDefinedIn('recipientGroup')`, AUCUN rôle Cognito n'a
+ * `create` : cette Lambda, via son identité IAM, est la SEULE voie d'écriture légitime pour ce
+ * type de notification).
+ *
+ * Écriture DIRECTE DynamoDB (`writeNotification`, `../shared/write-notification.ts` -- extrait
+ * le 2026-09-18, cette fonction en était l'implémentation d'origine, voir ce module pour le
+ * pourquoi de l'extraction), INDÉPENDANTE de l'email (`notifyAdminOfPendingClinic` ci-dessus) :
+ * deux appels distincts, deux `try/catch` distincts dans `handler` ci-dessous -- un échec
+ * DynamoDB ne doit jamais empêcher l'email (déjà fonctionnel, seul canal historique) et
+ * réciproquement, un échec SES (identité non vérifiée, voir `resource.ts`) ne doit jamais
+ * empêcher le badge de s'afficher.
+ */
+async function notifyAdminBadgeOfPendingClinic(snapshot: ClinicInsertSnapshot): Promise<void> {
+  if (!snapshot.id || !snapshot.name) {
+    console.error('clinic-verification-notifier: enregistrement Clinic incomplet, badge ignoré', snapshot)
+    return
+  }
+
+  const notificationTableName = requireEnv('NOTIFICATION_TABLE_NAME')
+
+  await writeNotification(documentClient, notificationTableName, {
+    recipientGroup: 'Admins',
+    type: 'CLINIC_PENDING_VERIFICATION',
+    titleKey: 'notifications.types.CLINIC_PENDING_VERIFICATION.title',
+    data: { clinicName: snapshot.name },
+  })
+}
+
 export const handler: Handler<DynamoDBStreamEvent> = async (event) => {
   for (const record of event.Records) {
     const snapshot = toSnapshot(record)
@@ -108,6 +146,13 @@ export const handler: Handler<DynamoDBStreamEvent> = async (event) => {
     } catch (err) {
       // Best-effort (voir en-tête) : logué, jamais rethrow -- ne bloque jamais le shard.
       console.error('clinic-verification-notifier: échec envoi email admin', err, snapshot)
+    }
+
+    try {
+      await notifyAdminBadgeOfPendingClinic(snapshot)
+    } catch (err) {
+      // Best-effort, indépendant de l'email (voir en-tête de la fonction ci-dessus).
+      console.error('clinic-verification-notifier: échec écriture badge admin', err, snapshot)
     }
   }
 }
