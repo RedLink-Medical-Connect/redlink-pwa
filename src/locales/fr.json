@@ -694,6 +694,20 @@
           "title": "Ajouter un animal",
           "subtitle": "Remplissez la fiche de votre compagnon pour sauver des vies.",
           "submit": "Enregistrer l'animal"
+        },
+        "photo": {
+          "add": "Ajouter une photo",
+          "change": "Changer la photo",
+          "remove": "Retirer la photo",
+          "hint": "JPEG, PNG ou WebP, 5 Mo maximum.",
+          "alt": "Photo de {name}",
+          "uploaded": "Photo mise à jour",
+          "removed": "Photo retirée",
+          "errors": {
+            "invalid_type": "Format non pris en charge : choisissez une image JPEG, PNG ou WebP.",
+            "too_large": "Image trop lourde : 5 Mo maximum.",
+            "generic": "Impossible de mettre à jour la photo. Réessayez."
+          }
         }
       },
       "missions": {

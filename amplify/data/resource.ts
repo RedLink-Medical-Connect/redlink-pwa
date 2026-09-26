@@ -69,6 +69,18 @@ const donorValidationExpiryNotifiedFieldAuth = (allow: any) => [
   allow.owner().to(['read']),
   allow.group('Veterinarians').to(['read']),
 ]
+// Photo personnalisée d'Animal (2026-09-26, docs/adr/0023) -- `Animal.photoKey` : même règle
+// que `donorValidationExpiryNotifiedFieldAuth` ci-dessus (Owner+Veterinarians en `read`,
+// personne en `create`/`update`), helper distinct parce que la RAISON diffère : ce n'est pas
+// du bookkeeping mais un pointeur vers un objet S3 que seul le BFF sait vérifier
+// (`amplify/functions/bff/animal-photo-routes.ts`, écriture DynamoDB directe après avoir
+// contrôlé que l'objet existe sous le préfixe `animal-photos/<animalId>/`). Laisser l'Owner
+// l'écrire via `updateAnimal` lui permettrait de faire pointer son Animal vers la photo d'un
+// autre -- le BFF refuserait de la signer (préfixe), mais autant ne pas ouvrir la porte.
+const animalPhotoKeyFieldAuth = (allow: any) => [
+  allow.owner().to(['read']),
+  allow.group('Veterinarians').to(['read']),
+]
 // Owner écrit UNE FOIS à la création puis lecture seule (jamais `update`), correction
 // réservée aux Veterinarians (read+update) -- Animal, champs médicaux critiques
 // (species/bloodGroup/weight/isVaccinated). Demande produit 2026-08-23 : contrairement à
@@ -754,6 +766,11 @@ export const schema = a.schema({
       donorValidationExpiryNotifiedAt: a
         .datetime()
         .authorization(donorValidationExpiryNotifiedFieldAuth),
+
+      // Clé S3 de la photo personnalisée (`animal-photos/<animalId>/<uuid>.<ext>`), absente =
+      // icône espèce par défaut. Jamais une URL : l'URL d'affichage est pré-signée à la demande
+      // par le BFF (`POST /api/animals/photo/urls`). Voir `animalPhotoKeyFieldAuth`.
+      photoKey: a.string().authorization(animalPhotoKeyFieldAuth),
 
       ownerID: a.id().required(),
       ownerProfile: a.belongsTo('Owner', 'ownerID'),

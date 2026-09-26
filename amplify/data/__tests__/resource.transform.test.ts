@@ -194,7 +194,7 @@ describe('amplify/data/resource.ts — Animal, garde-fou de régression sur le r
   // auth) plutôt que de supposer un seul bloc contigu comme avant ce correctif. Part de
   // `name:` pour exclure le `@auth` de niveau TYPE (`type Animal @model @auth(rules:
   // [...])`), légitime et hors du périmètre de ce test.
-  it("aucun champ hors species/weight/bloodGroup/isVaccinated/lastDonationDate/isValidatedDonor/validationExpiresAt/donorValidationExpiryNotifiedAt (name, breed, sex, birthDate, isSterilized, donationFrequency, ownerID, ownerProfile, missions...) ne porte de @auth au niveau champ", () => {
+  it("aucun champ hors species/weight/bloodGroup/isVaccinated/lastDonationDate/isValidatedDonor/validationExpiresAt/donorValidationExpiryNotifiedAt/photoKey (name, breed, sex, birthDate, isSterilized, donationFrequency, ownerID, ownerProfile, missions...) ne porte de @auth au niveau champ", () => {
     const animalType = extractType('Animal')
     const nameFieldIdx = animalType.indexOf('name: String!')
 
@@ -208,6 +208,8 @@ describe('amplify/data/resource.ts — Animal, garde-fou de régression sur le r
       'validationExpiresAt',
       // Système de notifications, 2026-09-18 -- voir donorValidationExpiryNotifiedFieldAuth.
       'donorValidationExpiryNotifiedAt',
+      // Photo personnalisée, 2026-09-26 -- voir animalPhotoKeyFieldAuth.
+      'photoKey',
     ]
 
     let restOfType = animalType.slice(nameFieldIdx)
@@ -281,6 +283,22 @@ describe('amplify/data/resource.ts — Animal.donorValidationExpiryNotifiedAt (s
 
   it('Owner ET Veterinarians ont SEULEMENT read -- aucun rôle Cognito ne peut écrire ce champ', () => {
     const block = extractFieldAuthBlock(animalType, 'donorValidationExpiryNotifiedAt')
+    expect(block).toContain('{allow: owner, operations: [read]')
+    expect(block).toContain('{allow: groups, operations: [read], groups: ["Veterinarians"]}')
+    expect(block).not.toContain('update')
+    expect(block).not.toContain('create')
+  })
+})
+
+describe('amplify/data/resource.ts — Animal.photoKey (photo personnalisée, ADR-0023)', () => {
+  const animalType = extractType('Animal')
+
+  it('photoKey est nullable (String, pas String!) -- absent = icône espèce par défaut', () => {
+    expect(animalType).toContain('photoKey: String @auth(')
+  })
+
+  it("Owner ET Veterinarians ont SEULEMENT read -- seul le BFF (DynamoDB direct) écrit ce champ", () => {
+    const block = extractFieldAuthBlock(animalType, 'photoKey')
     expect(block).toContain('{allow: owner, operations: [read]')
     expect(block).toContain('{allow: groups, operations: [read], groups: ["Veterinarians"]}')
     expect(block).not.toContain('update')

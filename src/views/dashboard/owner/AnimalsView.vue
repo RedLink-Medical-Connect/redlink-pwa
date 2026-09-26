@@ -7,6 +7,7 @@ import { useToast } from 'primevue/usetoast'
 import Dialog from 'primevue/dialog'
 
 import { useAnimals } from '@/composables/useAnimals'
+import { useAnimalPhoto, mapPhotoErrorKey, ALLOWED_PHOTO_TYPES } from '@/composables/useAnimalPhoto'
 import BreedAutocomplete from '@/components/common/BreedAutocomplete.vue'
 import {
   Species,
@@ -33,6 +34,16 @@ const {
   deleteAnimalById,
 } = useAnimals()
 
+const {
+  photoUrls,
+  isUploadingPhoto,
+  isRemovingPhoto,
+  loadPhotoUrls,
+  uploadAnimalPhoto,
+  removeAnimalPhoto,
+} = useAnimalPhoto()
+const photoInput = ref(null)
+
 const showEditModal = ref(false)
 const showDeleteModal = ref(false)
 const selectedAnimal = ref(null)
@@ -50,6 +61,9 @@ const frequencyOptions = computed(() => [
   { label: t('dashboard.owner.animals.frequency.twice_year'), value: DonationFrequency.TWICE_YEAR },
   { label: t('dashboard.owner.animals.frequency.once_year'), value: DonationFrequency.ONCE_YEAR },
 ])
+
+// Icône par défaut quand l'Animal n'a pas de photo (ou qu'elle n'a pas pu être résolue).
+const speciesEmoji = (species) => (species === Species.DOG ? '🐶' : '🐱')
 
 // Sous-tâche 6.8 : champ informatif uniquement (voir schema.graphql) — pas de valeur
 // pour un Animal sans sexe renseigné, on n'affiche simplement rien plutôt qu'un '?'.
@@ -74,9 +88,69 @@ const formatDate = (dateString) => {
 // nulle part dans ce repo). L'échec de chargement est désormais visible via `loadError`
 // dans le template, avec un bouton "Réessayer" -- même pattern que ValidationsView.vue/
 // DonorsView.vue/HistoryView.vue.
-onMounted(() => {
-  fetchAnimals()
-})
+// Photos résolues APRÈS la liste, en un seul appel BFF (`loadPhotoUrls` n'échoue jamais : un
+// souci de photo retombe sur l'icône espèce, jamais sur l'état d'erreur de la liste).
+const loadAnimals = async () => {
+  await fetchAnimals()
+  await loadPhotoUrls(animals.value)
+}
+
+onMounted(loadAnimals)
+
+// `photoKey` n'est écrit que par le BFF (ADR-0023) : on reporte la nouvelle valeur localement
+// sur la carte ET le formulaire d'édition plutôt que de recharger toute la liste.
+const setLocalPhotoKey = (animalId, photoKey) => {
+  const animal = animals.value.find((a) => a.id === animalId)
+  if (animal) animal.photoKey = photoKey
+  if (editForm.value.id === animalId) editForm.value.photoKey = photoKey
+}
+
+const showPhotoError = (e) => {
+  console.error(e)
+  toast.add({
+    severity: 'error',
+    summary: t('common.error'),
+    detail: t(mapPhotoErrorKey(e?.message)),
+    life: 4000,
+  })
+}
+
+const onPhotoSelected = async (event) => {
+  const file = event.target.files?.[0]
+  // Réinitialisé tout de suite : rechoisir le MÊME fichier après une erreur doit redéclencher
+  // `change`.
+  event.target.value = ''
+  if (!file) return
+  const animalId = editForm.value.id
+  try {
+    const photoKey = await uploadAnimalPhoto(file, { id: animalId })
+    setLocalPhotoKey(animalId, photoKey)
+    toast.add({
+      severity: 'success',
+      summary: t('common.success'),
+      detail: t('dashboard.owner.animals.photo.uploaded'),
+      life: 3000,
+    })
+  } catch (e) {
+    showPhotoError(e)
+  }
+}
+
+const onRemovePhoto = async () => {
+  const animalId = editForm.value.id
+  try {
+    await removeAnimalPhoto({ id: animalId })
+    setLocalPhotoKey(animalId, null)
+    toast.add({
+      severity: 'info',
+      summary: t('common.success'),
+      detail: t('dashboard.owner.animals.photo.removed'),
+      life: 3000,
+    })
+  } catch (e) {
+    showPhotoError(e)
+  }
+}
 
 const openEditModal = (animal) => {
   editForm.value = JSON.parse(JSON.stringify(animal))
@@ -144,6 +218,57 @@ const onDelete = async () => {
       class="p-fluid"
     >
       <div class="flex flex-col gap-4 pt-2">
+        <div class="flex items-center gap-4">
+          <div
+            class="w-16 h-16 shrink-0 rounded-full overflow-hidden bg-zinc-50 dark:bg-zinc-800 flex items-center justify-center text-3xl ring-4 ring-zinc-50 dark:ring-zinc-800"
+          >
+            <img
+              v-if="photoUrls[editForm.id]"
+              :src="photoUrls[editForm.id]"
+              :alt="$t('dashboard.owner.animals.photo.alt', { name: editForm.name })"
+              class="w-full h-full object-cover"
+            />
+            <span v-else aria-hidden="true">{{ speciesEmoji(editForm.species) }}</span>
+          </div>
+          <div class="flex flex-col items-start gap-1">
+            <input
+              ref="photoInput"
+              type="file"
+              class="hidden"
+              :accept="ALLOWED_PHOTO_TYPES.join(',')"
+              @change="onPhotoSelected"
+            />
+            <div class="flex flex-wrap gap-2">
+              <Button
+                :label="
+                  editForm.photoKey
+                    ? $t('dashboard.owner.animals.photo.change')
+                    : $t('dashboard.owner.animals.photo.add')
+                "
+                icon="pi pi-camera"
+                size="small"
+                variant="outlined"
+                :loading="isUploadingPhoto"
+                :disabled="isRemovingPhoto"
+                @click="photoInput?.click()"
+              />
+              <Button
+                v-if="editForm.photoKey"
+                :label="$t('dashboard.owner.animals.photo.remove')"
+                icon="pi pi-times"
+                size="small"
+                text
+                severity="danger"
+                :loading="isRemovingPhoto"
+                :disabled="isUploadingPhoto"
+                @click="onRemovePhoto"
+              />
+            </div>
+            <small class="text-xs text-zinc-500 dark:text-zinc-400">{{
+              $t('dashboard.owner.animals.photo.hint')
+            }}</small>
+          </div>
+        </div>
         <InputText v-model="editForm.name" :placeholder="$t('dashboard.owner.animals.form.name')" />
         <div class="grid grid-cols-2 gap-2">
           <BreedAutocomplete v-model="editForm.breed" :species="editForm.species" />
@@ -292,7 +417,7 @@ const onDelete = async () => {
             icon="pi pi-refresh"
             text
             class="mt-2"
-            @click="fetchAnimals"
+            @click="loadAnimals"
           />
         </div>
 
@@ -322,9 +447,15 @@ const onDelete = async () => {
             <div class="flex justify-between items-start mb-4">
               <div class="flex items-center gap-4">
                 <div
-                  class="w-14 h-14 bg-zinc-50 dark:bg-zinc-800 rounded-full flex items-center justify-center text-3xl ring-4 ring-zinc-50 dark:ring-zinc-800 shadow-inner"
+                  class="w-14 h-14 shrink-0 overflow-hidden bg-zinc-50 dark:bg-zinc-800 rounded-full flex items-center justify-center text-3xl ring-4 ring-zinc-50 dark:ring-zinc-800 shadow-inner"
                 >
-                  {{ animal.species === Species.DOG ? '🐶' : '🐱' }}
+                  <img
+                    v-if="photoUrls[animal.id]"
+                    :src="photoUrls[animal.id]"
+                    :alt="$t('dashboard.owner.animals.photo.alt', { name: animal.name })"
+                    class="w-full h-full object-cover"
+                  />
+                  <template v-else>{{ speciesEmoji(animal.species) }}</template>
                 </div>
                 <div>
                   <h3 class="font-black text-xl leading-none text-zinc-900 dark:text-white mb-1">

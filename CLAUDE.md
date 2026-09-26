@@ -122,6 +122,13 @@ architecturales) et `.cursorrules` (conventions détaillées pour l'éditeur).
   référence pour toute future constante partagée entre `backend.ts` et un handler. Référence
   pour toute future protection d'une origine Lambda Function URL derrière CloudFront : header
   secret partagé par défaut, OAC réservé aux origines qui ne reçoivent que GET/HEAD.
+- **Fichiers utilisateur (S3) derrière le BFF** : le navigateur n'a aucun identifiant AWS
+  (ADR-0021), donc pas d'`aws-amplify/storage` ni de `defineStorage`. Le BFF vérifie
+  l'appelant (`requireCaller`, `amplify/functions/bff/caller-identity.ts`, partagé avec
+  `clinic-routes.ts`), puis délivre un POST pré-signé (upload : taille et type imposés par S3) ou
+  un GET pré-signé (affichage). Le bucket est créé en CDK DANS `backend.bff.stack` (sinon, cycle
+  de stacks), et le pointeur (`Animal.photoKey`) est écrit en DynamoDB direct par le BFF seul,
+  en lecture seule côté `@auth`. Voir `animal-photo-routes.ts` et ADR-0023.
 - **Invitation d'un utilisateur par un autre (compte créé pour un tiers)** : un vétérinaire
   référent (= `Clinic.owner`, la règle `allow.owner()` déjà existante — déjà le seul autorisé
   à supprimer sa Clinic, `useClinicSettings.deleteAccount`) invite une collègue par email
