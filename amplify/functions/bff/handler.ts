@@ -2,6 +2,7 @@ import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from '
 import * as authRoutes from './auth-routes'
 import type { RouteResult } from './auth-routes'
 import * as clinicRoutes from './clinic-routes'
+import * as animalPhotoRoutes from './animal-photo-routes'
 import { proxyGraphql } from './graphql-proxy'
 import { ORIGIN_VERIFY_HEADER } from './origin-verify'
 
@@ -68,6 +69,10 @@ export const handler = async (
     'POST /api/auth/mfa/verify': () => authRoutes.confirmMfaSetup(body, cookies),
     'POST /api/auth/mfa/disable': () => authRoutes.disableMfa(cookies),
     'POST /api/clinic/veterinarians': () => clinicRoutes.inviteVeterinarian(body, cookies),
+    'POST /api/animals/photo/upload-url': () => animalPhotoRoutes.requestUploadUrl(body, cookies),
+    'POST /api/animals/photo/confirm': () => animalPhotoRoutes.confirmUpload(body, cookies),
+    'POST /api/animals/photo/remove': () => animalPhotoRoutes.removePhoto(body, cookies),
+    'POST /api/animals/photo/urls': () => animalPhotoRoutes.getPhotoUrls(body, cookies),
   }
 
   const route = routes[`${method} ${path}`]

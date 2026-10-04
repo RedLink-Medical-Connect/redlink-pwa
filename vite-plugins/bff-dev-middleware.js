@@ -39,8 +39,9 @@ import { readFileSync } from 'node:fs'
  * `apply: 'serve'` : ce plugin n'existe QUE pour le serveur de dev -- jamais dans un bundle de
  * production (`npm run build`), où CloudFront + le vrai Lambda prennent le relais.
  *
- * `/api/clinic/veterinarians` (invitation d'un vétérinaire, `clinic-routes.ts`) a besoin de
- * trois noms de ressources bruts (deux tables DynamoDB, une fonction Lambda) qu'`amplify_
+ * `/api/clinic/veterinarians` (invitation d'un vétérinaire, `clinic-routes.ts`) et
+ * `/api/animals/photo/*` (`animal-photo-routes.ts`) ont besoin de noms de ressources bruts
+ * (tables DynamoDB, fonction Lambda, bucket S3) qu'`amplify_
  * outputs.json` n'expose dans aucune catégorie connue (`auth`/`data`/...) -- posés côté
  * `backend.addOutput({ custom: {...} })` (`amplify/backend.ts`, même mécanisme déjà utilisé
  * pour `bffDistributionDomain`) précisément pour ce besoin, lisibles ici sous `outputs.custom`.
@@ -89,6 +90,8 @@ export function bffDevMiddleware() {
       process.env.VETERINARIAN_TABLE_NAME = outputs.custom?.veterinarianTableName
       process.env.CLINIC_TABLE_NAME = outputs.custom?.clinicTableName
       process.env.VETERINARIAN_ACCOUNT_ADMIN_FUNCTION_NAME = outputs.custom?.veterinarianAccountAdminFunctionName
+      process.env.ANIMAL_TABLE_NAME = outputs.custom?.animalTableName
+      process.env.ANIMAL_PHOTOS_BUCKET_NAME = outputs.custom?.animalPhotosBucketName
 
       server.middlewares.use(async (req, res, next) => {
         // Middleware NON monté sur un préfixe (`server.middlewares.use(fn)`, pas

@@ -25,7 +25,6 @@ declare module 'vue' {
     BreedAutocomplete: typeof import('./src/components/common/BreedAutocomplete.vue')['default']
     Button: typeof import('primevue/button')['default']
     Calendar: typeof import('primevue/calendar')['default']
-    Carousel: typeof import('primevue/carousel')['default']
     Checkbox: typeof import('primevue/checkbox')['default']
     Column: typeof import('primevue/column')['default']
     DashboardSidebar: typeof import('./src/components/dashboard/DashboardSidebar.vue')['default']

@@ -1,5 +1,6 @@
 import { defineBackend } from '@aws-amplify/backend'
 import { Duration, Names, Stack } from 'aws-cdk-lib'
+import { BlockPublicAccess, Bucket, BucketEncryption, HttpMethods } from 'aws-cdk-lib/aws-s3'
 import { Policy, PolicyStatement } from 'aws-cdk-lib/aws-iam'
 import { Secret } from 'aws-cdk-lib/aws-secretsmanager'
 import { FilterCriteria, FilterRule, FunctionUrlAuthType, StartingPosition } from 'aws-cdk-lib/aws-lambda'
@@ -946,6 +947,66 @@ backend.bff.addEnvironment(
 )
 
 /**
+ * Photo personnalisée d'Animal (`/api/animals/photo/*`, `amplify/functions/bff/
+ * animal-photo-routes.ts`) -- voir docs/adr/0023-animal-photo-presigned-s3-via-bff.md.
+ *
+ * Bucket posé en CDK brut DANS la stack de `bff` (= stack `data`, `resourceGroupName: 'data'`),
+ * PAS via `defineStorage` : (1) `defineStorage` n'accorde l'accès qu'à des rôles de l'identity
+ * pool (ou à des fonctions via `allow.resource()`), or depuis ADR-0021 le navigateur n'a plus
+ * aucun identifiant AWS -- seul `bff` touche au bucket ; (2) `allow.resource(bff)` ferait
+ * référencer le rôle de `bff` (stack `data`) par la stack `storage`, pendant que
+ * `addEnvironment('ANIMAL_PHOTOS_BUCKET_NAME', ...)` ferait référencer `storage` par `data` --
+ * exactement la famille de cycle `CloudformationStackCircularDependencyError` déjà rencontrée
+ * deux fois ici (voir `bff/resource.ts`). Dans la même stack que `bff`, toutes les références
+ * ci-dessous sont intra-stack.
+ *
+ * Aucun accès public (`BLOCK_ALL`), TLS obligatoire, chiffrement SSE-S3 : les photos ne sont
+ * lisibles qu'au travers d'une URL GET pré-signée par `bff`, après vérification que l'appelant
+ * est propriétaire de l'Animal. CORS `*` limité à `POST` : c'est la POLITIQUE SIGNÉE du POST
+ * pré-signé (clé exacte, taille max, Content-Type, expiration 5 min) qui autorise l'écriture,
+ * pas l'origine -- CORS ne gouverne que la lecture de la réponse par le JS du navigateur, et
+ * l'origine réelle n'est connue qu'en déploiement (domaine CloudFront, `localhost` en dev).
+ * Les `<img src>` (GET pré-signé) n'ont pas besoin de CORS.
+ *
+ * Rétention par défaut du CDK (`RETAIN`) : un `ampx sandbox delete` laisse le bucket derrière
+ * lui -- des photos d'utilisateurs ne doivent pas disparaître sur une suppression de stack.
+ */
+const animalPhotosBucket = new Bucket(backend.bff.stack, 'AnimalPhotosBucket', {
+  blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
+  encryption: BucketEncryption.S3_MANAGED,
+  enforceSSL: true,
+  cors: [
+    {
+      allowedMethods: [HttpMethods.POST],
+      allowedOrigins: ['*'],
+      allowedHeaders: ['*'],
+      maxAge: 3000,
+    },
+  ],
+})
+
+// `s3:PutObject` : le POST pré-signé est signé avec les identifiants du rôle de `bff` -- S3
+// l'évalue comme un PutObject de CE rôle. Pas de `s3:ListBucket` : inutile (voir
+// `confirmUpload`, un objet absent y répond 403 au lieu de 404, traité pareil).
+backend.bff.resources.lambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: ['s3:PutObject', 's3:GetObject', 's3:DeleteObject'],
+    resources: [animalPhotosBucket.arnForObjects('animal-photos/*')],
+  }),
+)
+// `GetItem` (propriétaire de l'Animal, ancienne `photoKey`) + `UpdateItem` (`photoKey`) --
+// `photoKey` n'est écrit par aucun rôle Cognito (`animalPhotoKeyFieldAuth`,
+// `amplify/data/resource.ts`), seulement par ce Lambda.
+backend.bff.resources.lambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: ['dynamodb:GetItem', 'dynamodb:UpdateItem'],
+    resources: [animalTable.tableArn],
+  }),
+)
+backend.bff.addEnvironment('ANIMAL_TABLE_NAME', animalTable.tableName)
+backend.bff.addEnvironment('ANIMAL_PHOTOS_BUCKET_NAME', animalPhotosBucket.bucketName)
+
+/**
  * `vite-plugins/bff-dev-middleware.js` exécute le VRAI handler `bff` dans le process Vite
  * pendant `npm run dev` (voir son commentaire de fichier, ADR-0021 §6bis) -- il reconstruit les
  * variables d'environnement ci-dessus depuis `amplify_outputs.json` (`outputs.auth.*`/
@@ -969,6 +1030,8 @@ backend.addOutput({
     veterinarianTableName: veterinarianTable.tableName,
     clinicTableName: clinicTable.tableName,
     veterinarianAccountAdminFunctionName: backend.veterinarianAccountAdmin.resources.lambda.functionName,
+    animalTableName: animalTable.tableName,
+    animalPhotosBucketName: animalPhotosBucket.bucketName,
   },
 })
 

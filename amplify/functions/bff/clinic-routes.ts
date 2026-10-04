@@ -1,8 +1,7 @@
-import { GetUserCommand, CognitoIdentityProviderClient } from '@aws-sdk/client-cognito-identity-provider'
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda'
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
 import { DynamoDBDocumentClient, GetCommand, PutCommand } from '@aws-sdk/lib-dynamodb'
-import { readCookie, ACCESS_TOKEN_COOKIE } from './cookies'
+import { requireCaller, ownerIdentity } from './caller-identity'
 import type { RouteResult } from './auth-routes'
 import type {
   VeterinarianAccountAdminEvent,
@@ -40,10 +39,6 @@ import type {
  * qu'elle a besoin de l'accès DynamoDB direct que `bff` a déjà (référent/clinicID), plutôt que
  * de dupliquer cet accès sur les deux Lambdas.
  */
-
-function getCognitoClient() {
-  return new CognitoIdentityProviderClient({ region: process.env.AWS_REGION })
-}
 
 const documentClient = DynamoDBDocumentClient.from(new DynamoDBClient({}))
 const lambdaClient = new LambdaClient({})
@@ -89,27 +84,6 @@ async function invokeAccountAdmin<T extends CreateAccountResult | RollbackAccoun
 }
 
 /**
- * Identité de l'appelant, validée AUPRÈS DE COGNITO (même principe que `tryGetUser()` dans
- * `auth-routes.ts`, ADR-0021 §4) -- pas un JWT décodé localement : cette route écrit un compte
- * Cognito et une ligne DynamoDB, la confiance doit venir de Cognito, pas du contenu d'un cookie.
- */
-async function requireCaller(
-  cookies: string[] | undefined,
-): Promise<{ sub: string; email: string; username: string } | null> {
-  const accessToken = readCookie(cookies, ACCESS_TOKEN_COOKIE)
-  if (!accessToken) return null
-  try {
-    const result = await getCognitoClient().send(new GetUserCommand({ AccessToken: accessToken }))
-    const attrs = Object.fromEntries((result.UserAttributes ?? []).map((a) => [a.Name, a.Value]))
-    if (!attrs.sub || !attrs.email || !result.Username) return null
-    return { sub: attrs.sub, email: attrs.email, username: result.Username }
-  } catch (err) {
-    console.error('requireCaller error:', err)
-    return null
-  }
-}
-
-/**
  * `POST /api/clinic/veterinarians` : le référent (= `Clinic.owner`, voir
  * `amplify/data/resource.ts:402` -- déjà le seul autorisé à supprimer sa Clinic,
  * `useClinicSettings.deleteAccount`) invite un·e collègue par email.
@@ -135,7 +109,7 @@ export async function inviteVeterinarian(
       new GetCommand({ TableName: getClinicTableName(), Key: { id: clinicID } }),
     )
     const clinicOwner = clinicResult.Item?.owner
-    const callerIdentity = `${caller.sub}::${caller.username}`
+    const callerIdentity = ownerIdentity(caller)
     if (clinicOwner !== callerIdentity) {
       return { statusCode: 403, body: { error: 'NOT_CLINIC_REFERENT' } }
     }

@@ -690,6 +690,20 @@
           "deleted": "Animal removed",
           "delete_failed": "Unable to delete the animal"
         },
+        "photo": {
+          "add": "Add a photo",
+          "change": "Change photo",
+          "remove": "Remove photo",
+          "hint": "JPEG, PNG or WebP, 5 MB max.",
+          "alt": "Photo of {name}",
+          "uploaded": "Photo updated",
+          "removed": "Photo removed",
+          "errors": {
+            "invalid_type": "Unsupported format: choose a JPEG, PNG or WebP image.",
+            "too_large": "Image too large: 5 MB max.",
+            "generic": "Unable to update the photo. Please try again."
+          }
+        },
         "add": {
           "title": "Add an animal",
           "subtitle": "Fill in your companion's profile to save lives.",
