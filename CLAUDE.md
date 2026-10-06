@@ -371,7 +371,9 @@ architecturales) et `.cursorrules` (conventions détaillées pour l'éditeur).
   `useRegistrationCompletion.js`, `useClinicDonors.js`, `useClinicRequest.js`,
   `useClinicSettings.js`, `useClinicStats.js`, `useAnimalValidation.js`,
   `useMatchingRequests.js`, `useClinicLink.js` (popup post-inscription Owner "se lier à
-  une clinique", seule écriture de `ClinicOwnerRelation` faite par l'Owner lui-même),
+  une clinique", seule écriture de `ClinicOwnerRelation` faite par l'Owner lui-même ; liste
+  via `client.queries.listActiveClinics`, PREMIÈRE requête custom `a.query()` du schéma —
+  filtre `verificationStatus = ACTIVE` côté resolver, champ illisible par un Owner),
   `useMissionClosure.js`, `useOwnerMissions.js` (ces
   deux derniers via `client.mutations.submitMissionValidation`, double
   validation de Mission, ADR-0018/0019/0020 — `useOwnerMissions.js` aussi via

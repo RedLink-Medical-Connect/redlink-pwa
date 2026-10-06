@@ -784,6 +784,26 @@ describe('amplify/data/resource.ts — double validation de Mission + notation (
     })
   })
 
+  describe('listActiveClinics — annuaire des cliniques ACTIVE pour la popup post-inscription Owner (2026-10-06)', () => {
+    it("compile en tant que requête custom, authentifiée seulement (@aws_cognito_user_pools sans cognito_groups, comme linkRequestToMission)", () => {
+      const queryType = extractType('Query')
+      expect(queryType).toContain(
+        'listActiveClinics(nextToken: String): ActiveClinicPage @aws_cognito_user_pools\n',
+      )
+    })
+
+    it("renvoie un type réduit (id/name/address) -- jamais Clinic entier : email/téléphone/RPPS/owner/verificationStatus ne sont pas sélectionnables via cette requête", () => {
+      const summaryType = extractType('ActiveClinicSummary')
+      expect(summaryType).toContain('id: ID!')
+      expect(summaryType).toContain('name: String!')
+      expect(summaryType).toContain('address: String')
+      for (const forbidden of ['email', 'phone', 'rpps', 'owner', 'verificationStatus']) {
+        expect(summaryType).not.toContain(`${forbidden}:`)
+      }
+      expect(extractType('ActiveClinicPage')).toContain('items: [ActiveClinicSummary!]!')
+    })
+  })
+
   describe('Veterinarian.numeroOrdre — numéro d’ordre personnel du vétérinaire, distinct de Clinic.rpps (entreprise)', () => {
     it("le champ vit bien dans le type Veterinarian, NULLABLE (pas String!), sans @auth de champ dédiée (même niveau de confiance que rpps) -- champ ajouté sur un modèle déjà déployé (amplify_outputs.json réel), .required() casserait la lecture des lignes Veterinarian existantes sans backfill (correctif graphql-schema-reviewer)", () => {
       const veterinarianType = extractType('Veterinarian')

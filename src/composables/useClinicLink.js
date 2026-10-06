@@ -19,9 +19,10 @@ import { resolveClinicOwnerRelationUpsert } from '@/services/clinic-owner-relati
  * `.to([...])`, donc toutes les opérations) sur `ClinicOwnerRelation` -- `ownerID` = `Owner.id`
  * = `sub` Cognito de l'appelant (`completeOwnerRegistration`). Aucun changement de schéma.
  *
- * Liste : TOUTES les cliniques (`allow.authenticated().to(['read'])` sur `Clinic`). Pas de
- * filtre sur `verificationStatus` : ce champ n'est pas lisible par un Owner
- * (`clinicVerificationStatusFieldAuth`), un filtre dessus échouerait en `Unauthorized`.
+ * Liste : uniquement les cliniques VÉRIFIÉES (`verificationStatus = ACTIVE`), via la requête
+ * custom `listActiveClinics` (`amplify/data/resource.ts`) -- PAS `client.models.Clinic.list()` :
+ * un Owner ne peut ni lire ni filtrer `verificationStatus` (`clinicVerificationStatusFieldAuth`),
+ * le filtre est donc fait côté serveur, et la requête ne renvoie que `id`/`name`/`address`.
  */
 export function useClinicLink() {
   const client = generateClient()
@@ -32,8 +33,9 @@ export function useClinicLink() {
   const loadError = ref(null)
 
   /**
-   * Charge toutes les cliniques (pagination `nextToken`), uniquement les champs affichés dans
-   * la recherche -- jamais email/téléphone/RPPS des cliniques (voir CLAUDE.md, `selectionSet`).
+   * Charge toutes les cliniques vérifiées. Boucle sur `nextToken` : le `Scan` côté resolver
+   * applique sa limite AVANT le filtre `ACTIVE`, une page peut donc être vide sans être la
+   * dernière.
    */
   const fetchClinics = async () => {
     isLoading.value = true
@@ -42,14 +44,10 @@ export function useClinicLink() {
       const all = []
       let nextToken = null
       do {
-        const { data, errors, nextToken: token } = await client.models.Clinic.list({
-          selectionSet: ['id', 'name', 'address'],
-          limit: 1000,
-          nextToken,
-        })
-        throwIfGraphqlError(errors, 'listClinics')
-        all.push(...(data || []))
-        nextToken = token || null
+        const { data, errors } = await client.queries.listActiveClinics({ nextToken })
+        throwIfGraphqlError(errors, 'listActiveClinics')
+        all.push(...(data?.items || []))
+        nextToken = data?.nextToken || null
       } while (nextToken)
       clinics.value = all
     } catch (e) {

@@ -1613,6 +1613,35 @@ export const schema = a.schema({
         entry: './resolvers/approve-clinic-verification-notify-vet.js',
       }),
     ]),
+
+  // Annuaire des cliniques VÉRIFIÉES (`verificationStatus = ACTIVE`) pour la popup
+  // post-inscription Owner "se lier à une clinique" (2026-10-06, `src/composables/
+  // useClinicLink.js`). Première requête custom (`a.query()`) de ce schéma -- jusqu'ici
+  // uniquement des mutations. Nécessaire parce qu'un Owner ne peut ni lire ni filtrer
+  // `Clinic.verificationStatus` (`clinicVerificationStatusFieldAuth`) : le filtre est fait côté
+  // serveur par `./resolvers/list-active-clinics.js` (`dataSource: a.ref('Clinic')`, bypass du
+  // `@auth` du modèle comme ADR-0011 -- la seule garde est `allow.authenticated()` ci-dessous,
+  // même niveau que la lecture `Clinic` existante `allow.authenticated().to(['read'])`).
+  // Retour volontairement RÉDUIT à un type dédié (`ActiveClinicSummary` : `id`/`name`/
+  // `address`) plutôt que `a.ref('Clinic')` : un client ne peut pas demander email/téléphone/
+  // RPPS/agrégats via cette requête, quel que soit son `selectionSet`.
+  ActiveClinicSummary: a.customType({
+    id: a.id().required(),
+    name: a.string().required(),
+    address: a.string(),
+  }),
+  ActiveClinicPage: a.customType({
+    items: a.ref('ActiveClinicSummary').required().array().required(),
+    nextToken: a.string(),
+  }),
+  listActiveClinics: a
+    .query()
+    .arguments({ nextToken: a.string() })
+    .returns(a.ref('ActiveClinicPage'))
+    .authorization((allow) => [allow.authenticated()])
+    .handler(
+      a.handler.custom({ dataSource: a.ref('Clinic'), entry: './resolvers/list-active-clinics.js' }),
+    ),
 })
 
 export type Schema = ClientSchema<typeof schema>

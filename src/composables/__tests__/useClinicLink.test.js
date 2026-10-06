@@ -10,8 +10,10 @@ const getCurrentUserMock = vi.fn()
 
 vi.mock('@/services/bff-graphql-client', () => ({
   generateClient: () => ({
+    queries: {
+      listActiveClinics: (...args) => clinicListMock(...args),
+    },
     models: {
-      Clinic: { list: (...args) => clinicListMock(...args) },
       ClinicOwnerRelation: {
         list: (...args) => relationListMock(...args),
         create: (...args) => relationCreateMock(...args),
@@ -33,10 +35,16 @@ beforeEach(() => {
 })
 
 describe('fetchClinics', () => {
-  it('charge toutes les pages (nextToken), en ne sélectionnant que id/name/address', async () => {
+  it('charge toutes les pages de listActiveClinics (nextToken), y compris une page vide intermédiaire', async () => {
     clinicListMock
-      .mockResolvedValueOnce({ data: [{ id: 'c1', name: 'A', address: 'x' }], nextToken: 'tok' })
-      .mockResolvedValueOnce({ data: [{ id: 'c2', name: 'B', address: 'y' }], nextToken: null })
+      .mockResolvedValueOnce({
+        data: { items: [{ id: 'c1', name: 'A', address: 'x' }], nextToken: 'tok1' },
+      })
+      // Scan : limite appliquée avant le filtre ACTIVE -> page vide mais pas la dernière.
+      .mockResolvedValueOnce({ data: { items: [], nextToken: 'tok2' } })
+      .mockResolvedValueOnce({
+        data: { items: [{ id: 'c2', name: 'B', address: 'y' }], nextToken: null },
+      })
 
     const { clinics, loadError, isLoading, fetchClinics } = useClinicLink()
     await fetchClinics()
@@ -44,14 +52,11 @@ describe('fetchClinics', () => {
     expect(clinics.value.map((c) => c.id)).toEqual(['c1', 'c2'])
     expect(loadError.value).toBeNull()
     expect(isLoading.value).toBe(false)
-    expect(clinicListMock).toHaveBeenCalledTimes(2)
-    expect(clinicListMock.mock.calls[0][0]).toMatchObject({
-      selectionSet: ['id', 'name', 'address'],
-      nextToken: null,
-    })
-    expect(clinicListMock.mock.calls[1][0]).toMatchObject({ nextToken: 'tok' })
-    // Pas de filtre sur verificationStatus : champ non lisible par un Owner.
-    expect(clinicListMock.mock.calls[0][0].filter).toBeUndefined()
+    expect(clinicListMock.mock.calls.map((c) => c[0])).toEqual([
+      { nextToken: null },
+      { nextToken: 'tok1' },
+      { nextToken: 'tok2' },
+    ])
   })
 
   it('erreur GraphQL : loadError posé, liste inchangée', async () => {
