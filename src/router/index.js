@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/auth.js'
 import { useClinicVerification } from '@/composables/useClinicVerification.js'
 import HomeView from '@/views/HomeView.vue'
+import { isChunkLoadError, shouldReloadForChunkError } from '@/services/chunk-load-error-service'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -249,6 +250,35 @@ router.beforeEach(async (to, from, next) => {
   }
 
   next()
+})
+
+// Chunk lazy introuvable (HTML/JS d'entrée d'un ancien build servi par un cache, voir
+// `chunk-load-error-service.js`) : sans ce handler, vue-router annule la navigation en
+// silence et le clic semble ne rien faire. Rechargement complet vers la route visée pour
+// récupérer le HTML à jour -- une seule fois par fenêtre (`sessionStorage`, anti-boucle).
+const CHUNK_RELOAD_KEY = 'chunk-reload-at'
+router.onError((error, to) => {
+  if (!isChunkLoadError(error)) return
+
+  let lastReloadAt = null
+  try {
+    lastReloadAt = Number(sessionStorage.getItem(CHUNK_RELOAD_KEY)) || null
+  } catch {
+    // sessionStorage indisponible (navigation privée stricte) : on tente quand même.
+  }
+
+  const now = Date.now()
+  if (!shouldReloadForChunkError(lastReloadAt, now)) {
+    console.error('Chunk introuvable après rechargement, abandon :', error)
+    return
+  }
+
+  try {
+    sessionStorage.setItem(CHUNK_RELOAD_KEY, String(now))
+  } catch {
+    // idem ci-dessus
+  }
+  window.location.assign(to?.fullPath || window.location.href)
 })
 
 router.afterEach(() => {
