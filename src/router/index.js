@@ -201,7 +201,9 @@ const router = createRouter({
 router.beforeEach(async (to, from, next) => {
   const auth = useAuthStore()
 
-  if (!auth.user && !auth.error) {
+  // Une seule vérification de session par chargement de l'app (voir `sessionChecked`,
+  // stores/auth.js) -- pas un aller-retour BFF à chaque clic d'un visiteur non connecté.
+  if (!auth.sessionChecked) {
     await auth.init()
   }
 

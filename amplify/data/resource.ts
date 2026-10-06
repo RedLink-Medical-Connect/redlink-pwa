@@ -791,8 +791,10 @@ export const schema = a.schema({
     })
     // `ownerDefinedIn("ownerID")` explicite -- traduction Gen2 du `ownerField: "ownerID"` Gen1,
     // POINT LE PLUS SENSIBLE de cette sous-tâche (voir docs/adr/0009 pour le détail complet).
-    // Ces lignes sont TOUJOURS écrites côté Veterinarian (useMissionClosure.js), jamais par
-    // l'Owner lui-même. Sans `ownerDefinedIn`, `allow.owner()` se serait appuyé sur le champ
+    // Ces lignes sont écrites côté Veterinarian (useMissionClosure.js/useAnimalValidation.js)
+    // et, depuis 2026-10-06, par l'Owner lui-même à la popup post-inscription "se lier à une
+    // clinique" (useClinicLink.js -- `ownerID` = son propre `sub`, autorisé par cette même règle,
+    // sans `.to([...])`). Sans `ownerDefinedIn`, `allow.owner()` se serait appuyé sur le champ
     // caché auto-injecté par le Transformer (identité de qui ÉCRIT la ligne, donc toujours le
     // Vet) au lieu du champ `ownerID` du modèle (identité réelle du pet Owner) -- exactement le
     // bug du commit `d27f204` : la query `clinicOwnerRelationsByOwnerID` serait restée vide en

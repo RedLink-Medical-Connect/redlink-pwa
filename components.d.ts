@@ -26,6 +26,7 @@ declare module 'vue' {
     Button: typeof import('primevue/button')['default']
     Calendar: typeof import('primevue/calendar')['default']
     Checkbox: typeof import('primevue/checkbox')['default']
+    ClinicLinkDialog: typeof import('./src/components/dashboard/ClinicLinkDialog.vue')['default']
     Column: typeof import('primevue/column')['default']
     DashboardSidebar: typeof import('./src/components/dashboard/DashboardSidebar.vue')['default']
     DataTable: typeof import('primevue/datatable')['default']

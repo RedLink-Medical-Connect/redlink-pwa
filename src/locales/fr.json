@@ -1122,6 +1122,22 @@
       "load_error": "Impossible de charger l'historique — réessayez.",
       "retry": "Réessayer",
       "event_details_aria": "Voir le détail : {label}"
+    },
+    "clinic_link": {
+      "title": "Se lier à une clinique",
+      "description": "Vous suivez déjà votre animal dans une clinique vétérinaire inscrite sur RedLink ? Liez-vous à elle : ses demandes de don vous seront proposées en priorité. Facultatif, vous pouvez passer cette étape.",
+      "label": "Rechercher votre clinique",
+      "placeholder": "Nom ou ville de la clinique...",
+      "no_result": "Aucune clinique trouvée",
+      "later": "Plus tard",
+      "confirm": "Me lier à cette clinique",
+      "toast_linked": "Vous êtes maintenant lié(e) à {name}.",
+      "errors": {
+        "load": "Impossible de charger la liste des cliniques. Réessayez plus tard.",
+        "session": "Votre session a expiré, reconnectez-vous puis réessayez.",
+        "unauthorized": "Vous n'avez pas l'autorisation d'effectuer cette liaison.",
+        "generic": "La liaison à la clinique a échoué. Réessayez."
+      }
     }
   },
   "menu": {

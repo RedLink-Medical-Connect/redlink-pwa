@@ -363,14 +363,16 @@ architecturales) et `.cursorrules` (conventions détaillées pour l'éditeur).
   `fetch()` (`useLegalDocument.js`) et rendu via `marked`
   (`src/services/legal-content-service.js`) — version en vigueur centralisée dans
   `src/constants/legal.js`, séparée du contenu lui-même. Voir ADR-0014.
-- Les 13 composables applicatifs qui parlent GraphQL sont sur
+- Les 14 composables applicatifs qui parlent GraphQL sont sur
   `client.models.X` (`generateClient()` importé de `@/services/bff-graphql-client`, pas
   directement `aws-amplify/data` depuis le BFF, voir plus haut/ADR-0021 — l'appel
   `client.models.X.*()` lui-même est identique à l'octet près) : `useAnimals.js`,
   `useOwnerProfile.js`, `useOwnerAvailability.js`,
   `useRegistrationCompletion.js`, `useClinicDonors.js`, `useClinicRequest.js`,
   `useClinicSettings.js`, `useClinicStats.js`, `useAnimalValidation.js`,
-  `useMatchingRequests.js`, `useMissionClosure.js`, `useOwnerMissions.js` (ces
+  `useMatchingRequests.js`, `useClinicLink.js` (popup post-inscription Owner "se lier à
+  une clinique", seule écriture de `ClinicOwnerRelation` faite par l'Owner lui-même),
+  `useMissionClosure.js`, `useOwnerMissions.js` (ces
   deux derniers via `client.mutations.submitMissionValidation`, double
   validation de Mission, ADR-0018/0019/0020 — `useOwnerMissions.js` aussi via
   `client.mutations.linkRequestToMission`, ADR-0011), `useRatings.js`

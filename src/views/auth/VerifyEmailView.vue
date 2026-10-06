@@ -105,7 +105,15 @@ const handleVerify = async () => {
     // samedi 9h-12h, isVaccinated/donationFrequency sur l'Animal express) est
     // inchangée -- seul cet écran intermédiaire disparaît, voir
     // completeOwnerRegistration()/useRegistrationCompletion.js.
-    await router.push('/dashboard')
+    // Owner : atterrit sur son profil avec la popup facultative "se lier à une clinique"
+    // (`ClinicLinkDialog.vue`, ouverte par `?linkClinic=1`). Route nommée directement : passer
+    // par `/dashboard` (redirection vers l'espace vétérinaire puis garde de rôle) perdrait le
+    // paramètre de requête.
+    if (registrationData.role === 'owner') {
+      await router.push({ name: 'owner-profile', query: { linkClinic: '1' } })
+    } else {
+      await router.push('/dashboard')
+    }
   } catch (err) {
     console.error('Erreur Inscription:', err)
     // Nettoyage PII (Groupe 3, en plus du TTL posé plus haut) : même un échec de

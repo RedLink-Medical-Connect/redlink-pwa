@@ -1,6 +1,7 @@
 <script setup>
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute, useRouter } from 'vue-router'
 import DashboardSidebar from '@/components/dashboard/DashboardSidebar.vue'
 import { useToast } from 'primevue/usetoast'
 import Dialog from 'primevue/dialog'
@@ -8,6 +9,7 @@ import PhoneInput from '@/components/common/PhoneInput.vue'
 import AddressAutocomplete from '@/components/common/AddressAutocomplete.vue'
 import StarRating from '@/components/common/StarRating.vue'
 import MfaSettings from '@/components/common/MfaSettings.vue'
+import ClinicLinkDialog from '@/components/dashboard/ClinicLinkDialog.vue'
 
 import { useOwnerProfile } from '@/composables/useOwnerProfile'
 
@@ -26,6 +28,20 @@ const {
 } = useOwnerProfile()
 
 const showDeleteConfirm = ref(false)
+
+// Popup post-inscription "se lier à une clinique" -- ouverte par `VerifyEmailView.vue`
+// (`?linkClinic=1`) ; le paramètre est retiré dès la fermeture pour qu'un rechargement ou un
+// retour arrière ne la rouvre pas.
+const route = useRoute()
+const router = useRouter()
+const showClinicLink = ref(route.query.linkClinic === '1')
+watch(showClinicLink, (isVisible) => {
+  if (!isVisible && route.query.linkClinic) {
+    const query = { ...route.query }
+    delete query.linkClinic
+    router.replace({ query })
+  }
+})
 
 const onAddressSelect = (data) => {
   form.value.address = data.address
@@ -89,6 +105,8 @@ onMounted(() => {
 <template>
   <div class="container mx-auto px-4 py-8 md:py-12">
     <Toast />
+
+    <ClinicLinkDialog v-model:visible="showClinicLink" />
 
     <Dialog
       v-model:visible="showDeleteConfirm"
