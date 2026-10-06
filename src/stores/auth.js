@@ -20,13 +20,6 @@ export const useAuthStore = defineStore('auth', () => {
   const isLoading = ref(false)
   const error = ref(null)
   const role = ref('owner')
-  // `true` dès que `init()` a interrogé `/api/auth/session` une fois (connecté ou non). Sans
-  // ce drapeau, la garde du routeur rappelait le BFF à CHAQUE navigation d'un visiteur non
-  // connecté (`user` reste `null`) : sur mobile/réseau lent ou Lambda à froid, un clic sur un
-  // bouton du /home semblait ne rien faire pendant plusieurs secondes. Les connexions/
-  // déconnexions passent toutes par ce store (`setUserFromSession`/`user.value = null`), donc
-  // l'état reste juste sans re-vérifier à chaque route.
-  const sessionChecked = ref(false)
 
   const isAuthenticated = computed(() => !!user.value)
 
@@ -86,8 +79,6 @@ export const useAuthStore = defineStore('auth', () => {
       }
     } catch {
       user.value = null
-    } finally {
-      sessionChecked.value = true
     }
   }
 
@@ -333,7 +324,6 @@ export const useAuthStore = defineStore('auth', () => {
 
   return {
     user,
-    sessionChecked,
     role,
     currentRole,
     isLoading,

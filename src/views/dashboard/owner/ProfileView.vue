@@ -10,6 +10,10 @@ import AddressAutocomplete from '@/components/common/AddressAutocomplete.vue'
 import StarRating from '@/components/common/StarRating.vue'
 import MfaSettings from '@/components/common/MfaSettings.vue'
 import ClinicLinkDialog from '@/components/dashboard/ClinicLinkDialog.vue'
+import {
+  CLINIC_LINK_PROMPT_QUERY_KEY,
+  CLINIC_LINK_PROMPT_QUERY_VALUE,
+} from '@/constants/auth-constants'
 
 import { useOwnerProfile } from '@/composables/useOwnerProfile'
 
@@ -30,15 +34,17 @@ const {
 const showDeleteConfirm = ref(false)
 
 // Popup post-inscription "se lier à une clinique" -- ouverte par `VerifyEmailView.vue`
-// (`?linkClinic=1`) ; le paramètre est retiré dès la fermeture pour qu'un rechargement ou un
-// retour arrière ne la rouvre pas.
+// (`CLINIC_LINK_PROMPT_QUERY_KEY`) ; le paramètre est retiré dès la fermeture pour qu'un
+// rechargement ou un retour arrière ne la rouvre pas.
 const route = useRoute()
 const router = useRouter()
-const showClinicLink = ref(route.query.linkClinic === '1')
+const showClinicLink = ref(
+  route.query[CLINIC_LINK_PROMPT_QUERY_KEY] === CLINIC_LINK_PROMPT_QUERY_VALUE,
+)
 watch(showClinicLink, (isVisible) => {
-  if (!isVisible && route.query.linkClinic) {
+  if (!isVisible && route.query[CLINIC_LINK_PROMPT_QUERY_KEY]) {
     const query = { ...route.query }
-    delete query.linkClinic
+    delete query[CLINIC_LINK_PROMPT_QUERY_KEY]
     router.replace({ query })
   }
 })

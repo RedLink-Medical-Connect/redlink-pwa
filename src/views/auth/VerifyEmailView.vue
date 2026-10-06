@@ -5,7 +5,11 @@ import { useAuthStore } from '@/stores/auth'
 import { useI18n } from 'vue-i18n'
 import { bffFetch } from '@/services/bff-fetch'
 import { useRegistrationCompletion } from '@/composables/useRegistrationCompletion'
-import { TEMP_REGISTRATION_TTL_MS } from '@/constants/auth-constants'
+import {
+  TEMP_REGISTRATION_TTL_MS,
+  CLINIC_LINK_PROMPT_QUERY_KEY,
+  CLINIC_LINK_PROMPT_QUERY_VALUE,
+} from '@/constants/auth-constants'
 
 const route = useRoute()
 const router = useRouter()
@@ -106,11 +110,14 @@ const handleVerify = async () => {
     // inchangée -- seul cet écran intermédiaire disparaît, voir
     // completeOwnerRegistration()/useRegistrationCompletion.js.
     // Owner : atterrit sur son profil avec la popup facultative "se lier à une clinique"
-    // (`ClinicLinkDialog.vue`, ouverte par `?linkClinic=1`). Route nommée directement : passer
+    // (`ClinicLinkDialog.vue`, ouverte par `CLINIC_LINK_PROMPT_QUERY_KEY`). Route nommée directement : passer
     // par `/dashboard` (redirection vers l'espace vétérinaire puis garde de rôle) perdrait le
     // paramètre de requête.
     if (registrationData.role === 'owner') {
-      await router.push({ name: 'owner-profile', query: { linkClinic: '1' } })
+      await router.push({
+        name: 'owner-profile',
+        query: { [CLINIC_LINK_PROMPT_QUERY_KEY]: CLINIC_LINK_PROMPT_QUERY_VALUE },
+      })
     } else {
       await router.push('/dashboard')
     }

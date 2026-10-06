@@ -8,7 +8,7 @@ import { useClinicLink, mapClinicLinkErrorKey } from '@/composables/useClinicLin
 import { filterClinics } from '@/services/clinic-search-service'
 
 // Popup facultative proposée à un Owner juste après la vérification de son email
-// (`VerifyEmailView.vue` -> `ProfileView.vue?linkClinic=1`) : se lier directement à UNE
+// (`VerifyEmailView.vue` -> `ProfileView.vue`, `CLINIC_LINK_PROMPT_QUERY_KEY`) : se lier directement à UNE
 // clinique de l'app. Voir `useClinicLink.js` pour la relation écrite et son interaction avec la
 // validation vétérinaire.
 const visible = defineModel('visible', { type: Boolean, default: false })

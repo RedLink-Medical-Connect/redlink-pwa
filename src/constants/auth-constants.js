@@ -4,3 +4,9 @@
 // cas d'abandon du flow -- lu par VerifyEmailView.vue, posé par RegisterOwnerView.vue/
 // RegisterClinicView.vue (voir `savedAt` dans le payload stocké).
 export const TEMP_REGISTRATION_TTL_MS = 30 * 60 * 1000
+
+// Paramètre de requête qui ouvre la popup facultative "se lier à une clinique"
+// (`ClinicLinkDialog.vue`) sur `ProfileView.vue` -- posé par VerifyEmailView.vue juste après
+// la finalisation d'une inscription Owner, retiré par ProfileView.vue à la fermeture.
+export const CLINIC_LINK_PROMPT_QUERY_KEY = 'linkClinic'
+export const CLINIC_LINK_PROMPT_QUERY_VALUE = '1'
