@@ -1101,12 +1101,41 @@ if (hostingAppId && hostingBranch) {
     },
   })
 
+  /**
+   * Cache COURT pour tout ce qui n'est pas un asset haché (`index.html`, routes SPA, `sw.js`,
+   * `registerSW.js`, `manifest.webmanifest`). Bug réel reproduit en prod (2026-10-06) : avec
+   * `CACHING_OPTIMIZED`, CloudFront respectait le `cache-control: s-maxage=31536000` qu'Amplify
+   * Hosting pose sur TOUTES ses réponses, HTML compris (Amplify invalide son propre CDN à chaque
+   * déploiement, mais rien n'invalide CETTE distribution). Un `index.html`/JS d'entrée d'un
+   * ancien build restait servi par certaines edges/variantes de compression, pointant vers des
+   * chunks lazy supprimés depuis (`/assets/RegisterOwnerView-<ancien hash>.js` -> 404) :
+   * l'import dynamique de la route échouait et les boutons du /home semblaient inertes.
+   * `maxTtl` plafonne le `s-maxage` de l'origine ; 60 s plutôt que 0 parce que la compression
+   * gzip/brotli par CloudFront exige un cache activé. Fenêtre résiduelle de 60 s après un
+   * déploiement couverte côté app par `router.onError` (`src/router/index.js`). Préféré à une
+   * invalidation scriptée à chaque déploiement (`amplify.yml` + permission IAM
+   * `cloudfront:CreateInvalidation` pour le rôle de build) : aucune pièce mobile de plus.
+   */
+  const spaShortCachePolicy = new CachePolicy(backend.bff.stack, 'SpaShortCachePolicy', {
+    comment: 'redlink-pwa : HTML/service worker SPA, cache court (pas le s-maxage 1 an Amplify Hosting)',
+    minTtl: Duration.seconds(0),
+    defaultTtl: Duration.seconds(0),
+    maxTtl: Duration.seconds(60),
+    enableAcceptEncodingGzip: true,
+    enableAcceptEncodingBrotli: true,
+  })
+
+  // Une seule instance, partagée par le comportement par défaut et `/assets/*` : CDK numérote
+  // les origines dans l'ordre de déclaration, réutiliser l'objet n'ajoute ni ne renumérote
+  // aucune origine de la distribution existante.
+  const hostingOrigin = new HttpOrigin(hostingDomain)
+
   const distribution = new Distribution(backend.bff.stack, 'BffDistribution', {
     comment: 'redlink-pwa : SPA (Amplify Hosting) + BFF Cognito (Lambda), same-origin pour les cookies SameSite=Strict',
     defaultBehavior: {
-      origin: new HttpOrigin(hostingDomain),
+      origin: hostingOrigin,
       viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
-      cachePolicy: CachePolicy.CACHING_OPTIMIZED,
+      cachePolicy: spaShortCachePolicy,
     },
     additionalBehaviors: {
       '/api/*': {
@@ -1126,6 +1155,14 @@ if (hostingAppId && hostingBranch) {
         originRequestPolicy: bffOriginRequestPolicy,
         allowedMethods: AllowedMethods.ALLOW_ALL,
         cachedMethods: CachedMethods.CACHE_GET_HEAD,
+      },
+      // Assets Vite à nom haché (contenu immuable pour un nom donné) : cache long sans risque,
+      // même comportement qu'avant pour ces fichiers. Déclaré APRÈS `/api/*` pour ne pas
+      // décaler la numérotation des origines (voir `hostingOrigin`).
+      '/assets/*': {
+        origin: hostingOrigin,
+        viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+        cachePolicy: CachePolicy.CACHING_OPTIMIZED,
       },
     },
   })

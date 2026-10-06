@@ -20,6 +20,14 @@ export const useAuthStore = defineStore('auth', () => {
   const isLoading = ref(false)
   const error = ref(null)
   const role = ref('owner')
+  // `true` dès que `init()` a interrogé `/api/auth/session` une fois (connecté ou non). Sans
+  // ce drapeau, la garde du routeur rappelait le BFF à CHAQUE navigation d'un visiteur non
+  // connecté (`user` reste `null`) : un aller-retour réseau inutile (0,2 à 1 s mesurés en prod)
+  // avant chaque changement de page. Optimisation seulement -- la cause des boutons inertes du
+  // /home était ailleurs (chunk introuvable, voir `router.onError`). Les connexions/
+  // déconnexions passent toutes par ce store (`setUserFromSession`/`user.value = null`), donc
+  // l'état reste juste sans re-vérifier à chaque route.
+  const sessionChecked = ref(false)
 
   const isAuthenticated = computed(() => !!user.value)
 
@@ -79,6 +87,8 @@ export const useAuthStore = defineStore('auth', () => {
       }
     } catch {
       user.value = null
+    } finally {
+      sessionChecked.value = true
     }
   }
 
@@ -324,6 +334,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   return {
     user,
+    sessionChecked,
     role,
     currentRole,
     isLoading,

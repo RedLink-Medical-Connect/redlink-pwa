@@ -122,6 +122,12 @@ architecturales) et `.cursorrules` (conventions détaillées pour l'éditeur).
   référence pour toute future constante partagée entre `backend.ts` et un handler. Référence
   pour toute future protection d'une origine Lambda Function URL derrière CloudFront : header
   secret partagé par défaut, OAC réservé aux origines qui ne reçoivent que GET/HEAD.
+- **Cache CloudFront devant Amplify Hosting** : Amplify Hosting pose `s-maxage=31536000` sur
+  TOUTES ses réponses (HTML compris) et n'invalide que son propre CDN — jamais la distribution
+  de `backend.ts`. Comportement par défaut en cache court (`SpaShortCachePolicy`, 60 s max),
+  `CACHING_OPTIMIZED` réservé à `/assets/*` (noms hachés). Sinon : HTML d'un ancien build ->
+  chunk lazy 404 -> navigation annulée en silence (bug réel 2026-10-06, filet côté app :
+  `router.onError` + `chunk-load-error-service.js`).
 - **Fichiers utilisateur (S3) derrière le BFF** : le navigateur n'a aucun identifiant AWS
   (ADR-0021), donc pas d'`aws-amplify/storage` ni de `defineStorage`. Le BFF vérifie
   l'appelant (`requireCaller`, `amplify/functions/bff/caller-identity.ts`, partagé avec
