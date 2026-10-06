@@ -295,6 +295,26 @@ describe('init', () => {
 
     expect(auth.isAuthenticated).toBe(false)
   })
+
+  it('sessionChecked passe à true après init(), connecté ou non -- la garde du routeur ne rappelle plus le BFF à chaque navigation', async () => {
+    fetchMock.mockResolvedValue(jsonResponse(200, { authenticated: false }))
+
+    const auth = useAuthStore()
+    expect(auth.sessionChecked).toBe(false)
+    await auth.init()
+
+    expect(auth.sessionChecked).toBe(true)
+  })
+
+  it('sessionChecked passe aussi à true si /api/auth/session échoue (réseau)', async () => {
+    fetchMock.mockRejectedValue(new Error('network'))
+
+    const auth = useAuthStore()
+    await auth.init()
+
+    expect(auth.sessionChecked).toBe(true)
+    expect(auth.isAuthenticated).toBe(false)
+  })
 })
 
 describe('setUserName', () => {
