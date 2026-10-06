@@ -575,6 +575,22 @@
     }
   },
   "dashboard": {
+    "clinic_link": {
+      "title": "Link to a clinic",
+      "description": "Is your pet already followed by a veterinary clinic registered on RedLink? Link to it: its donation requests will be shown to you first. Optional, you can skip this step.",
+      "label": "Search for your clinic",
+      "placeholder": "Clinic name or city...",
+      "no_result": "No clinic found",
+      "later": "Later",
+      "confirm": "Link me to this clinic",
+      "toast_linked": "You are now linked to {name}.",
+      "errors": {
+        "load": "Unable to load the clinic list. Please try again later.",
+        "session": "Your session has expired, please sign in again and retry.",
+        "unauthorized": "You are not allowed to create this link.",
+        "generic": "Linking to the clinic failed. Please try again."
+      }
+    },
     "sidebar": {
       "requests": "My Requests",
       "history": "History",

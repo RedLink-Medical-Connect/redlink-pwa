@@ -791,8 +791,10 @@ export const schema = a.schema({
     })
     // `ownerDefinedIn("ownerID")` explicite -- traduction Gen2 du `ownerField: "ownerID"` Gen1,
     // POINT LE PLUS SENSIBLE de cette sous-tâche (voir docs/adr/0009 pour le détail complet).
-    // Ces lignes sont TOUJOURS écrites côté Veterinarian (useMissionClosure.js), jamais par
-    // l'Owner lui-même. Sans `ownerDefinedIn`, `allow.owner()` se serait appuyé sur le champ
+    // Ces lignes sont écrites côté Veterinarian (useMissionClosure.js/useAnimalValidation.js)
+    // et, depuis 2026-10-06, par l'Owner lui-même à la popup post-inscription "se lier à une
+    // clinique" (useClinicLink.js -- `ownerID` = son propre `sub`, autorisé par cette même règle,
+    // sans `.to([...])`). Sans `ownerDefinedIn`, `allow.owner()` se serait appuyé sur le champ
     // caché auto-injecté par le Transformer (identité de qui ÉCRIT la ligne, donc toujours le
     // Vet) au lieu du champ `ownerID` du modèle (identité réelle du pet Owner) -- exactement le
     // bug du commit `d27f204` : la query `clinicOwnerRelationsByOwnerID` serait restée vide en
@@ -1611,6 +1613,35 @@ export const schema = a.schema({
         entry: './resolvers/approve-clinic-verification-notify-vet.js',
       }),
     ]),
+
+  // Annuaire des cliniques VÉRIFIÉES (`verificationStatus = ACTIVE`) pour la popup
+  // post-inscription Owner "se lier à une clinique" (2026-10-06, `src/composables/
+  // useClinicLink.js`). Première requête custom (`a.query()`) de ce schéma -- jusqu'ici
+  // uniquement des mutations. Nécessaire parce qu'un Owner ne peut ni lire ni filtrer
+  // `Clinic.verificationStatus` (`clinicVerificationStatusFieldAuth`) : le filtre est fait côté
+  // serveur par `./resolvers/list-active-clinics.js` (`dataSource: a.ref('Clinic')`, bypass du
+  // `@auth` du modèle comme ADR-0011 -- la seule garde est `allow.authenticated()` ci-dessous,
+  // même niveau que la lecture `Clinic` existante `allow.authenticated().to(['read'])`).
+  // Retour volontairement RÉDUIT à un type dédié (`ActiveClinicSummary` : `id`/`name`/
+  // `address`) plutôt que `a.ref('Clinic')` : un client ne peut pas demander email/téléphone/
+  // RPPS/agrégats via cette requête, quel que soit son `selectionSet`.
+  ActiveClinicSummary: a.customType({
+    id: a.id().required(),
+    name: a.string().required(),
+    address: a.string(),
+  }),
+  ActiveClinicPage: a.customType({
+    items: a.ref('ActiveClinicSummary').required().array().required(),
+    nextToken: a.string(),
+  }),
+  listActiveClinics: a
+    .query()
+    .arguments({ nextToken: a.string() })
+    .returns(a.ref('ActiveClinicPage'))
+    .authorization((allow) => [allow.authenticated()])
+    .handler(
+      a.handler.custom({ dataSource: a.ref('Clinic'), entry: './resolvers/list-active-clinics.js' }),
+    ),
 })
 
 export type Schema = ClientSchema<typeof schema>
